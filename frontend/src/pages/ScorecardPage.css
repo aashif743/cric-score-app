@@ -1,0 +1,699 @@
+:root {
+  --primary-color: #2c7be5;
+  --secondary-color: #00d97e;
+  --danger-color: #e63757;
+  --warning-color: #f6c343;
+  --dark-color: #12263f;
+  --light-color: #f9fafd;
+  --border-color: #e3ebf6;
+  --text-color: #6e84a3;
+  --text-dark: #12263f;
+  --modal-bg: rgba(0, 0, 0, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+.live-score-container {
+  padding: 1rem;
+  max-width: 600px;
+  margin: 0 auto;
+  color: var(--text-dark);
+  background-color: var(--light-color);
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Header Section */
+.upper-section .top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  margin-bottom: 1rem;
+}
+
+.settings-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--text-color);
+  padding: 0.5rem;
+}
+
+.match-title {
+  font-weight: 600;
+  font-size: 1.1rem;
+  text-align: center;
+  flex-grow: 1;
+  color: var(--dark-color);
+}
+
+/* Score Display */
+.score-info {
+  background: white;
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin: 1rem 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  text-align: center;
+}
+
+.score-display h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0.5rem 0;
+  color: var(--dark-color);
+}
+
+.over-display, .crr {
+  font-size: 1rem;
+  color: var(--text-color);
+  margin: 0.3rem 0;
+}
+
+.target-info {
+  margin: 1rem 0;
+  padding: 0.5rem;
+  background-color: rgba(44, 123, 229, 0.1);
+  border-radius: 8px;
+}
+
+.target-info p {
+  margin: 0.3rem 0;
+  font-size: 0.9rem;
+}
+
+/* Batsmen Info */
+.batsmen-info {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.batsman {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem 0.5rem;
+  width: 48%;
+  text-align: center;
+  background: white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.batsman.striker {
+  background-color: rgba(0,217,126,0.1);
+  border: 2px solid var(--secondary-color);
+  transform: translateY(-5px);
+}
+
+.batsman-name {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.batsman-runs {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0.3rem 0;
+}
+
+.batsman-balls {
+  font-size: 0.8rem;
+  color: var(--text-color);
+}
+
+.out-status {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  font-size: 0.7rem;
+  color: var(--danger-color);
+  font-weight: bold;
+}
+
+/* Bowler Info */
+.bowler-info, .over-history {
+  background: white;
+  border-radius: 10px;
+  padding: 1rem;
+  margin: 1rem 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.over-history p {
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.section-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--dark-color);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Button Section */
+.lower-section {
+  margin-top: 2rem;
+  padding-bottom: 1rem;
+}
+
+.button-row {
+  display: flex;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 1rem;
+  font-weight: 600;
+  font-size: 1rem;
+  background: white;
+  color: var(--text-dark);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+.long-buttons button {
+  flex: 1;
+}
+
+.long-btn {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.runs-btn {
+  background-color: white;
+}
+
+.wicket-btn, .out-btn {
+  background-color: var(--danger-color);
+  color: white;
+}
+
+.extra-btn {
+  background-color: var(--warning-color);
+  color: var(--text-dark);
+}
+
+.other-extra-btn {
+  background-color: #a17fff;
+  color: white;
+}
+
+.uncommon-btn {
+  background-color: #ff7eb9;
+  color: white;
+}
+
+.selected {
+  background-color: var(--primary-color);
+  color: white;
+  box-shadow: 0 4px 8px rgba(44,123,229,0.3);
+}
+
+.ok-button, .modal-actions {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.ok-button button, .modal-actions button {
+  flex: 1;
+  padding: 1rem;
+}
+
+.ok-btn {
+  background-color: var(--secondary-color);
+  color: white;
+}
+
+.undo-btn {
+  background-color: var(--text-color);
+  color: white;
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--modal-bg);
+  display: flex;
+  align-items: flex-end;
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.modal.open {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.modal-content {
+  background: white;
+  width: 100%;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  padding: 1.5rem;
+  max-height: 80vh;
+  overflow-y: auto;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+}
+
+.modal.open .modal-content {
+  transform: translateY(0);
+}
+
+.modal h3 {
+  margin-top: 0;
+  color: var(--dark-color);
+}
+
+.number-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.8rem;
+  margin: 1rem 0;
+}
+
+.out-options, .retire-types, .batter-selection {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.8rem;
+  margin: 1rem 0;
+}
+
+.retire-options h4 {
+  grid-column: 1 / -1;
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--text-color);
+}
+
+/* Responsive Adjustments */
+@media (max-width: 400px) {
+  .button-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .batsmen-info {
+    flex-direction: column;
+  }
+  
+  .batsman {
+    width: 100%;
+  }
+}
+
+
+/* Add these styles to your ScorecardPage.css */
+
+/* Bowler selection modal */
+.bowler-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.8rem;
+  margin: 1.5rem 0;
+}
+
+.bowler-options button {
+  padding: 0.8rem;
+  background-color: #f0f0f0;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.bowler-options button:hover {
+  background-color: #e0e0e0;
+}
+
+/* Full scorecard styles */
+.full-scorecard {
+  background: white;
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin: 1rem 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.scorecard-content {
+  margin-top: 1rem;
+}
+
+.innings-summary {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.innings-summary h3 {
+  font-size: 1.2rem;
+  color: var(--dark-color);
+  margin-bottom: 0.5rem;
+}
+
+.batting-summary, .bowling-summary {
+  margin-bottom: 1.5rem;
+}
+
+.batting-summary h4, .bowling-summary h4 {
+  font-size: 1.1rem;
+  color: var(--dark-color);
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.3rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+th {
+  font-weight: 600;
+  background-color: #f8f9fa;
+}
+
+tr.out {
+  color: var(--danger-color);
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .bowler-options {
+    grid-template-columns: 1fr;
+  }
+  
+  table {
+    font-size: 0.9rem;
+  }
+  
+  th, td {
+    padding: 0.3rem;
+  }
+}
+
+/* ScorecardPage.css */
+
+.live-score-container {
+  font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  color: #333;
+  position: relative;
+}
+
+.header-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.settings-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #555;
+  padding: 8px;
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.settings-btn:hover {
+  background-color: #f0f0f0;
+  color: #2c7be5;
+}
+
+.view-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.view-btn {
+  padding: 8px 16px;
+  border: 1px solid #ddd;
+  background-color: #f8f9fa;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.view-btn.active {
+  background-color: #2c7be5;
+  color: white;
+  border-color: #2c7be5;
+}
+
+.view-btn:hover:not(.active) {
+  background-color: #e9ecef;
+}
+
+.settings-panel {
+  position: absolute;
+  top: 50px;
+  left: 10px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  padding: 15px;
+  width: 220px;
+}
+
+.settings-panel h3 {
+  margin-top: 0;
+  font-size: 1.1rem;
+  color: #444;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.settings-panel ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.settings-panel li {
+  padding: 8px 0;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-radius: 4px;
+  padding-left: 8px;
+}
+
+.settings-panel li:hover {
+  background-color: #f5f5f5;
+  color: #2c7be5;
+}
+
+/* Rest of your existing CSS... */
+
+.bowler-name, .batsman-name {
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.bowler-name:hover, .batsman-name:hover {
+  background-color: #f0f0f0;
+  color: #2c7be5;
+}
+
+.modal .settings-options {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.setting-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setting-item label {
+  margin-right: 10px;
+  font-weight: 500;
+}
+
+.setting-item input {
+  width: 60px;
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  text-align: center;
+}
+
+/* Add this to your existing modal CSS */
+.modal-content input[type="text"] {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 1rem;
+}
+
+/* Add to your CSS file */
+.bowler-name-container {
+  position: relative;
+  cursor: pointer;
+}
+
+.bowler-name:hover {
+  background-color: #f0f0f0;
+}
+
+.edit-hint {
+  display: block;
+  font-size: 0.7rem;
+  color: #666;
+  margin-top: 2px;
+}
+
+/* Style for the edit modal input */
+.modal-content input[type="text"] {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 1rem;
+}
+
+/* Bowler display styles */
+.bowler-display {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bowler-name {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.bowler-name:hover {
+  background-color: #f0f0f0;
+}
+
+.bowler-stats {
+  color: #666;
+}
+
+.change-bowler-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  transition: all 0.2s;
+}
+
+.change-bowler-btn:hover {
+  background-color: #f0f0f0;
+  color: #2c7be5;
+}
+
+.change-bowler-btn svg {
+  fill: currentColor;
+}
+
+.bowler-display {
+  padding: 8px;
+  background: #f8f8f8;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.bowler-name {
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.live-spell {
+  color: #d32f2f;
+  font-weight: bold;
+}
+
+.completed-spell {
+  color: #1976d2;
+}
+
+.change-bowler-btn {
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: #1976d2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.modal.open {
+  animation: fadeIn 0.3s ease-in-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
