@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FiSettings, FiArrowLeft } from 'react-icons/fi';
+import { FiSettings, FiArrowLeft, FiRefreshCw } from 'react-icons/fi';
 import { motion, AnimatePresence } from "framer-motion";
 import './ScorecardPage.css';
 import { useNavigate } from 'react-router-dom';
@@ -7,6 +7,7 @@ import io from "socket.io-client";
 import API from '../api';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
+
 
 const socket = io("http://localhost:5000"); 
 
@@ -1064,35 +1065,90 @@ const handleWicket = (outType) => {
   
   
 
-  const startSecondInnings = () => {
-  // Log for debugging
-  console.log("🔄 Initiating second innings setup...");
+const startSecondInnings = () => {
+  console.log("🔄 Starting second innings setup...");
 
-  // Determine new roles
-  const newBattingTeam = match.innings === 1 ? 'teamB' : 'teamA';
-  const newBowlingTeam = match.innings === 1 ? 'teamA' : 'teamB';
+  // Determine teams for the first innings (who just finished batting)
+  // This relies on match.battingTeam and match.bowlingTeam being correctly set for innings 1.
+  // Or, if match.battingTeam isn't reliable here, use matchSettings.firstBatting.
+  const firstInningsActualBattingTeamName = match.battingTeam || (matchSettings?.firstBatting || teams.teamA.name);
+  const firstInningsActualBowlingTeamName = match.bowlingTeam || (firstInningsActualBattingTeamName === teams.teamA.name ? teams.teamB.name : teams.teamA.name);
 
-  // Store first innings data
-  const firstInningsData = {
-    score: match.runs || 0,
-    wickets: match.wickets || 0,
-    overs: `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`,
-    extras: { ...match.extras } || {
-      wides: 0,
-      noBalls: 0,
-      byes: 0,
-      legByes: 0
-    },
-    fallOfWickets: [...(match.fallOfWickets || [])]
+  const firstInningsBattingTeamKey = teams.teamA.name === firstInningsActualBattingTeamName ? 'teamA' : 'teamB';
+  const firstInningsBowlingTeamKey = teams.teamB.name === firstInningsActualBowlingTeamName ? 'teamB' : 'teamA';
+
+  // Ensure keys are valid before proceeding
+  if (!teams[firstInningsBattingTeamKey] || !teams[firstInningsBowlingTeamKey]) {
+    console.error("❌ Critical error in startSecondInnings: Cannot determine team keys for first innings summary.");
+    // Potentially show an error to the user or prevent proceeding
+    return;
+  }
+  
+  // Use the formatBatsmen and formatBowlers helpers defined for endMatch
+  // Ensure these helpers are accessible here.
+  const formatBatsmenForSummary = (batsmenList) =>
+    batsmenList.map(b => ({
+      name: b.name,
+      runs: b.runs || 0,
+      balls: b.balls || 0,
+      fours: b.fours || 0,
+      sixes: b.sixes || 0,
+      isOut: b.isOut || false,
+      outType: b.outType || '',
+      strikeRate: b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(2) : "0.00",
+    }));
+
+  const formatBowlersForSummary = (bowlersList) => {
+    return bowlersList.map(b => {
+      const allSpells = [...(b.previousSpells || [])];
+      if (b.currentSpell && b.currentSpell.balls > 0) {
+        allSpells.push(b.currentSpell);
+      }
+      let totalBalls = 0, totalRunsConceded = 0, totalWicketsTaken = 0, totalMaidens = 0;
+      allSpells.forEach(spell => {
+        totalBalls += spell.balls || 0;
+        totalRunsConceded += spell.runs || 0;
+        totalWicketsTaken += spell.wickets || 0;
+        totalMaidens += spell.maidens || 0;
+      });
+      return {
+        name: b.name,
+        overs: `${Math.floor(totalBalls / settings.ballsPerOver)}.${totalBalls % settings.ballsPerOver}`,
+        runs: totalRunsConceded,
+        wickets: totalWicketsTaken,
+        maidens: totalMaidens,
+        economyRate: totalBalls > 0 ? ((totalRunsConceded / totalBalls) * settings.ballsPerOver).toFixed(2) : "0.00",
+      };
+    });
   };
 
-  // Reset batting stats for second innings
+
+  const innings1CompleteSummary = {
+    teamName: teams[firstInningsBattingTeamKey].name,
+    batting: formatBatsmenForSummary(teams[firstInningsBattingTeamKey].batsmen),
+    bowling: formatBowlersForSummary(teams[firstInningsBowlingTeamKey].bowlers),
+    runs: match.runs, // Runs scored in the first innings
+    wickets: match.wickets, // Wickets fallen in the first innings
+    overs: `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`,
+    extras: { ...(match.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 }) },
+    fallOfWickets: [...(match.fallOfWickets || [])],
+    runRate: match.balls > 0 ? (match.runs / (match.balls / settings.ballsPerOver)).toFixed(2) : "0.00",
+    // declared: false, // Add if you track declarations
+  };
+
+  console.log("✅ First Innings Summary Prepared:", innings1CompleteSummary);
+
+  // Determine new batting and bowling teams for the second innings
+  const secondInningsBattingTeamName = firstInningsActualBowlingTeamName;
+  const secondInningsBowlingTeamName = firstInningsActualBattingTeamName;
+
+  // Reset batting stats for the team batting second (their previous stats were as bowlers or from another match)
+  const secondInningsBattingTeamKey = teams.teamA.name === secondInningsBattingTeamName ? 'teamA' : 'teamB';
   setTeams(prevTeams => {
     const updatedTeams = { ...prevTeams };
-
-    updatedTeams[newBattingTeam] = {
-      ...updatedTeams[newBattingTeam],
-      batsmen: updatedTeams[newBattingTeam].batsmen.map(b => ({
+    updatedTeams[secondInningsBattingTeamKey] = {
+      ...updatedTeams[secondInningsBattingTeamKey],
+      batsmen: updatedTeams[secondInningsBattingTeamKey].batsmen.map(b => ({
         ...b,
         runs: 0,
         balls: 0,
@@ -1103,258 +1159,257 @@ const handleWicket = (outType) => {
         strikeRate: '0.00'
       }))
     };
-
     return updatedTeams;
   });
 
-  // Reset match state while preserving _id
+  // Reset bowler stats for the team bowling second (their previous stats were as batsmen)
+   const secondInningsBowlingTeamKey = teams.teamA.name === secondInningsBowlingTeamName ? 'teamA' : 'teamB';
+    setTeams(prevTeams => {
+        const updatedTeams = { ...prevTeams };
+        updatedTeams[secondInningsBowlingTeamKey] = {
+            ...updatedTeams[secondInningsBowlingTeamKey],
+            bowlers: updatedTeams[secondInningsBowlingTeamKey].bowlers.map(b => ({
+                ...b,
+                previousSpells: [],
+                currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 }
+            }))
+        };
+        return updatedTeams;
+    });
+
+
   setMatch(prev => ({
     ...prev,
-    _id: prev._id || matchId, // ✅ preserve match ID
+    _id: prev._id || matchId,
     innings: 2,
     isChasing: true,
-    target: prev.runs + 1,
-    firstInningsData,
-    firstInningsBattingTeam: match.innings === 1 ? match.battingTeam : match.bowlingTeam,
+    target: prev.runs + 1, // Target is 1st innings score + 1
+    firstInningsSummary: innings1CompleteSummary, // Store the detailed summary
+
+    // Reset for 2nd innings
     runs: 0,
     wickets: 0,
     balls: 0,
-    overs: "0.0",
-    extras: {
-      wides: 0,
-      noBalls: 0,
-      byes: 0,
-      legByes: 0
-    },
-    fallOfWickets: [],
-    currentBowler: null
+    // overs: "0.0", // This will be calculated from balls
+    extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 },
+    fallOfWickets: [], // CRITICAL: Reset FOW for the new innings
+    battingTeam: secondInningsBattingTeamName, // Set current batting team
+    bowlingTeam: secondInningsBowlingTeamName, // Set current bowling team
+    // currentBowler: null, // This will be set when a bowler is chosen or automatically
   }));
 
-  // Reset players using updated team info
-  setPlayers(prev => {
-    const updatedTeams = teams;
-    return {
-      ...prev,
-      striker: updatedTeams[newBattingTeam].batsmen[0],
-      nonStriker: updatedTeams[newBattingTeam].batsmen[1],
-      bowler: updatedTeams[newBowlingTeam].bowlers[0],
-      nextBatsman: 3,
-      nextBowler: 2,
-      lastBowler: null
-    };
+  // Reset players for the new innings
+  const newStriker = teams[secondInningsBattingTeamKey].batsmen[0];
+  const newNonStriker = teams[secondInningsBattingTeamKey].batsmen[1];
+  const newBowler = teams[secondInningsBowlingTeamKey].bowlers[0];
+
+  setPlayers({
+    striker: newStriker || { name: "Batsman 1", runs: 0, balls: 0 }, // Fallbacks
+    nonStriker: newNonStriker || { name: "Batsman 2", runs: 0, balls: 0 },
+    bowler: newBowler || { name: "Bowler 1", currentSpell: {runs:0, wickets:0, balls:0, maidens:0}, previousSpells:[] },
+    nextBatsmanId: (newNonStriker?.id || 1) + 1, // Or a more robust way to get next ID
+    // nextBowlerId, lastBowler etc. need to be managed
   });
 
   setOverHistory([]);
+  setSelectedAction(null); // Clear any pending action
 
-  console.log(`✅ Second innings started. Target is ${match.runs + 1}`);
+  console.log(`✅ Second innings ready. Batting: ${secondInningsBattingTeamName}, Bowling: ${secondInningsBowlingTeamName}. Target: ${match.runs + 1}`);
+  sendMatchUpdate(); // Send an update that second innings has started
 };
 
 
 
-// In ScoreCard.jsx
 
 const endMatch = async () => {
   try {
-    // Ensure local state 'match' is up-to-date before proceeding
-    // This might involve a final setMatch if any pending updates were batched.
-    // For simplicity, we assume 'match' and 'teams' state are current.
+    const finalResultString = getMatchResult();
 
-    const finalResultString = getMatchResult(); // Your existing helper
-
-    // Update local React state for UI completion
     const completedMatchForUI = {
-      ...match, // Current match state (which should reflect 2nd innings end)
+      ...match,
       isComplete: true,
       result: finalResultString,
       status: "completed",
     };
-    setMatch(completedMatchForUI); // Update UI immediately
+    setMatch(completedMatchForUI);
 
     const currentDate = new Date().toISOString();
 
-    // Helper to format batsmen: Ensure it includes fours and sixes
-    // This function relies on b.fours and b.sixes being present in your 'teams' state objects
-    const formatBatsmen = (batsmenList) =>
+    // Helpers (ensure these are defined in ScoreCard.jsx scope and work correctly)
+    const formatBatsmen = (batsmenList = []) =>
       batsmenList.map(b => ({
         name: b.name,
         runs: b.runs || 0,
         balls: b.balls || 0,
-        fours: b.fours || 0,   // CRITICAL: Ensure this data exists in 'teams' state
-        sixes: b.sixes || 0,   // CRITICAL: Ensure this data exists in 'teams' state
+        fours: b.fours || 0,
+        sixes: b.sixes || 0,
         isOut: b.isOut || false,
         outType: b.outType || '',
         strikeRate: b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(2) : "0.00",
       }));
 
-    // Helper to format bowlers: Ensure it includes maidens
-    // This function relies on spell objects having a 'maidens' count
-    const formatBowlers = (bowlersList) => {
+    const formatBowlers = (bowlersList = []) => {
       return bowlersList.map(b => {
-        // Consolidate all spells (previous and current) for final stats
         const allSpells = [...(b.previousSpells || [])];
-        if (b.currentSpell && b.currentSpell.balls > 0) { // Include current spell if it has deliveries
+        if (b.currentSpell && (b.currentSpell.balls > 0 || (b.previousSpells && b.previousSpells.length > 0 && b.currentSpell.balls === 0))) { // Include current spell if it has deliveries or if previous spells exist (even if current spell is 0 balls for a new bowler at end)
           allSpells.push(b.currentSpell);
         }
-
-        let totalBalls = 0;
-        let totalRunsConceded = 0;
-        let totalWicketsTaken = 0;
-        let totalMaidens = 0;
-
+        let totalBalls = 0, totalRunsConceded = 0, totalWicketsTaken = 0, totalMaidens = 0;
         allSpells.forEach(spell => {
           totalBalls += spell.balls || 0;
           totalRunsConceded += spell.runs || 0;
           totalWicketsTaken += spell.wickets || 0;
-          totalMaidens += spell.maidens || 0; // CRITICAL: Ensure this data exists in spell objects
+          totalMaidens += spell.maidens || 0;
         });
-
         return {
           name: b.name,
           overs: `${Math.floor(totalBalls / settings.ballsPerOver)}.${totalBalls % settings.ballsPerOver}`,
           runs: totalRunsConceded,
           wickets: totalWicketsTaken,
           maidens: totalMaidens,
-          economyRate: totalBalls > 0
-            ? ((totalRunsConceded / totalBalls) * settings.ballsPerOver).toFixed(2)
-            : "0.00",
+          economyRate: totalBalls > 0 ? ((totalRunsConceded / totalBalls) * settings.ballsPerOver).toFixed(2) : "0.00",
         };
       });
     };
 
     // --- Innings 1 Data ---
-    // Retrieve from the stored summary if available (populated by startSecondInnings)
-    // Fallback logic is complex if match.firstInningsSummary isn't guaranteed.
-    // For robustness, ensure startSecondInnings correctly populates match.firstInningsSummary.
+    // Use the summary stored when the second innings started.
     const innings1Data = match.firstInningsSummary || {
-        teamName: "Team A (Default)", // Provide sensible defaults or error if not found
-        batting: [],
-        bowling: [],
-        runs: 0,
-        wickets: 0,
-        overs: "0.0",
-        extras: { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
-        fallOfWickets: [],
-        runRate: "0.00",
+      teamName: matchSettings?.firstBatting || teams.teamA.name, // Fallback
+      batting: [], bowling: [], runs: 0, wickets: 0, overs: "0.0",
+      extras: { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
+      fallOfWickets: [], runRate: "0.00",
     };
-    // If match ended in 1st innings (e.g., all out before target in a hypothetical 1-inn match, or abandoned)
-    // This scenario needs careful handling based on your app's logic for such cases.
-    // The current structure assumes a two-innings match where startSecondInnings was called.
-    // If a match can end in the first innings, innings1Data would need to be constructed here
-    // using the current 'teams' state for the first batting/bowling team.
+    // If innings1Data is still default, it means startSecondInnings might not have run or populated it.
+    // This could happen if the match ends in the 1st innings.
+     if (!match.firstInningsSummary && match.innings === 1 && match.isComplete) {
+        // Match ended in 1st innings, construct innings1Data from current state
+        const firstInningsBattingTeamKey = teams.teamA.name === match.battingTeam ? 'teamA' : 'teamB';
+        const firstInningsBowlingTeamKey = teams.teamA.name === match.bowlingTeam ? 'teamA' : 'teamB';
+        
+        innings1Data.teamName = teams[firstInningsBattingTeamKey].name;
+        innings1Data.batting = formatBatsmen(teams[firstInningsBattingTeamKey].batsmen);
+        innings1Data.bowling = formatBowlers(teams[firstInningsBowlingTeamKey].bowlers);
+        innings1Data.runs = match.runs;
+        innings1Data.wickets = match.wickets;
+        innings1Data.overs = `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`;
+        innings1Data.extras = { ...match.extras };
+        innings1Data.fallOfWickets = [...match.fallOfWickets];
+        innings1Data.runRate = match.balls > 0 ? (match.runs / (match.balls / settings.ballsPerOver)).toFixed(2) : "0.00";
+        console.log("Match ended in 1st innings, constructed innings1Data:", innings1Data);
+    }
+
 
     // --- Innings 2 Data ---
-    // Determine the teams for the second innings based on the first.
-    const firstInningsActualBattingTeamName = innings1Data.teamName;
-    const secondInningsBattingTeamName = firstInningsActualBattingTeamName === teams.teamA.name ? teams.teamB.name : teams.teamA.name;
-    const secondInningsBowlingTeamName = firstInningsActualBattingTeamName;
-
-    const secondInningsBattingTeamKey = teams.teamA.name === secondInningsBattingTeamName ? 'teamA' : 'teamB';
-    const secondInningsBowlingTeamKey = teams.teamA.name === secondInningsBowlingTeamName ? 'teamA' : 'teamB';
-
-    const innings2Data = {
-      teamName: teams[secondInningsBattingTeamKey].name,
-      batting: formatBatsmen(teams[secondInningsBattingTeamKey].batsmen), // Batsmen from the team that batted 2nd
-      bowling: formatBowlers(teams[secondInningsBowlingTeamKey].bowlers), // Bowlers from the team that bowled 2nd
-      runs: match.runs, // Current runs at the end of 2nd innings
-      wickets: match.wickets, // Current wickets at the end of 2nd innings
-      overs: `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`,
-      extras: { ...match.extras }, // Current extras at the end of 2nd innings
-      fallOfWickets: [...match.fallOfWickets], // Current FOW at the end of 2nd innings
-      runRate: match.balls > 0 ? (match.runs / (match.balls / settings.ballsPerOver)).toFixed(2) : "0.00",
-      target: match.target, // Target for the second innings
-      // declared: false, // if you track declarations
+    let innings2Data = {
+        teamName: "N/A", batting: [], bowling: [], runs: 0, wickets: 0, overs: "0.0",
+        extras: { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
+        fallOfWickets: [], runRate: "0.00", target: 0
     };
+
+    if (match.innings === 2 || (match.innings === 1 && match.isComplete && match.firstInningsSummary) ) { // If 2nd innings played or was set up
+      const secondInningsActualBattingTeamName = match.battingTeam; // Current batting team at end of match (should be 2nd innings team)
+      const secondInningsActualBowlingTeamName = match.bowlingTeam; // Current bowling team
+
+      const secondInningsBattingTeamKey = teams.teamA.name === secondInningsActualBattingTeamName ? 'teamA' : 'teamB';
+      const secondInningsBowlingTeamKey = teams.teamA.name === secondInningsActualBowlingTeamName ? 'teamA' : 'teamB';
+      
+      // Ensure keys are valid
+      if (teams[secondInningsBattingTeamKey] && teams[secondInningsBowlingTeamKey]) {
+          innings2Data = {
+            teamName: teams[secondInningsBattingTeamKey].name,
+            batting: formatBatsmen(teams[secondInningsBattingTeamKey].batsmen),
+            bowling: formatBowlers(teams[secondInningsBowlingTeamKey].bowlers),
+            runs: match.runs, // Final runs of 2nd innings
+            wickets: match.wickets, // Final wickets of 2nd innings
+            overs: `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`,
+            extras: { ...match.extras },
+            fallOfWickets: [...match.fallOfWickets], // FOW from 2nd innings
+            runRate: match.balls > 0 ? (match.runs / (match.balls / settings.ballsPerOver)).toFixed(2) : "0.00",
+            target: match.target,
+          };
+      } else {
+          console.warn("Could not determine team keys for innings 2 data in endMatch. Using defaults.");
+          if (innings1Data.teamName === teams.teamA.name) innings2Data.teamName = teams.teamB.name;
+          else innings2Data.teamName = teams.teamA.name;
+      }
+    }
 
 
     // --- Construct final matchData for backend and FullScorecardPage ---
     const finalMatchDataPayload = {
-      // Top-level match details from matchSettings or defaults
-      date: matchSettings?.date || currentDate, // Prefer date from matchSettings if available
+      date: matchSettings?.date || currentDate,
       venue: matchSettings?.venue || "Unknown Venue",
-      matchType: matchSettings?.matchType || "T20", // From MatchSetup
-      series: matchSettings?.series || "Local Tournament", // From MatchSetup (if added)
-      totalOvers: settings.overs, // Overall match overs from current settings
-      ballsPerOver: settings.ballsPerOver, // From current settings
-      playersPerTeam: settings.playersPerTeam, // From current settings
-
-      teamA: { // Ensure these team objects are consistent
+      matchType: matchSettings?.matchType || "T20",
+      series: matchSettings?.series || "",
+      totalOvers: settings.overs,
+      ballsPerOver: settings.ballsPerOver,
+      playersPerTeam: settings.playersPerTeam,
+      teamA: {
         name: teams.teamA.name,
-        shortName: teams.teamA.name.substring(0, 3).toUpperCase(), // Or from matchSettings if available
+        shortName: teams.teamA.name.substring(0, 3).toUpperCase(),
       },
       teamB: {
         name: teams.teamB.name,
-        shortName: teams.teamB.name.substring(0, 3).toUpperCase(), // Or from matchSettings if available
+        shortName: teams.teamB.name.substring(0, 3).toUpperCase(),
       },
-      toss: { // From matchSettings (passed from MatchSetup)
-        winner: matchSettings?.toss?.winner || matchSettings?.firstBatting || teams.teamA.name,
+      toss: {
+        winner: matchSettings?.toss?.winner || innings1Data.teamName, // Team that batted first if toss not specific
         decision: matchSettings?.toss?.decision || "bat",
       },
-      umpires: matchSettings?.umpires || [], // From MatchSetup (if added)
-      matchReferee: matchSettings?.matchReferee || "", // From MatchSetup (if added)
-
-      // Innings Data
+      umpires: matchSettings?.umpires || [],
+      matchReferee: matchSettings?.matchReferee || "",
       innings1: innings1Data,
-      innings2: innings2Data,
-
-      // Result and Summary
+      innings2: (match.innings === 2 || (match.innings === 1 && match.isComplete && match.firstInningsSummary)) ? innings2Data : undefined, // Only include innings2 if it happened
       result: finalResultString,
       status: "completed",
       matchSummary: {
-        winner: determineWinner(), // Your existing helper
-        margin: calculateMargin(), // Your existing helper
-        playerOfMatch: determinePlayerOfMatch(innings1Data, innings2Data), // Your existing helper
+        winner: determineWinner(),
+        margin: calculateMargin(),
+        playerOfMatch: determinePlayerOfMatch(innings1Data, innings2Data),
       },
+      // Include the backend match ID if available from initial setup
+      _id: matchSettings?._id || match?._id || matchId,
     };
+    
+    console.log("📦 Final Match Data Payload for FullScorecard & Backend:", JSON.stringify(finalMatchDataPayload, null, 2));
+
 
     // --- API Call ---
     try {
-      // Use the backend match ID stored in match._id or matchSettings._id
-      const backendMatchId = match._id || matchSettings?._id || matchId;
+      const backendMatchId = finalMatchDataPayload._id;
       if (!backendMatchId) {
-          console.error("⚠️ Critical: Backend Match ID is missing. Cannot end match on server.");
-          // Handle this error, perhaps save to localStorage only
+          console.error("⚠️ Critical: Backend Match ID is missing in final payload. Cannot end match on server.");
           localStorage.setItem('unsavedMatchBackup', JSON.stringify(finalMatchDataPayload));
-          throw new Error("Backend Match ID missing");
+          throw new Error("Backend Match ID missing for endMatch API call");
       }
-
-      console.log("🚀 Sending to backend /end-match, ID:", backendMatchId);
-      console.log("📦 Payload:", { matchData: finalMatchDataPayload }); // Log the exact payload
-
-      const response = await axios.post(
+      await axios.post(
         `http://localhost:5000/api/matches/${backendMatchId}/end-match`,
-        { matchData: finalMatchDataPayload } // Backend expects { matchData: { ... } }
+        { matchData: finalMatchDataPayload }
       );
-      console.log("✅ Match ended successfully on server:", response.data);
-      localStorage.removeItem("currentMatchId"); // If you use this
+      console.log("✅ Match ended successfully on server.");
+      localStorage.removeItem("currentMatchId");
     } catch (error) {
       console.error("⚠️ Backend update failed for end-match. Match saved locally.", error.response?.data || error.message);
       localStorage.setItem('unsavedMatchBackup', JSON.stringify(finalMatchDataPayload));
-      // Optionally, inform the user that sync failed but data is saved locally.
     }
 
-    // --- Callback and Navigation ---
-    if (onMatchEnd) { // Prop from App.jsx
+    if (onMatchEnd) {
       onMatchEnd(finalMatchDataPayload);
     }
 
     navigate('/full-scorecard', {
       state: {
-        matchData: finalMatchDataPayload, // Pass the fully constructed data
-        // liveData is less relevant here as the match is complete
+        matchData: finalMatchDataPayload,
       }
     });
 
   } catch (error) {
     console.error("❌ Error in endMatch function:", error);
-    // Fallback navigation or error display
     navigate('/full-scorecard', {
       state: {
         error: "Couldn't finalize scorecard due to an error.",
-        basicInfo: { // Minimal info for display
-          teamA: teams.teamA.name,
-          teamB: teams.teamB.name,
-          result: getMatchResult(), // Try to get a result string
-        }
+        basicInfo: { teamA: teams.teamA.name, teamB: teams.teamB.name, result: getMatchResult() }
       }
     });
   }
@@ -2024,146 +2079,183 @@ const renderSettingsOptions = () => {
 
   return (
     <div className="live-score-container">
+      {/* Header with Back Button and View Toggles */}
       <div className="header-actions">
+        <button className="back-btn" onClick={() => navigate(-1)}>
+          <FiArrowLeft size={20} />
+        </button>
+        <div className="view-buttons">
+          <button className="view-btn active">Live Scorecard</button>
+          <button className="view-btn" onClick={() => navigate("/full-scorecard")}>
+            Full Scorecard
+          </button>
+        </div>
         <button 
           className="settings-btn"
           onClick={() => setShowSettingsPanel(!showSettingsPanel)}
         >
           <FiSettings size={20} />
         </button>
-        
-        <div className="view-buttons">
-          <button className="view-btn active">Live Scorecard</button>
-          <button 
-            className="view-btn"
-            onClick={() => navigate("/full-scorecard")}>Full Scorecard</button>
-        </div>
       </div>
 
 
+
+      {/* Settings Panel (Conditional) */}
       {showSettingsPanel && (
         <div className="settings-panel">
           <h3>Match Settings</h3>
           <ul>
-            <li onClick={() => setShowModal('SETTINGS')}>Change Overs Settings</li>
-            <li onClick={() => setShowModal('SETTINGS')}>WD/NB Runs Settings</li>
-            <li onClick={() => setShowModal('SETTINGS')}>Edit Balls Settings</li>
-            <li onClick={() => setShowModal('EDIT_PLAYER')}>Edit Player Names</li>
+            <li>Change Overs Settings</li>
+            <li>WD/NB Runs Settings</li>
+            <li>Edit Balls Settings</li>
+            <li>Edit Player Names</li>
           </ul>
         </div>
       )}
 
-      <div className="upper-section">
-        <div className="top-bar">
-          <h2 className="match-title">
-            {match.innings === 1 ? '1st Innings' : '2nd Innings'}
-            {match.isComplete && ' - Match Complete'}
-          </h2>
+      {/* Scorecard Section */}
+      <div className="scorecard-section">
+        {/* Innings and Team */}
+        <div className="innings-team">
+          <h2 className="innings">{match.innings === 1 ? "1ST INNINGS" : "2ND INNINGS"}</h2>
+          <h3 className="team-name">TEAM A</h3>
         </div>
 
-        <div className="score-info">
+        {/* Current Run Rate (CRR) */}
+        <p className="crr">
+          CRR {match.balls > 0 
+            ? (match.runs / (match.balls / settings.ballsPerOver)).toFixed(2) 
+            : "0.00"}
+        </p>
 
-          <div className="score-display">
-            {!match ? (
-              <p>Loading match data...</p>
-            ) : (
-              <>
-                <h1>{(match.runs ?? 0)}/{(match.wickets ?? 0)}</h1>
-                <p className="over-display">
-                  Overs: {match.balls !== undefined 
-                    ? `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`
-                    : "0.0"}
-                </p>
-                <p className="crr">
-                  CRR: {match.balls > 0
-                    ? ((match.runs / (match.balls / settings.ballsPerOver)) || 0).toFixed(2)
-                    : "0.00"}
-                </p>
-              </>
-            )}
-          </div>
+        {/* Score and Overs */}
+        <div className="score-overs">
+          <h1 className="score">{match.runs || 0}/{match.wickets || 0}</h1>
+          <p className="overs">
+            ({Math.floor(match.balls / settings.ballsPerOver)}.
+            {match.balls % settings.ballsPerOver}/{settings.totalOvers})
+          </p>
+        </div>
 
-
-
-          {match.isChasing && !match.isComplete && (
-            <div className="target-info">
-              <p>Target: {match.target}</p>
-              <p>Need {Math.max(0, remainingRuns)} runs from {remainingBalls} balls</p>
-              <p>Req. RR: {requiredRunRate}</p>
+        {match.isChasing && !match.isComplete && (
+          <div className="target-info">
+            <div className="target-row">
+              <span className="target-label">Target:</span>
+              <span className="target-value">{match.target}</span>
             </div>
-          )}
+            <div className="target-row highlight">
+              <span>Need {Math.max(0, remainingRuns)} runs from {remainingBalls} balls</span>
+            </div>
+            <div className="target-row">
+              <span className="target-label">Req. RR:</span>
+              <span className="target-value">{requiredRunRate}</span>
+            </div>
+          </div>
+        )}
+
 
             <div className="batsmen-info">
-            <div className={`batsman striker`}>
+              {/* Striker (Left Side - Highlighted) */}
+              <div className="batsman striker">
+                <div className="striker-header">
+                  <p 
+                    className="batsman-name"
+                    onClick={() => {
+                      const currentBattingTeam = match.innings === 1 ? 'teamA' : 'teamB';
+                      startEditingPlayer('batsman', players.striker.id, currentBattingTeam);
+                    }}
+                  >
+                    {players.striker.name}
+                  </p>
+                  <span className="live-dot"></span> {/* Animated dot */}
+                </div>
+                <div className="batsman-stats">
+                  <span className="batsman-runs">{players.striker.runs}</span>
+                  <span className="batsman-balls">({players.striker.balls})</span>
+                </div>
+                {players.striker.isOut && (
+                  <span className="out-status">{players.striker.outType}</span>
+                )}
+              </div>
+
+              {/* Non-Striker (Right Side) */}
+              <div className="batsman">
                 <p 
-                className="batsman-name"
-                onClick={() => {
-                    const currentBattingTeam = match.innings === 1 ? 'teamA' : 'teamB';
-                    startEditingPlayer('batsman', players.striker.id, currentBattingTeam);
-                }}
-                >
-                {players.striker.name}
-                </p>
-                <p className="batsman-runs">{players.striker.runs}</p>
-                <p className="batsman-balls">({players.striker.balls})</p>
-                {players.striker.isOut && <span className="out-status">{players.striker.outType}</span>}
-            </div>
-            <div className={`batsman`}>
-                <p 
-                className="batsman-name"
-                onClick={() => {
+                  className="batsman-name"
+                  onClick={() => {
                     const currentBattingTeam = match.innings === 1 ? 'teamA' : 'teamB';
                     startEditingPlayer('batsman', players.nonStriker.id, currentBattingTeam);
-                }}
+                  }}
                 >
-                {players.nonStriker.name}
+                  {players.nonStriker.name}
                 </p>
-                <p className="batsman-runs">{players.nonStriker.runs}</p>
-                <p className="batsman-balls">({players.nonStriker.balls})</p>
-                {players.nonStriker.isOut && <span className="out-status">{players.nonStriker.outType}</span>}
+                <div className="batsman-stats">
+                  <span className="batsman-runs">{players.nonStriker.runs}</span>
+                  <span className="batsman-balls">({players.nonStriker.balls})</span>
+                </div>
+                {players.nonStriker.isOut && (
+                  <span className="out-status">{players.nonStriker.outType}</span>
+                )}
+              </div>
             </div>
-            </div>
+
+
+
 
             <div className="bowler-info">
-                <p className="section-title">Bowler</p>
-                <div className="bowler-display">
-                    <p 
-                    className="bowler-name"
-                    onClick={() => {
-                        const currentBowlingTeam = match.innings === 1 ? 'teamB' : 'teamA';
-                        startEditingPlayer('bowler', players.bowler.id, currentBowlingTeam);
-                    }}
-                    >
-                    {players.bowler.name}
-                    </p>
-                    <div className="bowler-display">
-                    <BowlerDisplay bowler={
-                        teams[match.innings === 1 ? 'teamB' : 'teamA'].bowlers.find(
-                        b => b.id === players.bowler.id)} />
-                        <button 
-                            className="change-bowler-btn"
-                            onClick={() => setShowModal('CHANGE_BOWLER')}
-                        >
-                            Change Bowler
-                        </button>
-                    </div>
+              {/* Bowler Name, Spell, and Change Button (Same Line) */}
+              <div className="bowler-header">
+                <p 
+                  className="bowler-name"
+                  onClick={() => {
+                    const currentBowlingTeam = match.innings === 1 ? 'teamB' : 'teamA';
+                    startEditingPlayer('bowler', players.bowler.id, currentBowlingTeam);
+                  }}
+                >
+                  {players.bowler.name}
+                </p>
+                <div className="bowler-spell">
+                  {players.bowler.wickets || 0}/{players.bowler.runs || 0} ({players.bowler.oversBowled || 0}.{players.bowler.ballsBowled % 6 || 0})
                 </div>
+                <button 
+                  className="change-bowler-btn"
+                  onClick={() => setShowModal('CHANGE_BOWLER')}
+                >
+                  <FiRefreshCw size={16} /> Change
+                </button>
+              </div>
+
+              {overHistory.length > 0 && (
+                <div className="over-history-section">
+                  <p className="section-title">This Over</p>
+                  <div className="balls-container">
+                    {overHistory.map((ball, index) => (
+                      <span
+                        key={index}
+                        className={`ball-mark ${
+                          ball === '6' || ball === '4' ? 'boundary' :
+                          ball === 'W' ? 'wicket' :
+                          ball.includes('WD') || ball.includes('B') ? 'extra' :
+                          'regular-run'
+                        }`}
+                      >
+                        {ball}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
-          {overHistory.length > 0 && (
-            <div className="over-history">
-              <p className="section-title">This Over</p>
-              <p>{overHistory.join(' ')}</p>
-            </div>
-          )}
-        </div>
-      </div>
+
+
 
       {!match.isComplete && (
         <div className="lower-section">
-          <div className="button-row long-buttons">
+          {/* First Row - End Innings (Long Button) */}
+          <div className="button-row">
             <button 
-              className="long-btn" 
+              className="end-innings-btn" 
               onClick={() => {
                 saveState();
                 endInnings();
@@ -2171,32 +2263,58 @@ const renderSettingsOptions = () => {
             >
               End Innings
             </button>
-            <button onClick={() => handleActionClick('Retire')}>
+          </div>
+
+          {/* Second Row - Retire + Change Striker */}
+          <div className="button-row">
+            <button 
+              className="action-btn retire-btn"
+              onClick={() => handleActionClick('Retire')}
+            >
               Retire
             </button>
-            <button onClick={() => {
-              saveState();
-              setPlayers(prev => ({
-                ...prev,
-                striker: prev.nonStriker,
-                nonStriker: prev.striker
-              }));
-              setSelectedAction(null);
-            }}>
-              Change Strike
+            <button 
+              className="action-btn change-strike-btn"
+              onClick={() => {
+                saveState();
+                setPlayers(prev => ({
+                  ...prev,
+                  striker: prev.nonStriker,
+                  nonStriker: prev.striker
+                }));
+                setSelectedAction(null);
+              }}
+            >
+              Change Striker
             </button>
           </div>
 
-          <div className="button-grid">
-            {['WD', 'NB', 'BYE', '0', '1', '2', '3', '4', '6', '5,7..', 'OUT'].map((btn) => (
+          {/* Third Row - WD, NB, BYE, UNDO */}
+          <div className="button-row">
+            {['WD', 'NB', 'BYE', 'UNDO'].map((btn) => (
+              <button
+                key={btn}
+                onClick={() => btn === 'UNDO' ? handleUndo() : handleActionClick(btn)}
+                className={`action-btn ${
+                  btn === 'WD' || btn === 'NB' ? 'yellow-btn' :
+                  btn === 'BYE' ? 'purple-btn' :
+                  'undo-btn'
+                }`}
+                disabled={btn === 'UNDO' && history.length === 0}
+              >
+                {btn}
+              </button>
+            ))}
+          </div>
+
+          {/* Fourth Row - 0, 1, 2, 5,7.. */}
+          <div className="button-row">
+            {['0', '1', '2', '5,7..'].map((btn) => (
               <button
                 key={btn}
                 onClick={() => handleActionClick(btn)}
-                className={`${selectedAction === btn ? 'selected' : ''} ${
-                  ['WD', 'NB'].includes(btn) ? 'extra-btn' : 
-                  ['BYE'].includes(btn) ? 'other-extra-btn' :
-                  btn === 'OUT' ? 'wicket-btn' : 
-                  btn === '5,7..' ? 'uncommon-btn' : 'runs-btn'
+                className={`action-btn ${
+                  btn === '5,7..' ? 'purple-btn' : 'white-btn'
                 }`}
               >
                 {btn}
@@ -2204,20 +2322,25 @@ const renderSettingsOptions = () => {
             ))}
           </div>
 
-          <div className="action-buttons">
-            <button 
-              onClick={handleUndo} 
-              className="undo-btn" 
-              disabled={history.length === 0}
-            >
-              Undo
-            </button>
-            
+          {/* Fifth Row - 3, 4, 6, OUT */}
+          <div className="button-row">
+            {['3', '4', '6', 'OUT'].map((btn) => (
+              <button
+                key={btn}
+                onClick={() => handleActionClick(btn)}
+                className={`action-btn ${
+                  btn === 'OUT' ? 'red-btn' : 'white-btn'
+                }`}
+              >
+                {btn}
+              </button>
+            ))}
           </div>
         </div>
       )}
 
       {renderModal()}
+    </div>
     </div>
   );
 };
