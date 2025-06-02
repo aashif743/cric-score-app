@@ -12,8 +12,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "https://red-shrew-841581.hostingersite.com", // ✅ Your actual frontend domain
-    methods: ["GET", "POST"], // Or your specific frontend origin
+    origin: "https://red-shrew-841581.hostingersite.com", // Or your specific frontend origin
   },
 });
 
