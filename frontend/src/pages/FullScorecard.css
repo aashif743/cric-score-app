@@ -1,235 +1,369 @@
-/* ===== BASE STYLES ===== */
+/* ==========================================================================
+   Full Scorecard - Professional Redesign
+   ========================================================================== */
+
+/* --- 1. Root Variables & Base Styles --- */
+:root {
+  --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --bg-color: #f8f9fa; /* Light grey background */
+  --card-bg-color: #ffffff;
+  --primary-text-color: #212529;
+  --secondary-text-color: #6c757d;
+  --border-color: #dee2e6;
+  --accent-color: #4f46e5; /* Professional Indigo */
+  --accent-color-dark: #4338ca;
+  --success-color: #16a34a;
+  --danger-color: #dc2626;
+  --card-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --card-border-radius: 12px;
+  --transition-speed: 0.3s;
+}
+
+body {
+  font-family: var(--font-family-sans);
+  background-color: var(--bg-color);
+  color: var(--primary-text-color);
+  line-height: 1.6;
+}
+
+/* --- 2. Animations --- */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- 3. Main Layout & Card --- */
 .full-scorecard-container {
-  font-family: 'Roboto', sans-serif;
-  color: #333;
-  line-height: 1.5;
+  padding: 1rem;
+  min-height: 100vh;
+  animation: fadeIn var(--transition-speed) ease-out;
 }
 
-/* ===== HEADER SECTION ===== */
+.scorecard-card {
+  max-width: 800px;
+  margin: 0 auto;
+  background-color: var(--card-bg-color);
+  border-radius: var(--card-border-radius);
+  box-shadow: var(--card-shadow);
+  overflow: hidden; /* Important for border-radius on children */
+  animation: slideUp 0.5s ease-out;
+}
+
+/* --- 4. Header Section --- */
 .header-section {
-  background: #fff;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background: linear-gradient(135deg, #fdfdff 0%, #f7f7ff 100%);
 }
 
-.header-section h1 {
-  font-size: 1.5rem;
+.header-top {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.header-title {
+  font-size: 1.75rem;
   font-weight: 700;
-  color: #1a202c;
-  margin-bottom: 0.5rem;
+  color: var(--primary-text-color);
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 1rem;
+  flex-wrap: wrap;
 }
 
 .match-meta {
-  color: #4a5568;
-  font-size: 0.875rem;
-}
-
-.match-meta span {
-  display: inline-block;
-  margin-right: 1rem;
-  margin-bottom: 0.25rem;
-}
-
-.toss-info {
-  font-size: 0.875rem;
-  color: #4a5568;
-  margin-top: 0.5rem;
-}
-
-/* ===== RESULT SECTION ===== */
-.result-section {
-  background: #ebf8ff;
-  padding: 1rem;
-  border-bottom: 1px solid #bee3f8;
-}
-
-.result-text {
-  color: #2b6cb0;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-
-.summary-item {
-  font-size: 0.875rem;
-  margin-bottom: 0.25rem;
-}
-
-/* ===== INNINGS SECTION ===== */
-.innings-section {
-  margin-bottom: 2rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
-  overflow: hidden;
-}
-
-.innings-title {
-  background: #f7fafc;
-  padding: 0.75rem 1rem;
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #2d3748;
-  border-bottom: 1px solid #e2e8f0;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.innings-score {
-  color: #2b6cb0;
-  font-weight: 700;
-  margin-left: auto;
-}
-
-.innings-overs {
-  color: #4a5568;
+  gap: 0.5rem 1.5rem;
   font-size: 0.875rem;
+  color: var(--secondary-text-color);
 }
 
-.innings-target {
-  color: #718096;
-  font-size: 0.875rem;
-  margin-left: auto;
-}
-
-/* ===== SCORECARD TABLES ===== */
-.scorecard-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
-}
-
-.scorecard-table th {
-  background: #f7fafc;
-  padding: 0.5rem;
-  text-align: left;
-  font-weight: 600;
-  color: #4a5568;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.scorecard-table td {
-  padding: 0.5rem;
-  border-bottom: 1px solid #edf2f7;
-}
-
-.scorecard-table tr:last-child td {
-  border-bottom: none;
-}
-
-.player-name {
+.match-meta span strong {
+  color: var(--primary-text-color);
   font-weight: 500;
-  color: #2d3748;
 }
 
-.batsman-status {
-  text-transform: capitalize;
-  font-size: 0.8125rem;
-}
-
-/* ===== SECTION HEADERS ===== */
-.batting-section h4,
-.bowling-section h4 {
-  font-size: 1rem;
+.match-result {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background-color: #edf2ff;
+  border: 1px solid #c7d2fe;
+  color: var(--accent-color);
   font-weight: 600;
-  color: #2d3748;
-  margin: 1rem 0 0.5rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-/* ===== EXTRAS & FALL OF WICKETS ===== */
-.extras-section,
-.fow-section {
-  margin: 1rem 0;
-  font-size: 0.875rem;
-}
-
-.extras-section strong,
-.fow-section strong {
-  color: #4a5568;
-}
-
-.fow-item {
-  margin-bottom: 0.25rem;
-}
-
-/* ===== BUTTONS ===== */
-.live-btn {
-  background: #4299e1;
-  color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 0.375rem;
-  font-weight: 500;
-  font-size: 0.875rem;
-  border: none;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.live-btn:hover {
-  background: #3182ce;
-}
-
-.back-button {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-/* ===== NO DATA MESSAGE ===== */
-.no-data {
-  color: #718096;
-  font-style: italic;
-  padding: 1rem;
+  border-radius: 8px;
   text-align: center;
 }
 
-/* ===== RESPONSIVE ADJUSTMENTS ===== */
-@media (max-width: 640px) {
-  .header-section h1 {
-    font-size: 1.25rem;
+/* --- 5. Main Content: Score Sections --- */
+.score-sections {
+  padding: 1rem;
+}
+
+.innings-section {
+  margin-bottom: 2rem;
+  animation: slideUp 0.5s ease-out;
+  animation-fill-mode: backwards; /* Start animation even if scrolled past */
+}
+
+/* Delay animations for sequential appearance */
+.innings-section + .innings-separator + .innings-section {
+  animation-delay: 0.2s;
+}
+
+.innings-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.innings-score {
+  color: var(--accent-color);
+  font-weight: 700;
+}
+
+.innings-overs, .innings-target {
+  font-size: 1rem;
+  color: var(--secondary-text-color);
+  font-weight: 400;
+}
+
+.innings-details > * + * {
+  margin-top: 2rem;
+}
+
+.innings-details h4 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.innings-separator {
+  border: none;
+  border-top: 1px dashed var(--border-color);
+  margin: 2.5rem 0;
+}
+
+/* --- 6. Batting & Bowling Tables --- */
+.scorecard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.scorecard-table th,
+.scorecard-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.scorecard-table thead tr {
+  background-color: #f9fafb;
+}
+
+.scorecard-table th {
+  font-weight: 600;
+  color: var(--secondary-text-color);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.scorecard-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.scorecard-table tbody tr:hover {
+  background-color: #f8f9fa;
+  transition: background-color 0.2s;
+}
+
+.scorecard-table .player-name {
+  font-weight: 600;
+  color: var(--primary-text-color);
+}
+
+.scorecard-table .batsman-status {
+  font-size: 0.85rem;
+  color: var(--secondary-text-color);
+}
+
+/* --- 7. Extras & Fall of Wickets --- */
+.extras-section, .fow-section {
+  padding: 1rem;
+  background-color: #f9fafb;
+  border-radius: 8px;
+}
+
+.extras-details, .fow-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  font-size: 0.9rem;
+}
+
+.extras-details span strong, .fow-score {
+  color: var(--primary-text-color);
+  font-weight: 600;
+}
+
+.fow-item {
+  color: var(--secondary-text-color);
+}
+
+/* --- 8. Buttons & Utility --- */
+.btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+}
+
+.header-actions .btn {
+  padding: 0.5rem 1.2rem;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+.header-actions .btn-primary {
+  background-color: #2563eb; /* Blue-600 */
+  color: white;
+}
+
+.header-actions .btn-primary:hover {
+  background-color: #1e40af; /* Blue-800 */
+}
+
+.header-actions .btn-secondary {
+  background-color: #f3f4f6; /* Gray-100 */
+  color: #1f2937; /* Gray-800 */
+}
+
+.header-actions .btn-secondary:hover {
+  background-color: #e5e7eb; /* Gray-200 */
+}
+
+.header-actions button svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  stroke: currentColor;
+}
+
+.no-data {
+  text-align: center;
+  padding: 2rem;
+  color: var(--secondary-text-color);
+  background-color: #f9fafb;
+  border-radius: 8px;
+}
+
+/* --- 9. Responsive Design --- */
+@media (min-width: 768px) {
+  .full-scorecard-container {
+    padding: 2rem;
   }
   
-  .match-meta span {
-    display: block;
-    margin-right: 0;
+  .header-top {
+    flex-direction: row;
+    align-items: center;
   }
   
-  .scorecard-table {
-    font-size: 0.8125rem;
+  .header-title {
+    font-size: 2.25rem;
   }
   
-  .scorecard-table th,
-  .scorecard-table td {
-    padding: 0.375rem;
+  .score-sections {
+    padding: 1.5rem;
   }
-  
-  .innings-title {
-    font-size: 1rem;
-    padding: 0.5rem;
+
+  .btn {
+    padding: 0.6rem 1.25rem;
   }
-  
-  .result-text {
-    font-size: 1.125rem;
+
+  /* Right-align numeric columns in tables for better readability on desktop */
+  .scorecard-table th:not(:first-child):not(:nth-child(2)),
+  .scorecard-table td:not(:first-child):not(:nth-child(2)) {
+    text-align: right;
   }
 }
 
-@media (max-width: 480px) {
-  .header-section h1 {
-    font-size: 1.125rem;
-  }
-  
-  .scorecard-table {
-    display: block;
-    overflow-x: auto;
-    white-space: nowrap;
-  }
-  
-  .match-meta {
-    font-size: 0.75rem;
-  }
-  
-  .result-text {
-    font-size: 1rem;
-  }
+
+.net-run-rate-summary {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(to right, #fdfefe, #f8f9fa);
+  border-radius: 12px;
+  border: 1px solid #dee2e6;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
 }
+
+.net-run-rate-summary:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.net-run-rate-summary h3 {
+  margin-bottom: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #212529;
+  border-left: 4px solid #0d6efd;
+  padding-left: 0.5rem;
+}
+
+.nrr-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.nrr-details p {
+  margin: 0;
+  font-size: 1rem;
+  color: #495057;
+  line-height: 1.4;
+}
+
+.nrr-details p span {
+  font-weight: 500;
+  color: #0d6efd;
+}
+

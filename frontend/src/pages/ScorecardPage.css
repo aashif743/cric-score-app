@@ -1,3 +1,7 @@
+/* ==========================================================================
+   Base Styles (Mobile First)
+   ========================================================================== */
+
 .live-score-container {
   font-family: 'Roboto', sans-serif;
   background: #dee1e4;
@@ -6,6 +10,13 @@
   max-width: 400px;
   margin: 0 auto;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+  /* --- Key changes for fixed screen on MOBILE --- 
+  height: 100vh;
+  overflow-y: hidden;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column; */
 }
 
 .header-actions {
@@ -13,6 +24,7 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  flex-shrink: 0;
 }
 
 .back-btn, .settings-btn {
@@ -47,6 +59,7 @@
   border-radius: 8px;
   margin-bottom: 16px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
 }
 
 .settings-panel ul {
@@ -62,14 +75,35 @@
 /* Scorecard Styling */
 .scorecard-section {
   text-align: center;
+  flex-grow: 1;     
+  min-height: 0;    
+  overflow-y: hidden;   
+  display: flex;
+  flex-direction: column;
+}
+
+.scorecard-section .innings-team,
+.scorecard-section .team-name,
+.scorecard-section .crr,
+.scorecard-section .score-overs,
+.scorecard-section .chasing-info,
+.scorecard-section .batsmen-info,
+.scorecard-section .bowler-info,
+.scorecard-section .over-history-section {
+  flex-shrink: 1; 
+  min-height: 0;
 }
 
 .innings-team {
-  margin-bottom: 8px;
+  margin-bottom: -7px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
 }
 
 .innings {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
   color: #555;
   margin: 0;
@@ -77,16 +111,25 @@
 }
 
 .team-name {
-  font-size: 16px;
-  font-weight: 500;
-  color: #333;
   margin: 4px 0;
+}
+
+.batting-team {
+  font-size: 20px;
+  font-weight: 700;
+  color: #000000; /* red highlight */
+}
+
+.bowling-team {
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
 }
 
 .crr {
   font-size: 14px;
   color: #666;
-  margin: 4px 0;
+  margin: -3px 0;
 }
 
 .score-overs {
@@ -94,61 +137,69 @@
   justify-content: center;
   align-items: baseline;
   gap: 8px;
-  margin: 12px 0;
+  margin: 1px 0;
 }
 
 .score {
-  font-size: 32px;
+  font-size: 35px;
   font-weight: 700;
   color: #000;
   margin: 0;
 }
 
 .overs {
-  font-size: 14px;
+  font-size: 16px;
   color: #666;
 }
 
 .chasing-info {
   font-size: 14px;
-  color: #d32f2f; /* Red for urgency */
+  color: #d32f2f;
   font-weight: 500;
   margin-top: 8px;
 }
 
 .batsmen-info {
   display: flex;
-  gap: 16px;
-  margin-top: 20px;
+  flex-direction: row;
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .batsman {
+  position: relative;
   flex: 1;
-  padding: 12px;
+  padding: 10px;
   border-radius: 12px;
   background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-basis: 0;
+  flex-grow: 1;
 }
 
 .batsman.striker {
-  background: #ffffff; /* Light blue highlight for striker */
+  background: #ffffff;
   border: 2px solid #008cff;
-  position: relative;
 }
 
-.striker-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.striker-header, .non-striker-header {
+  width: 100%;
+  position: relative;
+  text-align: center;
+  padding-top: 7px;
 }
 
 .live-dot {
-  display: inline-block;
+  position: absolute;
+  top: 0;
+  right: 8px;
   width: 8px;
   height: 8px;
-  background: #005eff; /* Orange dot */
+  background: #ff5722;
   border-radius: 50%;
   animation: pulse 1.5s infinite;
-  
 }
 
 @keyframes pulse {
@@ -159,12 +210,17 @@
 
 .batsman-name {
   font-weight: 600;
+  font-size: 15px;
   margin: 0;
   cursor: pointer;
+  text-align: center;
+  width: 100%;
+  padding: 0 12px;
 }
 
 .batsman-stats {
   margin-top: 4px;
+  text-align: center;
 }
 
 .batsman-runs {
@@ -180,7 +236,7 @@
 .out-status {
   display: block;
   font-size: 10px;
-  color: #d32f2f; /* Red for out status */
+  color: #d32f2f;
   margin-top: 4px;
 }
 
@@ -221,7 +277,6 @@
   cursor: pointer;
 }
 
-
 .over-history-section {
   margin-top: 16px;
   padding: 12px;
@@ -231,13 +286,14 @@
 
 .section-title {
   font-weight: 600;
+  font-size: 14px;
   margin-bottom: 8px;
   color: #333;
 }
 
 .balls-container {
   display: flex;
-  gap: 8px;
+  gap: 15px;
   flex-wrap: wrap;
 }
 
@@ -252,37 +308,18 @@
   font-size: 12px;
 }
 
-/* Boundary (4/6) */
-.boundary {
-  background: #4CAF50;
-  color: white;
-}
-
-/* Wicket (W) */
-.wicket {
-  background: #f44336;
-  color: white;
-}
-
-/* Extras (WD/B+1) */
-.extra {
-  background: none;
-  border: 1px dashed #9E9E9E;
-}
-
-/* Regular runs (0,1,2,3) */
-.regular-run {
-  background: #9E9E9E;
-  color: white;
-}
-
-
+.boundary { background: #4CAF50; color: white; }
+.wicket { background: #f44336; color: white; }
+.extra { background: none; }
+.regular-run { background: #9E9E9E; color: white; }
+.ball-mark.empty { opacity: 0.5; font-style: italic; }
 
 .lower-section {
-  margin-top: 20px;
+  margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .button-row {
@@ -290,19 +327,7 @@
   gap: 8px;
 }
 
-/* Button Styles */
-.end-innings-btn {
-  flex: 1;
-  padding: 12px;
-  background: #ffffff; /* Red */
-  color: rgb(0, 0, 0);
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.action-btn {
+.end-innings-btn, .action-btn {
   flex: 1;
   padding: 12px;
   border: 1px solid #ddd;
@@ -312,57 +337,47 @@
   background: #ffffff;
 }
 
-/* Color Variations */
-.yellow-btn { background: #ffeb3b; } /* WD, NB */
-.purple-btn { background: #9c27b0; color: white; } /* BYE, 5,7.. */
-.red-btn { background: #f44336; color: white; } /* OUT */
-.white-btn { background: white; } /* 0-6 */
-.undo-btn { background: #607d8b; color: white; } /* UNDO */
+.end-innings-btn { font-weight: 600; }
 
-/* Hover States */
-.action-btn:hover {
-  opacity: 0.9;
-}
+.yellow-btn { background: #ffbd59; }
+.purple-btn { background: #cd62eb; color: white; }
+.red-btn { background: #ed4f44; color: white; }
+.white-btn { background: white; }
+.undo-btn { background: #000000; color: white; }
 
-/* Disabled State */
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.action-btn:hover { opacity: 0.9; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ===== TARGET INFO ===== */
 .target-info {
-  background: #fff8e1; /* Light orange background */
-  border-radius: 8px;
-  padding: 12px;
-  margin-top: 16px;
-  border-left: 4px solid #ffa000; /* Accent border */
+  margin-top: 12px;
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .target-row {
   display: flex;
-  justify-content: space-between;
-  margin-bottom: 6px;
-  font-size: 14px;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 4px;
 }
 
 .target-row.highlight {
   font-weight: 600;
-  color: #d32f2f; /* Red for emphasis */
+  color: #d32f2f;
+  margin-bottom: 6px;
+}
+
+.target-combined-row {
+  display: flex;
   justify-content: center;
-  margin: 8px 0;
+  gap: 50px;
 }
 
-.target-label {
-  color: #616161; /* Dark gray */
-  font-weight: 500;
-}
+.target-label { color: #616161; font-weight: 500; }
+.target-value { font-weight: 600; color: #000; }
 
-.target-value {
-  font-weight: 600;
-  color: #000;
-}
-
-/* ===== MODAL BASE STYLES ===== */
+/* ===== MODAL STYLES (Largely unchanged) ===== */
 .modal {
   position: fixed;
   top: 0;
@@ -376,9 +391,7 @@ button:disabled {
   font-family: 'Roboto', sans-serif;
 }
 
-.modal.open {
-  display: flex;
-}
+.modal.open { display: flex; }
 
 .modal-overlay {
   position: absolute;
@@ -409,204 +422,789 @@ button:disabled {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ... Other modal styles remain the same ... */
+
+
+/* ===== MOBILE RESPONSIVE ADJUSTMENTS (Existing) ===== */
+@media (max-height: 600px) {
+  .live-score-container { padding: 8px; }
+  .header-actions { margin-bottom: 10px; }
+  .team-name { font-size: 14px; }
+  .score { font-size: 28px; }
+  .batsman { padding: 8px; }
+  .batsman-name { font-size: 14px; }
+}
+
+@media (max-height: 500px) {
+  .over-history-section {
+    /* Consider hiding or significantly reducing size if necessary */
+    /* display: none; */
+  }
+}
+
+
+@media (max-width: 480px) {
+  .modal-content { width: 95%; padding: 15px; }
+  .number-grid, .out-options { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 360px) {
+  .number-grid, .out-options { grid-template-columns: repeat(2, 1fr); }
+}
+
+
+/* ==========================================================================
+   Professional Modal Design System
+   ========================================================================== */
+
+/* --- 1. Base Modal Layout (Overlay & Container) --- */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  display: flex; /* Changed from none to flex for alignment */
+  align-items: center;
+  justify-content: center;
+  
+  /* Smooth transition for appearance */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0s 0.3s;
+}
+
+.modal.open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.3s ease;
+}
+
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(17, 24, 39, 0.6); /* Darker, modern overlay */
+  -webkit-backdrop-filter: blur(4px); /* Frosted glass effect */
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  position: relative;
+  z-index: 2;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  
+  /* Entry animation */
+  transform: scale(0.95);
+  transition: transform 0.3s ease;
+}
+
+.modal.open .modal-content {
+  transform: scale(1);
+}
+
+/* --- 2. Modal Header & Content Sections --- */
 .modal-content h3 {
-  margin: 0 0 20px 0;
-  color: #333;
-  font-size: 1.25rem;
-  font-weight: 600;
+  margin: 0 0 24px 0;
+  color: #111827; /* Darker text */
+  font-size: 1.5rem;
+  font-weight: 700;
   text-align: center;
 }
 
-/* ===== INPUT STYLES ===== */
-.modal-content input[type="text"],
-.modal-content input[type="number"] {
-  width: 100%;
-  padding: 12px 15px;
-  margin-bottom: 15px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+.modal-content h4 {
+  margin: 24px 0 12px 0;
   font-size: 1rem;
-  transition: border-color 0.2s;
+  font-weight: 600;
+  color: #4b5563; /* Grey for subheadings */
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
-.modal-content input:focus {
-  border-color: #4CAF50;
-  outline: none;
+/* Add consistent spacing between direct children of the content area */
+.modal-content > *:not(h3):not(.modal-actions) + * {
+  margin-top: 16px;
 }
 
-/* ===== BUTTON GRIDS ===== */
+/* --- 3. Interactive Grids (Numbers, Out Types, Bowlers) --- */
 .number-grid,
 .out-options,
 .bowler-options {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-bottom: 20px;
+  /* Responsive grid that fits as many items as possible */
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 12px;
 }
 
 .number-grid button,
 .out-options button,
 .bowler-option {
-  aspect-ratio: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 8px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.number-grid button {
-  background: #f5f5f5;
-  color: #333;
-  font-size: 1.1rem;
-}
-
-.out-options button {
-  background: #f5f5f5;
-  color: #333;
-  font-size: 0.9rem;
-  padding: 8px;
-  white-space: nowrap;
-}
-
-.bowler-option {
-  background: #f5f5f5;
   padding: 12px;
-  flex-direction: column;
-}
-
-.bowler-option.current-bowler {
-  background: #e3f2fd;
-  border: 1px solid #bbdefb;
-}
-
-.bowler-info {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  background-color: #f9fafb;
+  color: #374151;
+  transition: all 0.2s ease;
   text-align: center;
 }
 
-.bowler-name {
-  font-weight: 500;
-  font-size: 0.9rem;
+/* Hover State for Grid Items */
+.number-grid button:hover,
+.out-options button:hover,
+.bowler-option:hover {
+  border-color: #4f46e5; /* Accent color */
+  background-color: #eef2ff;
+  color: #4f46e5;
 }
 
-/* ===== SELECTED STATES ===== */
+/* Selected State for Grid Items */
 .number-grid button.selected,
-.out-options button.selected {
-  background: #4CAF50;
-  color: white;
+.out-options button.selected,
+.bowler-option.current-bowler {
+  background-color: #4f46e5; /* Accent color */
+  color: rgb(0, 0, 0);
+  border-color: #4f46e5;
+  transform: scale(1.05);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25);
 }
 
-/* ===== RETIRE OPTIONS ===== */
-.retire-options {
-  margin-bottom: 20px;
+.bowler-option .bowler-name {
+  font-weight: 600;
 }
 
-.retire-types,
-.batter-selection {
-  margin-bottom: 15px;
+
+/* --- 4. Inputs & Forms --- */
+.modal-content input[type="text"],
+.modal-content input[type="number"] {
+  width: 100%;
+  padding: 12px 15px;
+  margin: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 1rem;
+  background-color: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box; /* Important for width 100% */
 }
 
-.retire-options h4 {
-  margin: 0 0 10px 0;
-  font-size: 0.9rem;
-  color: #666;
+.modal-content input[type="text"]:focus,
+.modal-content input[type="number"]:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
 }
 
-.retire-options button {
-  padding: 8px 12px;
-  margin-right: 8px;
-  margin-bottom: 8px;
-  background: #f5f5f5;
-  border: none;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.retire-options button.selected {
-  background: #4CAF50;
-  color: white;
-}
-
-/* ===== SETTINGS SCREENS ===== */
-.settings-options,
-.edit-players-screen,
-.choose-team-screen {
-  margin-bottom: 20px;
-}
-
-.setting-item {
-  margin-bottom: 15px;
-}
-
-.setting-item label {
-  display: block;
-  margin-bottom: 5px;
-  font-size: 0.9rem;
-  color: #666;
-}
-
-/* ===== MODAL ACTIONS ===== */
+/* --- 5. Modal Action Buttons (Footer) --- */
 .modal-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
+  gap: 12px;
+  margin-top: 24px; /* Pushes to the bottom */
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
 }
 
-.cancel-btn,
-.ok-btn {
+.cancel-btn, .ok-btn {
   padding: 10px 20px;
   border: none;
   border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancel-btn {
+  background: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #d1d5db;
+}
+
+.cancel-btn:hover {
+  background: #e5e7eb;
+}
+
+.ok-btn {
+  background: #4f46e5;
+  color: white;
+}
+
+.ok-btn:hover {
+  background: #4338ca; /* Darker accent */
+}
+
+/* --- 6. Specific Settings Panel Styles --- */
+.settings-options,
+.edit-players-screen,
+.choose-team-screen {
+  flex-grow: 1; /* Allows content to fill space */
+  overflow-y: auto; /* Scroll if content overflows */
+  padding-right: 8px; /* Space for scrollbar */
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.setting-item label {
   font-weight: 500;
+  color: #374151;
+}
+
+.setting-item input {
+  width: 80px; /* Constrain width of number inputs */
+  text-align: center;
+}
+
+.edit-players-screen .setting-item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.edit-players-screen .setting-item input {
+  width: 100%;
+}
+
+.choose-team-screen,
+.edit-players-screen {
+  text-align: center;
+}
+
+/* Replace inline styles with classes for settings buttons */
+.choose-team-screen button + button,
+.edit-players-screen div button + button {
+  margin-left: 1rem;
+}
+
+
+
+
+/* ==========================================================================
+   Professional Confirmation Modal Design
+   ========================================================================== */
+
+/* --- 1. The Overlay --- */
+.confirm-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2000; /* Ensure it's on top of everything */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(17, 24, 39, 0.6);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+
+  /* Animation */
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* --- 2. The Modal Content Box --- */
+.confirm-modal-content {
+  background: white;
+  padding: 2rem;
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  width: 90%;
+  max-width: 420px;
+  text-align: center;
+
+  /* Animation */
+  animation: slideUpScale 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+@keyframes slideUpScale {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* --- 3. Modal Elements (Icon, Text, Actions) --- */
+.confirm-modal-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 1rem auto;
+  color: #f87171; /* A soft but clear danger red */
+}
+
+.confirm-modal-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 0.5rem 0;
+}
+
+.confirm-modal-message {
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #6b7280; /* Muted text color for the description */
+  margin: 0 0 1.5rem 0;
+}
+
+.confirm-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+/* --- 4. Modal Buttons --- */
+.btn-modal {
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-modal:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Secondary Button (e.g., "Cancel") */
+.btn-modal-secondary {
+  background-color: #e5e7eb;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.btn-modal-secondary:hover {
+  background-color: #d1d5db;
+}
+
+/* Danger Button (e.g., "End Match") */
+.btn-modal-danger {
+  background-color: #ef4444; /* Bright, clear danger color */
+  color: white;
+}
+
+.btn-modal-danger:hover {
+  background-color: #dc2626; /* Darker on hover */
+}
+
+
+
+
+/* ==========================================================================
+   NEW DESKTOP STYLES
+   ========================================================================== */
+@media (min-width: 768px) {
+  /* --- Outer Container --- */
+  .live-score-container {
+    max-width: 900px; /* Reduced for more compact layout */
+    margin: 1rem auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* --- Main Content Area --- */
+  .content-columns {
+    display: flex;
+    flex-direction: row;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  /* --- Left Side: Scorecard --- */
+  .scorecard-section {
+    flex: 1;
+    background-color: #f9fafb;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* --- Right Side: Buttons/Actions --- */
+  .lower-section {
+    width: 280px;
+    background-color: #ffffff;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Team Header */
+  .team-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  /* Score Display */
+  .score-display {
+    font-size: 32px;
+    font-weight: bold;
+    margin: 8px 0;
+  }
+
+  /* Players Section */
+  .players-section {
+    display: flex;
+    gap: 16px;
+    margin: 12px 0;
+  }
+
+  .player {
+    flex: 1;
+  }
+
+  /* Bowler Section */
+  .bowler-section {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #eee;
+  }
+
+  /* Button Grid Layout */
+  .button-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .button-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  /* Special Buttons */
+  .wide-btn, .noball-btn, .bye-btn, .undo-btn {
+    grid-column: span 1;
+  }
+
+  .out-btn {
+    grid-column: span 3;
+  }
+
+  /* Button Styles */
+  .action-btn {
+    padding: 10px;
+    font-size: 14px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    background: #f5f5f5;
+  }
+
+  /* End Innings Buttons */
+  .end-innings-btns {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .end-innings-btn {
+    flex: 1;
+    padding: 10px;
+  }
+}
+
+/* Style for the container holding "This Over" title and new button */
+.section-title-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* Style for the "View History" button */
+.view-history-btn {
+  background-color: #6b7280; /* gray-500 */
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  font-size: 0.75rem; /* 12px */
+  border-radius: 12px; /* pill shape */
   cursor: pointer;
   transition: background-color 0.2s;
 }
 
-.cancel-btn {
-  background: #f5f5f5;
-  color: #666;
+.view-history-btn:hover {
+  background-color: #4b5563; /* gray-600 */
 }
 
-.ok-btn {
-  background: #4CAF50;
+/* Specific styles for the previous overs history modal */
+.previous-overs-modal .modal-content {
+  max-width: 500px;
+}
+
+.previous-overs-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 10px; /* For scrollbar */
+}
+
+.over-summary-item {
+  border-bottom: 1px solid #e5e7eb; /* gray-200 */
+  padding: 12px 4px;
+}
+
+.over-summary-item:last-child {
+  border-bottom: none;
+}
+
+.over-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+}
+
+.over-summary-header strong {
+  font-size: 1rem;
+}
+
+.over-summary-runs {
+  font-weight: 500;
+  color: #1f2937; /* gray-800 */
+}
+
+
+
+.balls-container-modal {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+
+
+
+
+
+
+.retire-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.retire-types,
+.batter-selection {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.retire-options h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #4b5563;
+  text-align: left;
+}
+
+.button-group {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.option-button {
+  padding: 0.75rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background-color: #f9fafb;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #374151;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.option-button:hover {
+  border-color: #a5b4fc;
+  background-color: #eef2ff;
+  color: #4f46e5;
+}
+
+.option-button.selected {
+  background-color: #4f46e5;
   color: white;
+  border-color: #4f46e5;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25);
 }
 
-.cancel-btn:hover {
-  background: #e0e0e0;
+
+/* --- Main container for run-out details --- */
+.run-out-details {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
 }
 
-.ok-btn:hover {
-  background: #43a047;
+/* --- Section titles --- */
+.run-out-details h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
 }
 
-/* ===== RESPONSIVE ADJUSTMENTS ===== */
-@media (max-width: 480px) {
-  .modal-content {
-    width: 95%;
-    padding: 15px;
-  }
-  
-  .number-grid,
-  .out-options {
-    grid-template-columns: repeat(3, 1fr);
-  }
-  
-  .retire-options button {
-    margin-right: 5px;
-    margin-bottom: 5px;
-    padding: 6px 10px;
-  }
+/* --- Grid layout for run number selection --- */
+.number-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(48px, 1fr));
+  gap: 0.75rem;
 }
 
-@media (max-width: 360px) {
-  .number-grid,
-  .out-options {
-    grid-template-columns: repeat(2, 1fr);
-  }
+/* --- Grid layout for batsman selection --- */
+.batter-selection {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+/* --- Button styling --- */
+.run-out-details button {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background-color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+/* --- Hover & selected state --- */
+.run-out-details button:hover {
+  background-color: #eef2ff;
+  border-color: #a5b4fc;
+  color: #4f46e5;
+}
+
+.run-out-details button.selected {
+  background-color: #4f46e5;
+  color: white;
+  border-color: #4f46e5;
+  transform: translateY(-2px);
+  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.2);
+}
+
+/* ==========================================================================
+   Direct Wicket Selection in Modal
+   ========================================================================== */
+
+/* --- Container for the new section --- */
+.direct-wicket-section {
+  margin-top: 1.5rem; /* Adds space above the section */
+  padding-top: 1.5rem; /* Adds space below the separator line */
+  border-top: 1px solid #e5e7eb; /* A light grey separator line */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem; /* Space between the title, subtitle, and buttons */
+}
+
+/* --- Title for the section ("Run Out (Optional)") --- */
+.direct-wicket-section .wicket-title {
+  margin: 0;
+  padding: 0;
+  border-bottom: none; /* Removes the border from the generic h4 style */
+  font-size: 1rem; /* 16px */
+  font-weight: 600;
+  color: #374151; /* A strong but not black text color */
+  text-align: left;
+}
+
+/* --- Subtitle style for the helper text --- */
+.modal-subtitle {
+  font-size: 0.875rem; /* 14px */
+  color: #6b7280; /* Muted grey text */
+  margin: 0 0 0.5rem 0; /* Adds a little space below */
+  text-align: left;
+  line-height: 1.4;
+}
+
+/* --- Styling the batsman buttons to match your existing design --- */
+/* This targets the buttons inside your new section */
+.direct-wicket-section .batter-selection button {
+  padding: 0.75rem 1rem;
+  border: 1px solid #d1d5db; /* Default border */
+  border-radius: 8px;
+  background-color: #f9fafb; /* Light background */
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #374151; /* Default text color */
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out; /* Smooth transitions */
+}
+
+/* --- Hover state for the buttons --- */
+.direct-wicket-section .batter-selection button:hover {
+  border-color: #a5b4fc; /* A lighter shade of the accent color */
+  background-color: #eef2ff; /* A very light purple */
+  color: #4f46e5; /* Accent color text */
+}
+
+/* --- Selected state (when className='selected' is active) --- */
+/* This provides the visual feedback for both selecting and deselecting */
+.direct-wicket-section .batter-selection button.selected {
+  background-color: #4f46e5; /* Main accent color */
+  color: white; /* White text when selected */
+  border-color: #4f46e5;
+  transform: translateY(-2px); /* Slight lift effect */
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25); /* Subtle glow */
 }

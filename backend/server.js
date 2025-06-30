@@ -5,6 +5,7 @@ const dotenv = require("dotenv");
 const http = require("http");
 const { Server } = require("socket.io");
 const matchRoutes = require("./routes/matchRoutes");
+const userRoutes = require('./routes/userRoutes');
 
 dotenv.config();
 
@@ -12,13 +13,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "https://red-shrew-841581.hostingersite.com", // Or your specific frontend origin
+    origin: "*", // Or your specific frontend origin
   },
 });
 
 app.use(cors());
 app.use(express.json());
 app.use("/api/matches", matchRoutes);
+app.use('/api/users', userRoutes);
 
 // MongoDB Connection
 mongoose
@@ -31,14 +33,25 @@ io.on("connection", (socket) => {
   console.log("🟢 A user connected");
 
   socket.on("join-match", (matchId) => {
-    socket.join(`match:${matchId}`);  // ✅ Correct template literal usage
-    console.log(`User joined match: ${matchId}`);
+    // The room name should be consistent. Let's stick to a simple matchId.
+    socket.join(matchId);
+    console.log(`User ${socket.id} joined room: ${matchId}`);
   });
 
-  socket.on("update-score", ({ matchId, data }) => {
-    socket.to(`match:${matchId}`).emit("score-updated", data);  // ✅ Correct
+  // ✅ FIX: Listen for 'live-score-update' to match the frontend sender.
+  socket.on("live-score-update", ({ matchId, payload }) => {
+    if (matchId && payload) {
+      console.log(`Relaying score update to room: ${matchId}`);
+      // ✅ FIX: Broadcast only the 'payload' to the 'score-updated' event.
+      socket.to(matchId).emit("score-updated", payload);
+    }
   });
 
+  socket.on("leave-match", (matchId) => {
+    socket.leave(matchId);
+    console.log(`User ${socket.id} left room: ${matchId}`);
+  });
+  
   socket.on("disconnect", () => {
     console.log("🔴 A user disconnected");
   });
