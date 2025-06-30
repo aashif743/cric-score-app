@@ -17,7 +17,6 @@ const MatchSetup = ({ onStartMatch }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    // Update bowling team when batting team changes
     setFormData(prev => ({
       ...prev,
       firstBowling: prev.firstBatting === prev.teamA ? prev.teamB : prev.teamA
@@ -25,13 +24,15 @@ const MatchSetup = ({ onStartMatch }) => {
   }, [formData.firstBatting, formData.teamA, formData.teamB]);
 
   const handleTeamNameChange = (teamKey, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [teamKey]: value,
-      // Update firstBatting/firstBowling if team names change
-      firstBatting: prev.firstBatting === prev[teamKey] ? value : prev.firstBatting,
-      firstBowling: prev.firstBowling === prev[teamKey] ? value : prev.firstBowling
-    }));
+    setFormData(prev => {
+      const oldTeamName = prev[teamKey];
+      return {
+        ...prev,
+        [teamKey]: value,
+        firstBatting: prev.firstBatting === oldTeamName ? value : prev.firstBatting,
+        // firstBowling will be updated by the useEffect
+      };
+    });
   };
 
   const handleNumberChange = (name, value) => {
@@ -46,8 +47,7 @@ const MatchSetup = ({ onStartMatch }) => {
     setIsSubmitting(true);
 
     try {
-      // Prepare match data with all required fields
-      const matchData = {
+      const matchDataToCreate = {
         teamA: {
           name: formData.teamA,
           shortName: formData.teamA.substring(0, 3).toUpperCase()
@@ -56,34 +56,71 @@ const MatchSetup = ({ onStartMatch }) => {
           name: formData.teamB,
           shortName: formData.teamB.substring(0, 3).toUpperCase()
         },
-        venue: "Main Stadium", // Default value or make this an input field
+        venue: "Main Stadium", // Default or make this an input field
         matchType: "T20", // Or add as a select field
         toss: {
           winner: formData.firstBatting,
           decision: "bat" // Default or make selectable
         },
-        matchSummary: {
-          playerOfMatch: "TBD", // Will update later
-          winner: "TBD" // Will update when match ends
-        },
-        status: "scheduled",
+        // matchSummary is usually populated as the match progresses or ends
+        status: "scheduled", // Initial status
         overs: formData.overs,
         ballsPerOver: formData.ballsPerOver,
         playersPerTeam: formData.playersPerTeam,
-        firstBatting: formData.firstBatting
+        firstBatting: formData.firstBatting // Explicitly sending who bats first
+        // Other fields like date, umpires can be added here if needed
       };
 
-      const response = await API.post('/matches', matchData);
-      const createdMatch = response.data;
+      console.log("Attempting to create match with data:", JSON.stringify(matchDataToCreate, null, 2));
+      const response = await API.post('/matches', matchDataToCreate);
       
-      onStartMatch({ 
-        ...formData,
-       _id: response.data._id
-      });
+      console.log("API Response received:", response); 
+      // Log the entire response object to see its structure (headers, status, data, etc.)
+      
+      console.log("API Response data (response.data):", JSON.stringify(response.data, null, 2)); 
+      // Log just the data part of the response
+
+      // Robustly try to extract the ID from common response structures
+      const createdMatchId = response.data?.data?._id ||    // e.g., { data: { _id: ..., ... } }
+                             response.data?.data?.id ||     // e.g., { data: { id: ..., ... } }
+                             response.data?._id ||          // e.g., { _id: ..., ... }
+                             response.data?.id;             // e.g., { id: ..., ... }
+      
+      console.log("Extracted createdMatchId:", createdMatchId);
+
+      if (!createdMatchId) {
+        // This block will execute if createdMatchId is null, undefined, or an empty string
+        console.error("Error creating match: No _id or id found in API response body.", response.data);
+        alert("Failed to create match: Could not retrieve a valid Match ID from the server. Please check server logs and API response structure.");
+        setIsSubmitting(false);
+        return; // Stop if no ID
+      }
+      
+      const settingsForApp = { 
+        ...formData, // Includes teamA, teamB names, overs, players, etc. from the form
+       _id: createdMatchId // The crucial backend-generated ID
+      };
+      console.log("Calling onStartMatch with settings:", JSON.stringify(settingsForApp, null, 2));
+      onStartMatch(settingsForApp);
 
     } catch (error) {
-      console.error("Error creating match:", error);
-      alert(`Failed to create match: ${error.error || error.message}`);
+      console.error("Error in handleSubmit during API call:", error);
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        console.error("Error response data:", error.response.data);
+        console.error("Error response status:", error.response.status);
+        console.error("Error response headers:", error.response.headers);
+        alert(`Failed to create match: Server error ${error.response.status} - ${error.response.data?.error || error.response.data?.message || 'Unknown server error'}`);
+      } else if (error.request) {
+        // The request was made but no response was received
+        console.error("Error request data:", error.request);
+        alert("Failed to create match: No response from server. Please check your network connection and backend server status.");
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        console.error('Error message:', error.message);
+        alert(`Failed to create match: ${error.message}`);
+      }
     } finally {
       setIsSubmitting(false);
     }
