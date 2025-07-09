@@ -6,4 +6,4 @@ router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 router.post('/complete-registration', setUserName);
 
-module.exports = router;
+module.exports = router; 

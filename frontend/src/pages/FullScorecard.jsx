@@ -7,7 +7,7 @@ import domtoimage from 'dom-to-image';
 import io from "socket.io-client";
 import "./FullScorecard.css";
 
-const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000");
+const socket = io(import.meta.env.VITE_BACKEND_URL || "https://cric-score-app.onrender.com");
 
 const FullScorecardPage = () => {
   const { state } = useLocation();

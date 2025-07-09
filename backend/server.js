@@ -13,11 +13,14 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
+const io = new Server(httpServer, {
   cors: {
-    origin: "https://red-shrew-841581.hostingersite.com", // Or your specific frontend origin
-  },
+    origin: "https://red-shrew-841581.hostingersite.com", // Your frontend domain
+    methods: ["GET", "POST"],
+    credentials: true,
+  }
 });
+
 
 app.use(cors());
 app.use(express.json());

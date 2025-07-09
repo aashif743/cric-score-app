@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // The base URL for our custom user authentication API
-const API_URL = '/api/users/';
+const API_URL = 'https://cric-score-app.onrender.com/api/users/';
 
 /**
  * Requests an OTP from our backend.
