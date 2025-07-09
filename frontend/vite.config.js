@@ -10,7 +10,7 @@ export default defineConfig({
       // Any request starting with /api will be forwarded
       '/api': {
         // The address of your backend server
-        target: 'http://localhost:5000', 
+        target: 'https://cric-score-app.onrender.com', 
         // This is necessary for the server to accept the request
         changeOrigin: true, 
       },

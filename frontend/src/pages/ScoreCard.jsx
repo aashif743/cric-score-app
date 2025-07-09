@@ -9,7 +9,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthContext } from '../context/AuthContext.jsx';
 
-const socket = io("http://localhost:5000"); 
+const socket = io("https://cric-score-app.onrender.com"); 
 
 
 
