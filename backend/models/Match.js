@@ -188,6 +188,11 @@ const TeamSchema = new mongoose.Schema({
 }, { _id: false });
 
 const MatchSchema = new mongoose.Schema({
+  user: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      ref: 'User', // This tells Mongoose the 'user' field refers to the 'User' model
+    },
   teamA: TeamSchema,
   teamB: TeamSchema,
   date: {

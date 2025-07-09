@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useContext } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import html2canvas from 'html2canvas';
-import "./FullScorecard.css";
-import io from "socket.io-client";
+import { motion, AnimatePresence } from "framer-motion";
+import { AuthContext } from '../context/AuthContext.jsx';
 import axios from "axios";
 import domtoimage from 'dom-to-image';
+import io from "socket.io-client";
+import "./FullScorecard.css";
 
 const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000");
 
@@ -12,130 +13,145 @@ const FullScorecardPage = () => {
   const { state } = useLocation();
   const navigate = useNavigate();
   const { matchIdParam } = useParams();
-  const location = useLocation();
   const scorecardRef = useRef(null);
+  const { user } = useContext(AuthContext);
 
   const [displayMatchData, setDisplayMatchData] = useState(null);
   const [isLoading, setIsLoading] = useState(!state?.matchData);
   const [error, setError] = useState(null);
-  const [socketError, setSocketError] = useState(null);
+  const [historyModal, setHistoryModal] = useState({ isOpen: false, inningsData: null });
 
-  // Helper function to validate and normalize match data
-  const normalizeMatchData = useCallback((data) => {
-    if (!data) return null;
-    
-    const normalized = {
-      ...data,
-      teamA: data.teamA || { name: "Team A" },
-      teamB: data.teamB || { name: "Team B" },
-      innings1: data.innings1 || null,
-      innings2: data.innings2 || null,
-      toss: data.toss || {},
-      date: data.date || null,
-      venue: data.venue || null,
-      matchType: data.matchType || null,
-      result: data.result || null,
-      status: data.status || "completed"
-    };
-
-    ['innings1', 'innings2'].forEach(key => {
-      if (normalized[key]) {
-        normalized[key] = {
-          teamName: normalized[key].teamName || (key === 'innings1' ? normalized.teamA.name : normalized.teamB.name),
-          batting: Array.isArray(normalized[key].batting) ? normalized[key].batting : [],
-          bowling: Array.isArray(normalized[key].bowling) ? normalized[key].bowling : [],
-          runs: normalized[key].runs || 0,
-          wickets: normalized[key].wickets || 0,
-          overs: normalized[key].overs || "0.0",
-          extras: normalized[key].extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0, total: 0 },
-          fallOfWickets: Array.isArray(normalized[key].fallOfWickets) ? normalized[key].fallOfWickets : [],
-          target: normalized[key].target || 0
-        };
+  // Animation variants
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1,
+        delayChildren: 0.2
       }
-    });
+    }
+  };
 
-    return normalized;
-  }, []);
+  const itemVariants = {
+    hidden: { y: 20, opacity: 0 },
+    visible: {
+      y: 0,
+      opacity: 1,
+      transition: {
+        duration: 0.6,
+        ease: [0.22, 1, 0.36, 1]
+      }
+    }
+  };
+
+const normalizeMatchData = useCallback((data) => {
+  if (!data) return null;
+  
+  const normalized = {
+    ...data,
+    teamA: data.teamA || { name: "Team A" },
+    teamB: data.teamB || { name: "Team B" },
+    innings1: data.innings1 ? {
+      ...data.innings1,
+      batting: Array.isArray(data.innings1.batting) ? data.innings1.batting.map(b => ({
+        ...b,
+        runs: b.runs || 0,
+        balls: b.balls || 0,
+        fours: b.fours || 0,
+        sixes: b.sixes || 0,
+        strikeRate: b.strikeRate || (b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(2) : "0.00"),
+        status: b.status || (b.isOut ? 'Out' : (b.balls > 0 ? 'Not Out' : 'Did Not Bat'))
+      })) : [],
+      bowling: Array.isArray(data.innings1.bowling) ? data.innings1.bowling.map(bowler => ({
+        ...bowler,
+        overs: bowler.overs || "0.0",
+        runs: bowler.runs || 0,
+        wickets: bowler.wickets || 0,
+        maidens: bowler.maidens || 0,
+        economyRate: bowler.economyRate || "0.00"
+      })) : []
+    } : null,
+    innings2: data.innings2 ? {
+      ...data.innings2,
+      batting: Array.isArray(data.innings2.batting) ? data.innings2.batting.map(b => ({
+        ...b,
+        runs: b.runs || 0,
+        balls: b.balls || 0,
+        fours: b.fours || 0,
+        sixes: b.sixes || 0,
+        strikeRate: b.strikeRate || (b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(2) : "0.00"),
+        status: b.status || (b.isOut ? 'Out' : (b.balls > 0 ? 'Not Out' : 'Did Not Bat'))
+      })) : [],
+      bowling: Array.isArray(data.innings2.bowling) ? data.innings2.bowling.map(bowler => ({
+        ...bowler,
+        overs: bowler.overs || "0.0",
+        runs: bowler.runs || 0,
+        wickets: bowler.wickets || 0,
+        maidens: bowler.maidens || 0,
+        economyRate: bowler.economyRate || "0.00"
+      })) : []
+    } : null,
+    toss: data.toss || {},
+    date: data.date || null,
+    venue: data.venue || null,
+    matchType: data.matchType || null,
+    result: data.result || null,
+    status: data.status || "completed"
+  };
+
+  return normalized;
+}, []);
 
   useEffect(() => {
-    const resolvedMatchId = matchIdParam || state?.matchData?._id;
-
-    if (!resolvedMatchId) {
-      setError("No match ID found to display scorecard.");
-      setIsLoading(false);
-      return;
-    }
-
-    const handleScoreUpdate = (livePayload) => {
-      console.log("✅ Live score update received:", livePayload);
-      setDisplayMatchData(prevData => {
-          if (!prevData) {
-              console.warn("Received live update but previous data is null.");
-              return prevData;
-          }
-
-          const newMatchData = JSON.parse(JSON.stringify(prevData));
-          const inningsKey = `innings${livePayload.currentInningsNumber}`;
-
-          // ✅ FIX: Merge the entire update, which now includes the teamName
-          newMatchData[inningsKey] = {
-              ...(newMatchData[inningsKey] || {}), // Preserve existing data
-              ...livePayload.inningsUpdate      // Merge new data
-          };
-
-          if (livePayload.status) {
-              newMatchData.status = livePayload.status;
-          }
-
-          // Log the state right after it's updated for debugging
-          console.log("📦 State after live update:", newMatchData);
-          return newMatchData;
-        });
-      };
-
     const loadMatchData = async () => {
-      try {
-        if (state?.matchData) {
-          console.log("🚀 Using match data passed via navigation state.");
-          setDisplayMatchData(normalizeMatchData(state.matchData));
-        } else {
-          console.log(`📡 Fetching initial match data for ID: ${resolvedMatchId}`);
-          const response = await axios.get(
-            `${import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"}/api/matches/${resolvedMatchId}`
-          );
-          setDisplayMatchData(normalizeMatchData(response.data));
-        }
-      } catch (err) {
-        setError(`Failed to load match data. ${err.response?.data?.message || err.message}`);
-      } finally {
+      const resolvedMatchId = matchIdParam;
+      setIsLoading(true);
+      setError(null);
+
+      if (state?.matchData) {
+        console.log("Using state match data");
+        setDisplayMatchData(normalizeMatchData(state.matchData));
         setIsLoading(false);
+        return;
       }
+
+      const cachedMatchData = localStorage.getItem(`finalMatchData_${resolvedMatchId}`);
+    if (cachedMatchData) {
+      try {
+        const parsedData = JSON.parse(cachedMatchData);
+        console.log("✅ Restoring match from localStorage:", parsedData);
+        setDisplayMatchData(normalizeMatchData(parsedData));
+        setIsLoading(false);
+        return;
+      } catch (err) {
+        console.error("Failed to parse cached match data", err);
+      }
+    }
+      
+      if (resolvedMatchId && !resolvedMatchId.startsWith('guest_')) {
+        if (!user || !user.token) {
+          setError("You must be logged in to view past match scorecards.");
+          setIsLoading(false);
+          return;
+        }
+        try {
+          const config = { headers: { 'Authorization': `Bearer ${user.token}` } };
+          const response = await axios.get(`/api/matches/${resolvedMatchId}`, config);
+          setDisplayMatchData(normalizeMatchData(response.data.data));
+        } catch (err) {
+          setError(`Failed to fetch match data. ${err.response?.data?.message || err.message}`);
+        }
+      } else {
+        setError("No match data found. The session may have expired or been cleared.");
+      }
+      
+      setIsLoading(false);
     };
 
     loadMatchData();
-
-    try {
-      socket.connect();
-      socket.on("connect", () => {
-        console.log("Connected to socket server");
-        socket.emit("join-match", resolvedMatchId);
-      });
-      socket.on("score-updated", handleScoreUpdate);
-      socket.on("connect_error", (err) => {
-        console.error("Socket connection error:", err);
-        setSocketError("Live updates unavailable - connection error");
-      });
-    } catch (socketErr) {
-      console.error("Socket initialization error:", socketErr);
-      setSocketError("Failed to initialize live updates");
-    }
-
-    return () => {
-      socket.emit("leave-match", resolvedMatchId);
-      socket.off("score-updated", handleScoreUpdate);
-      socket.disconnect();
-    };
-  }, [matchIdParam, state, normalizeMatchData]);
+  }, [matchIdParam, state, user, normalizeMatchData]);
+  
 
   const handleDownloadImage = useCallback(() => {
     const node = scorecardRef.current;
@@ -154,14 +170,6 @@ const FullScorecardPage = () => {
     }
   }, [displayMatchData]);
 
-  const goToLiveScorecard = () => {
-    navigate("/scorecard");
-  };
-
-  const goToMatchSetup = () => {
-    navigate("/match-setup");
-  };
-
   const formatDate = (dateString) => {
     if (!dateString) return "Date N/A";
     try {
@@ -173,20 +181,26 @@ const FullScorecardPage = () => {
     }
   };
 
-  const renderBattingTable = (batsmen = [], inningsLabel = "") => {
-    const batsmenList = Array.isArray(batsmen) ? batsmen : [];
-    const playedBatsmen = batsmenList.filter(
-      (b) => (b.balls || 0) > 0 || (b.runs || 0) > 0 || b.isOut === true || b.status?.toLowerCase() === "not out"
-    );
+const renderBattingTable = (batsmen = [], inningsLabel = "") => {
+  console.log("Rendering batting table:", batsmen);
+  const batsmenList = Array.isArray(batsmen) ? batsmen : [];
+  
+  // Filter to show only batsmen who either:
+  // - Faced at least one ball (balls > 0)
+  // - Scored runs (runs > 0)
+  // - Were out (isOut === true)
+  const playedBatsmen = batsmenList.filter(b => 
+    (b.balls || 0) > 0 || 
+    (b.runs || 0) > 0 || 
+    b.isOut === true
+  );
 
-    if (batsmenList.length === 0) {
-      return <p className="no-data">Batting data not available for {inningsLabel}.</p>;
-    }
-    if (playedBatsmen.length === 0 && inningsLabel) {
-      return <p className="no-data">No batsmen faced a ball or scored in {inningsLabel}.</p>;
-    }
+  if (playedBatsmen.length === 0) {
+    return <div className="no-data">No batsmen faced a ball in {inningsLabel}.</div>;
+  }
 
-    return (
+  return (
+    <motion.div className="table-container" variants={itemVariants}>
       <table className="scorecard-table">
         <thead>
           <tr>
@@ -201,37 +215,51 @@ const FullScorecardPage = () => {
         </thead>
         <tbody>
           {playedBatsmen.map((b, idx) => (
-            <tr key={`${inningsLabel}-batsman-${b.id || idx}`}>
+            <motion.tr 
+              key={`${inningsLabel}-batsman-${b.id || idx}`}
+              whileHover={{ backgroundColor: '#f8f9fa' }}
+            >
               <td className="player-name">{b.name}</td>
-              <td className="batsman-status">{b.status}</td>
+              <td className="batsman-status">
+                {b.status || 
+                 (b.isOut ? 'Out' : 
+                  ((b.balls || 0) > 0 ? 'Not Out' : 'Did Not Bat'))}
+              </td>
               <td>{b.runs ?? 0}</td>
               <td>{b.balls ?? 0}</td>
               <td>{b.fours ?? 0}</td>
               <td>{b.sixes ?? 0}</td>
-              <td>{b.strikeRate || "0.00"}</td>
-            </tr>
+              <td>
+                {b.strikeRate || 
+                 ((b.balls || 0) > 0 ? 
+                  ((b.runs / b.balls) * 100).toFixed(2) : 
+                  "0.00")}
+              </td>
+            </motion.tr>
           ))}
         </tbody>
       </table>
-    );
-  };
+    </motion.div>
+  );
+};
 
-  const renderBowlingTable = (bowlers = [], inningsLabel = "") => {
-    const bowlersList = Array.isArray(bowlers) ? bowlers : [];
-    const bowledBowlers = bowlersList.filter((b) => {
-      if (!b.overs) return false;
-      const [overs, balls] = b.overs.toString().split('.').map(Number);
-      return (overs || 0) > 0 || (balls || 0) > 0;
-    });
+const renderBowlingTable = (bowlers = [], inningsLabel = "") => {
+  console.log("Rendering bowling table:", bowlers);
+  const bowlersList = Array.isArray(bowlers) ? bowlers : [];
+  
+  // Filter to show only bowlers who bowled at least one ball
+  const bowledBowlers = bowlersList.filter(b => {
+    if (!b.overs) return false;
+    const [whole, part] = b.overs.toString().split('.').map(Number);
+    return (whole || 0) > 0 || (part || 0) > 0;
+  });
 
-    if (bowlersList.length === 0) {
-      return <p className="no-data">Bowling data not available for {inningsLabel}.</p>;
-    }
-    if (bowledBowlers.length === 0 && inningsLabel) {
-      return <p className="no-data">No bowlers delivered a ball in {inningsLabel}.</p>;
-    }
+  if (bowledBowlers.length === 0) {
+    return <div className="no-data">No bowlers delivered a ball in {inningsLabel}.</div>;
+  }
 
-    return (
+  return (
+    <motion.div className="table-container" variants={itemVariants}>
       <table className="scorecard-table">
         <thead>
           <tr>
@@ -245,19 +273,33 @@ const FullScorecardPage = () => {
         </thead>
         <tbody>
           {bowledBowlers.map((b, idx) => (
-            <tr key={`${inningsLabel}-bowler-${b.id || idx}`}>
+            <motion.tr 
+              key={`${inningsLabel}-bowler-${b.id || idx}`}
+              whileHover={{ backgroundColor: '#f8f9fa' }}
+            >
               <td className="player-name">{b.name}</td>
               <td>{b.overs || "0.0"}</td>
               <td>{b.maidens ?? 0}</td>
               <td>{b.runs ?? 0}</td>
               <td>{b.wickets ?? 0}</td>
-              <td>{b.economyRate || "0.00"}</td>
-            </tr>
+              <td>
+                {b.economyRate || 
+                 (b.overs ? calculateEconomy(b.overs, b.runs) : "0.00")}
+              </td>
+            </motion.tr>
           ))}
         </tbody>
       </table>
-    );
-  };
+    </motion.div>
+  );
+};
+
+  const calculateEconomy = (overs, runs) => {
+  if (!overs || runs === undefined) return "0.00";
+  const [whole, part] = overs.toString().split('.').map(Number);
+  const totalBalls = (whole || 0) * 6 + (part || 0);
+  return totalBalls > 0 ? ((runs / totalBalls) * 6).toFixed(2) : "0.00";
+};
 
   const renderExtras = (inningsExtras) => {
     const extras = inningsExtras || {};
@@ -271,7 +313,7 @@ const FullScorecardPage = () => {
     }
 
     return (
-      <div className="extras-section">
+      <motion.div className="extras-section" variants={itemVariants}>
         <h4>Extras</h4>
         <div className="extras-details">
           <span><strong>Total:</strong> {displayTotal}</span>
@@ -281,7 +323,7 @@ const FullScorecardPage = () => {
           {(extras.legByes || 0) > 0 && <span><strong>Leg Byes (lb):</strong> {extras.legByes}</span>}
           {(extras.penalty || 0) > 0 && <span><strong>Penalty (p):</strong> {extras.penalty}</span>}
         </div>
-      </div>
+      </motion.div>
     );
   };
 
@@ -290,7 +332,7 @@ const FullScorecardPage = () => {
     if (fowList.length === 0) return null;
 
     return (
-      <div className="fow-section">
+      <motion.div className="fow-section" variants={itemVariants}>
         <h4>Fall of Wickets</h4>
         <div className="fow-details">
           {fowList.map((wicket, idx) => (
@@ -305,94 +347,237 @@ const FullScorecardPage = () => {
             </div>
           ))}
         </div>
-      </div>
+      </motion.div>
     );
   };
 
-  const renderInningsSection = (inningsData, defaultTeamName, inningsLabel) => {
-    if (!inningsData || typeof inningsData !== 'object') {
-      return (
-        <div className="innings-section">
-          <h3 className="innings-title">
-            {defaultTeamName} - Yet to bat
-          </h3>
-        </div>
-      );
-    }
+  const renderOverHistoryModal = () => {
+    if (!historyModal.isOpen || !historyModal.inningsData) return null;
 
-    const hasData = inningsData.runs !== undefined || 
-                   inningsData.wickets !== undefined ||
-                   (inningsData.batting && inningsData.batting.length > 0) ||
-                   (inningsData.bowling && inningsData.bowling.length > 0);
-
-    if (!hasData) {
-      return (
-        <div className="innings-section">
-          <h3 className="innings-title">
-            {inningsData.teamName || defaultTeamName} - Yet to bat
-          </h3>
-        </div>
-      );
-    }
-
-    const hasBattingData = Array.isArray(inningsData.batting) && inningsData.batting.length > 0;
-    const hasBowlingData = Array.isArray(inningsData.bowling) && inningsData.bowling.length > 0;
+    const { teamName, overHistory = [] } = historyModal.inningsData;
 
     return (
-      <div className="innings-section">
-        <h3 className="innings-title">
-          {inningsData.teamName || defaultTeamName}
-          <span className="innings-score">
-            {inningsData.runs ?? 0}/{inningsData.wickets ?? 0}
-          </span>
-          <span className="innings-overs">
-            ({inningsData.overs || "0.0"} Overs)
-          </span>
-          {inningsData.target > 0 && <span className="innings-target"> (Target: {inningsData.target})</span>}
-        </h3>
-
-        <div className="innings-details">
-          {hasBattingData ? (
-            <div className="batting-section">
-              <h4>Batting</h4>
-              {renderBattingTable(inningsData.batting, inningsLabel)}
+      <AnimatePresence>
+        <motion.div 
+          className="modal-overlay"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={() => setHistoryModal({ isOpen: false, inningsData: null })}
+        >
+          <motion.div 
+            className="modal-content"
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3>Over History for {teamName}</h3>
+              <button 
+                className="close-modal"
+                onClick={() => setHistoryModal({ isOpen: false, inningsData: null })}
+              >
+                &times;
+              </button>
             </div>
-          ) : (
-            <p className="no-data">No batting data recorded for {inningsData.teamName || defaultTeamName} in {inningsLabel}.</p>
-          )}
-
-          {renderExtras(inningsData.extras)}
-          {renderFallOfWickets(inningsData.fallOfWickets, inningsLabel)}
-
-          {hasBowlingData ? (
-            <div className="bowling-section">
-              <h4>Bowling</h4>
-              {renderBowlingTable(inningsData.bowling, inningsLabel)}
+            <div className="modal-body">
+              {overHistory.length === 0 ? (
+                <p className="no-overs">No completed overs recorded for this innings.</p>
+              ) : (
+                <div className="overs-list">
+                  {[...overHistory].reverse().map((over) => (
+                    <motion.div 
+                      key={over.overNumber} 
+                      className="over-item"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <div className="over-header">
+                        <strong>Over {over.overNumber}</strong>
+                        <span>(Bowler: {over.bowlerName})</span>
+                      </div>
+                      <div className="balls-container">
+                        {over.balls.map((ball, index) => (
+                          <span 
+                            key={index} 
+                            className={`ball ${ball === 'W' ? 'wicket' : ''}`}
+                          >
+                            {ball}
+                          </span>
+                        ))}
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </div>
-          ) : (
-            <p className="no-data">No bowling data recorded against {inningsData.teamName || defaultTeamName} in {inningsLabel}.</p>
-          )}
-        </div>
-      </div>
+          </motion.div>
+        </motion.div>
+      </AnimatePresence>
     );
   };
+
+const renderInningsSection = (inningsData, defaultTeamName, inningsLabel) => {
+  if (!inningsData) {
+    return (
+      <motion.div className="innings-section" variants={itemVariants}>
+        <h3 className="innings-title">
+          {defaultTeamName} - Yet to bat
+        </h3>
+      </motion.div>
+    );
+  }
+
+  // --- FIX: Filter the lists before rendering ---
+  const playedBatsmen = inningsData.batting?.filter(
+    (batsman) => batsman.status !== 'Did Not Bat'
+  ) || [];
+
+  const bowledBowlers = inningsData.bowling?.filter(
+    (bowler) => bowler.overs && bowler.overs !== "0.0"
+  ) || [];
+
+  return (
+    <motion.div className="innings-section" variants={itemVariants}>
+      <h3 className="innings-title">
+        {inningsData.teamName || defaultTeamName}
+        <span className="innings-score">
+          {inningsData.runs ?? 0}/{inningsData.wickets ?? 0}
+        </span>
+        <span className="innings-overs">
+          ({inningsData.overs || "0.0"} Overs)
+        </span>
+        {inningsData.target > 0 && (
+          <span className="innings-target"> (Target: {inningsData.target})</span>
+        )}
+      </h3>
+
+      <div className="innings-details">
+        {/* Batting Section */}
+        <div className="batting-section">
+          <h4>Batting</h4>
+          {playedBatsmen.length > 0 ? ( // Use the filtered list here
+            <table className="scorecard-table">
+              <thead>
+                <tr>
+                  <th>Batsman</th>
+                  <th>Status</th>
+                  <th>R</th>
+                  <th>B</th>
+                  <th>4s</th>
+                  <th>6s</th>
+                  <th>SR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Map over the filtered list */}
+                {playedBatsmen.map((batsman, index) => (
+                  <tr key={`bat-${index}`}>
+                    <td>{batsman.name || `Batsman ${index + 1}`}</td>
+                    <td>{batsman.status || 'Did Not Bat'}</td>
+                    <td>{batsman.runs || 0}</td>
+                    <td>{batsman.balls || 0}</td>
+                    <td>{batsman.fours || 0}</td>
+                    <td>{batsman.sixes || 0}</td>
+                    <td>
+                      {batsman.strikeRate || 
+                       (batsman.balls > 0 ? 
+                        ((batsman.runs / batsman.balls) * 100).toFixed(2) : 
+                        '0.00')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="no-data">No batting data available</div>
+          )}
+        </div>
+
+        {/* Bowling Section */}
+        <div className="bowling-section">
+          <h4>Bowling</h4>
+          {bowledBowlers.length > 0 ? ( // Use the filtered list here
+            <table className="scorecard-table">
+              <thead>
+                <tr>
+                  <th>Bowler</th>
+                  <th>O</th>
+                  <th>M</th>
+                  <th>R</th>
+                  <th>W</th>
+                  <th>ER</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Map over the filtered list */}
+                {bowledBowlers.map((bowler, index) => (
+                  <tr key={`bowl-${index}`}>
+                    <td>{bowler.name || `Bowler ${index + 1}`}</td>
+                    <td>{bowler.overs || '0.0'}</td>
+                    <td>{bowler.maidens || 0}</td>
+                    <td>{bowler.runs || 0}</td>
+                    <td>{bowler.wickets || 0}</td>
+                    <td>
+                      {bowler.economyRate || 
+                       (bowler.overs ? calculateEconomy(bowler.overs, bowler.runs) : '0.00')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="no-data">No bowling data available</div>
+          )}
+        </div>
+
+        {renderExtras(inningsData.extras)}
+        {renderFallOfWickets(inningsData.fallOfWickets, inningsLabel)}
+
+        <button 
+          className="view-history-btn"
+          onClick={() => setHistoryModal({ isOpen: true, inningsData })}
+        >
+          View Over-by-Over History
+        </button>
+      </div>
+    </motion.div>
+  );
+};
 
   if (isLoading) {
     return (
-      <div className="loading-container">
-        <div className="loader"></div>
+      <motion.div 
+        className="loading-container"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+      >
+        <div className="loading-spinner"></div>
         <p>Loading match data...</p>
-      </div>
+      </motion.div>
     );
   }
 
   if (error || !displayMatchData) {
     return (
-      <div className="error-container">
+      <motion.div 
+        className="error-container"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+      >
         <h2>Error Loading Scorecard</h2>
         <p>{error || "No match data is available to display."}</p>
-        <button onClick={() => navigate("/")} className="back-button">Go Home</button>
-      </div>
+        <motion.button 
+          onClick={() => navigate("/")} 
+          className="back-button"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          Go Home
+        </motion.button>
+      </motion.div>
     );
   }
 
@@ -410,34 +595,59 @@ const FullScorecardPage = () => {
     matchSummary
   } = displayMatchData;
 
-  console.log("Current match data:", {
-    displayMatchData,
-    isLoading,
-    error,
-    socketConnected: socket.connected,
-    locationState: state
-  });
-
   return (
-    <div className="full-scorecard-container" ref={scorecardRef}>
-      <div className="scorecard-card">
+    <motion.div 
+      className="full-scorecard-container"
+      initial="hidden"
+      animate="visible"
+      variants={containerVariants}
+      ref={scorecardRef}
+    >
+      <motion.div 
+        className="scorecard-card"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
         <header className="header-section">
           <div className="header-top">
             <h1 className="header-title">
               {teamA?.name || "Team A"} vs {teamB?.name || "Team B"}
             </h1>
             <div className="header-actions">
-              <button className="btn btn-secondary" onClick={goToLiveScorecard}>
-                ← Live View
-              </button>
-              <button className="btn btn-primary" onClick={goToMatchSetup}>
-                New Match
-              </button>
-              <button className="btn" onClick={handleDownloadImage} title="Download Scorecard">
+              <motion.button 
+                className="btn btn-secondary"
+                onClick={() => navigate("/scorecard")}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
                 </svg>
-              </button>
+                Live View
+              </motion.button>
+              <motion.button 
+                className="btn btn-primary"
+                onClick={() => navigate("/match-setup")}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Match
+              </motion.button>
+              <motion.button 
+                className="btn btn-download"
+                onClick={handleDownloadImage}
+                title="Download Scorecard"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </motion.button>
             </div>
           </div>
           <div className="match-meta">
@@ -446,16 +656,30 @@ const FullScorecardPage = () => {
             {venue && <span><strong>Venue:</strong> {venue}</span>}
             {toss?.winner && <span><strong>Toss:</strong> {`${toss.winner} won and chose to ${toss.decision}`}</span>}
           </div>
-          {result && <div className="match-result"><strong>Result:</strong> {result}</div>}
+          {result && (
+            <motion.div 
+              className="match-result"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+            >
+              <strong>Result:</strong> {result}
+            </motion.div>
+          )}
         
           {matchSummary?.netRunRates && (
-            <div className="net-run-rate-summary">
-              <h3>NRR</h3>
+            <motion.div 
+              className="net-run-rate-summary"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+            >
+              <h3>Net Run Rate</h3>
               <div className="nrr-details">
                 <p><strong>{teamA.name}</strong>: {matchSummary.netRunRates[teamA.name] || 'N/A'}</p>
                 <p><strong>{teamB.name}</strong>: {matchSummary.netRunRates[teamB.name] || 'N/A'}</p>
               </div>
-            </div>
+            </motion.div>
           )}
         </header>
 
@@ -464,13 +688,20 @@ const FullScorecardPage = () => {
 
           {innings2 && innings2.teamName !== "N/A" && (
             <>
-              <hr className="innings-separator" />
+              <motion.hr 
+                className="innings-separator"
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: 1 }}
+                transition={{ delay: 0.4 }}
+              />
               {renderInningsSection(innings2, teamB?.name || "Team B", "2nd Innings")}
             </>
           )}
         </main>
-      </div>
-    </div>
+      </motion.div>
+      
+      {renderOverHistoryModal()}
+    </motion.div>
   );
 };
 
