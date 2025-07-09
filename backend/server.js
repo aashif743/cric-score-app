@@ -7,27 +7,34 @@ const { Server } = require("socket.io");
 
 // Import your route files
 const matchRoutes = require("./routes/matchRoutes");
-const userRoutes = require("./routes/userRoutes"); // <-- THIS LINE WAS MISSING
+const userRoutes = require("./routes/userRoutes");
 
 dotenv.config();
 
 const app = express();
+
+// ✅ Create HTTP server from the Express app
 const server = http.createServer(app);
-const io = new Server(httpServer, {
+
+// ✅ Initialize socket.io using the correct server variable
+const io = new Server(server, {
   cors: {
     origin: "https://red-shrew-841581.hostingersite.com", // Your frontend domain
     methods: ["GET", "POST"],
     credentials: true,
-  }
+  },
 });
 
-
-app.use(cors());
+// Middleware
+app.use(cors({
+  origin: "https://red-shrew-841581.hostingersite.com",
+  credentials: true,
+}));
 app.use(express.json());
 
-// Tell the app to use the route files
+// API Routes
 app.use("/api/matches", matchRoutes);
-app.use("/api/users", userRoutes); // <-- THIS LINE WAS MISSING
+app.use("/api/users", userRoutes);
 
 // MongoDB Connection
 mongoose
@@ -35,7 +42,7 @@ mongoose
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// Socket.io connection
+// Socket.io Events
 io.on("connection", (socket) => {
   console.log("🟢 A user connected");
 
@@ -55,12 +62,14 @@ io.on("connection", (socket) => {
     socket.leave(matchId);
     console.log(`User ${socket.id} left room: ${matchId}`);
   });
-  
+
   socket.on("disconnect", () => {
     console.log("🔴 A user disconnected");
   });
 });
 
-// Start server
+// Start Server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
