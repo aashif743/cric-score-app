@@ -4,8 +4,10 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const http = require("http");
 const { Server } = require("socket.io");
+
+// Import your route files
 const matchRoutes = require("./routes/matchRoutes");
-const userRoutes = require('./routes/userRoutes');
+const userRoutes = require("./routes/userRoutes"); // <-- THIS LINE WAS MISSING
 
 dotenv.config();
 
@@ -13,14 +15,16 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Or your specific frontend origin
+    origin: "https://red-shrew-841581.hostingersite.com", // Or your specific frontend origin
   },
 });
 
 app.use(cors());
 app.use(express.json());
+
+// Tell the app to use the route files
 app.use("/api/matches", matchRoutes);
-app.use('/api/users', userRoutes);
+app.use("/api/users", userRoutes); // <-- THIS LINE WAS MISSING
 
 // MongoDB Connection
 mongoose
@@ -33,16 +37,13 @@ io.on("connection", (socket) => {
   console.log("🟢 A user connected");
 
   socket.on("join-match", (matchId) => {
-    // The room name should be consistent. Let's stick to a simple matchId.
     socket.join(matchId);
     console.log(`User ${socket.id} joined room: ${matchId}`);
   });
 
-  // ✅ FIX: Listen for 'live-score-update' to match the frontend sender.
   socket.on("live-score-update", ({ matchId, payload }) => {
     if (matchId && payload) {
       console.log(`Relaying score update to room: ${matchId}`);
-      // ✅ FIX: Broadcast only the 'payload' to the 'score-updated' event.
       socket.to(matchId).emit("score-updated", payload);
     }
   });

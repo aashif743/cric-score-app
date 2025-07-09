@@ -4,6 +4,10 @@ const mongoose = require("mongoose");
 // Create a new match
 exports.createMatch = async (req, res) => {
   try {
+    if (!req.user) {
+        return res.status(401).json({ success: false, error: "User not authenticated." });
+    }
+
     const {
       teamA,
       teamB,
@@ -43,6 +47,9 @@ exports.createMatch = async (req, res) => {
 
 
     const matchDataForSchema = {
+
+      user: req.user.id,
+
       teamA: {
         name: teamA.name,
         shortName: teamA.shortName || teamA.name.substring(0, 3).toUpperCase(),
@@ -96,35 +103,23 @@ exports.createMatch = async (req, res) => {
 };
 
 // Get all matches - (No changes, seems fine)
-exports.getAllMatches = async (req, res) => {
+exports.getMyMatches = async (req, res) => { 
   try {
-    const filter = {};
-    const { status, matchType, page = 1, limit = 10 } = req.query;
+    // Note: The `protect` middleware gives us the logged-in user on req.user
+    if (!req.user) {
+        return res.status(401).json({ success: false, error: "User not authenticated." });
+    }
 
-    if (status) filter.status = status;
-    if (matchType) filter.matchType = matchType;
-
-    const skip = (page - 1) * limit;
-    const matches = await Match.find(filter)
-      .sort({ date: -1 }) // Sort by date is usually better than createdAt for matches
-      .skip(skip)
-      .limit(Number(limit));
-
-    const total = await Match.countDocuments(filter);
+    // Find all matches where the 'user' field matches the logged-in user's ID
+    const matches = await Match.find({ user: req.user.id }).sort({ createdAt: -1 });
 
     res.json({
       success: true,
       data: matches,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / limit),
-      },
     });
   } catch (error) {
-    console.error("Get matches error:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch matches" });
+    console.error("Get my matches error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch user's matches" });
   }
 };
 
@@ -142,6 +137,10 @@ exports.getMatchById = async (req, res) => {
 
     if (!match) {
       return res.status(404).json({ success: false, error: "Match not found" });
+    }
+
+    if (match.user.toString() !== req.user.id) {
+        return res.status(401).json({ success: false, error: "Not authorized to view this match" });
     }
 
     res.json({ success: true, data: match });
@@ -166,21 +165,17 @@ exports.updateMatch = async (req, res) => {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
 
+    if (match.user.toString() !== req.user.id) {
+        return res.status(401).json({ success: false, error: "Not authorized to update this match" });
+    }
+
     const { _id, createdAt, updatedAt, ...updateDataFromFrontend } = req.body;
 
-    // Determine active innings (simplified logic)
-    // A more robust way would be to have a 'currentInningsNumber' field in MatchSchema
-    // or derive from status and innings1/innings2 population.
     const activeInningsKey = (match.innings1 && match.status === "in_progress" && (!match.innings2 || match.innings2.overs === "0.0")) ? "innings1" : "innings2";
 
     if (match.status !== "in_progress" && match.status !== "scheduled") { // 'scheduled' if first ball update
         return res.status(400).json({ success: false, error: "Match is not in progress or scheduled to start." });
     }
-    
-    // Example: Updating score-related fields in the active innings
-    // This needs to be much more comprehensive to handle all aspects of updateDataFromFrontend
-    // such as individual player scores, fall of wickets, extras etc.
-    // It needs to merge data carefully, especially arrays of batsmen/bowlers.
 
     if (activeInningsKey) {
         if (updateDataFromFrontend.runs !== undefined) {
@@ -201,9 +196,6 @@ exports.updateMatch = async (req, res) => {
         if (updateDataFromFrontend.fallOfWickets) { // Assuming FOW is an array
             match[activeInningsKey].fallOfWickets = updateDataFromFrontend.fallOfWickets;
         }
-        // Updating batting and bowling arrays is more complex:
-        // You'd typically find the specific batsman/bowler and update their stats,
-        // or replace the whole array if the frontend sends the complete updated list.
         if (updateDataFromFrontend.batting) { // Sent from frontend
             match[activeInningsKey].batting = updateDataFromFrontend.batting;
         }
@@ -219,12 +211,6 @@ exports.updateMatch = async (req, res) => {
         match.innings2.target = updateDataFromFrontend.target;
     }
 
-
-    // Directly apply other top-level updates if they are part of updateDataFromFrontend
-    // and are actual fields in MatchSchema (e.g., status)
-    // This is a shallow merge, be careful with nested objects not handled above.
-    // Object.assign(match, updateDataFromFrontend); // Use with caution, or update specific fields
-
     const updatedMatch = await match.save();
 
     res.json({ success: true, data: updatedMatch, message: "Match updated successfully" });
@@ -238,17 +224,21 @@ exports.updateMatch = async (req, res) => {
 exports.deleteMatch = async (req, res) => {
   try {
     const { id } = req.params;
-
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: "Invalid match ID" });
     }
-
-    const deletedMatch = await Match.findByIdAndDelete(id);
-
-    if (!deletedMatch) {
+    
+    const match = await Match.findById(id);
+    if (!match) {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
+    
+    // Security Check
+    if (match.user.toString() !== req.user.id) {
+        return res.status(401).json({ success: false, error: "Not authorized to delete this match" });
+    }
 
+    const deletedMatch = await Match.findByIdAndDelete(id);
     res.json({ success: true, message: "Match deleted successfully" });
   } catch (error) {
     console.error("Delete match error:", error);
@@ -267,9 +257,9 @@ exports.endInnings = async (req, res) => {
         return res.status(400).json({ success: false, error: "Innings 1 data not provided." });
     }
 
-    const match = await Match.findById(id);
-    if (!match) {
-      return res.status(404).json({ success: false, error: "Match not found" });
+    const match = await Match.findById(req.params.id);
+    if (match && match.user.toString() !== req.user.id) {
+      return res.status(401).json({ success: false, error: "Not authorized" });
     }
 
     if (!match.innings1) { // Should have been initialized in createMatch
@@ -342,9 +332,9 @@ exports.endMatch = async (req, res) => {
       return res.status(400).json({ success: false, error: "Match data not provided in request body." });
     }
 
-    const match = await Match.findById(id);
-    if (!match) {
-      return res.status(404).json({ success: false, error: "Match not found." });
+    const match = await Match.findById(req.params.id);
+    if (match && match.user.toString() !== req.user.id) {
+      return res.status(401).json({ success: false, error: "Not authorized" });
     }
 
     // Destructure data from the frontend payload
@@ -353,8 +343,6 @@ exports.endMatch = async (req, res) => {
       innings2: feInnings2,
       matchSummary: feMatchSummary,
       result: feResult,
-      // Assuming these top-level details might also be in fullMatchDataFromFrontend if they are part of what ScoreCard sends
-      // date: feDate, venue: feVenue, matchType: feMatchType, series: feSeries, toss: feToss 
     } = fullMatchDataFromFrontend;
 
     // --- Populate Innings 1 ---
@@ -441,14 +429,6 @@ exports.endMatch = async (req, res) => {
     }
     match.result = feResult || "Result TBD";
     match.status = "completed"; // Mark as completed
-
-    // You might want to update other top-level match fields if ScoreCard.jsx sends them
-    // e.g., if venue or umpires could be finalized/edited on the scorecard page:
-    // if (fullMatchDataFromFrontend.venue) match.venue = fullMatchDataFromFrontend.venue;
-    // if (fullMatchDataFromFrontend.umpires) match.umpires = fullMatchDataFromFrontend.umpires;
-    // if (fullMatchDataFromFrontend.matchReferee) match.matchReferee = fullMatchDataFromFrontend.matchReferee;
-    // if (fullMatchDataFromFrontend.date) match.date = fullMatchDataFromFrontend.date;
-
 
     const savedMatch = await match.save();
     res.json({ success: true, message: "Match ended and result updated successfully.", data: savedMatch });

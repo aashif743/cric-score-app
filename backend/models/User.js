@@ -4,17 +4,23 @@ const userSchema = mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, 'Please add a name'],
     },
-    email: {
+    phoneNumber: {
       type: String,
-      required: [true, 'Please add an email'],
+      required: [true, 'Please add a phone number'],
       unique: true,
     },
-    password: {
+    email: {  // Add this field explicitly
       type: String,
-      required: [true, 'Please add a password'],
+      unique: false,  // Explicitly set to not unique
+      sparse: true    // Allows multiple null values
     },
+    otp: {
+        type: String,
+    },
+    otpExpires: {
+        type: Date,
+    }
   },
   {
     timestamps: true,
