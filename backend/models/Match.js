@@ -32,50 +32,40 @@ const BatsmanSchema = new mongoose.Schema({
   },
   outType: {
     type: String,
-    // Consider adding 'Retired Hurt' if different from 'Retired'
-    enum: ["Bowled", "Caught", "LBW", "Run Out", "Stumped", "Retired", "Hit Wicket", "Retired Out", "Other"],
-    default: null
+    enum: ["Bowled", "Caught", "LBW", "Run Out", "Stumped", "Retired", "Hit Wicket", "Retired Out", "Not Out", "Did Not Bat"],
+    default: "Not Out"
   },
-  strikeRate: { // This will likely be calculated on the frontend for display
+  strikeRate: {
     type: Number,
     default: 0,
   }
 }, { _id: false });
 
-// Flexible BowlerSchema: Can store detailed spells OR aggregated summary stats
 const BowlerSchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, "Bowler name is required"],
     trim: true
   },
-  // Fields for aggregated summary stats (typically used when innings/match ends)
-  overs: String,  // e.g., "10.2" (for display)
-  // 'runs', 'wickets', 'maidens' fields are duplicated here for summary
-  // if you choose to store only summary for completed innings.
-  // If storing detailed spells, these can be derived.
-  // For simplicity with current controller, adding them here for summary.
-  runs: Number,      // Total runs conceded by this bowler in the innings
-  wickets: Number,   // Total wickets taken by this bowler in the innings
-  maidens: Number,   // Total maiden overs by this bowler in the innings
-  economyRate: Number, // Can be calculated or stored
-
-  // Fields for detailed spell-by-spell tracking (optional, for live scoring depth)
+  overs: String,
+  runs: Number,
+  wickets: Number,
+  maidens: Number,
+  economyRate: Number,
   spells: [{
     balls: { type: Number, default: 0, min: 0 },
     runs: { type: Number, default: 0, min: 0 },
     wickets: { type: Number, default: 0, min: 0 },
     maidens: { type: Number, default: 0, min: 0 },
-    overs: String // Overs for this specific spell, e.g., "2.0"
+    overs: String
   }],
-  currentSpell: { // Optional: for tracking current ongoing spell during live scoring
+  currentSpell: {
     balls: { type: Number, default: 0, min: 0 },
     runs: { type: Number, default: 0, min: 0 },
     wickets: { type: Number, default: 0, min: 0 },
     maidens: { type: Number, default: 0, min: 0 }
   }
 }, { _id: false });
-
 
 const ExtrasSchema = new mongoose.Schema({
   total: {
@@ -106,69 +96,96 @@ const ExtrasSchema = new mongoose.Schema({
 }, { _id: false });
 
 const FallOfWicketSchema = new mongoose.Schema({
-  batsman: { // Name of the batsman who got out
+  batsman: {
     type: String,
     required: true
   },
-  score: { // Team score at the fall of this wicket
+  score: {
     type: Number,
     required: true,
     min: 0
   },
-  wicket: { // Wicket number, e.g., 1 for the first wicket, 2 for the second
+  wicket: {
     type: Number,
     required: true,
     min: 1
   },
-  over: { // Over number when the wicket fell, e.g., "10.3"
+  over: {
     type: String,
     required: true
-  },
-  // bowler: String // Optional: Name of the bowler who took the wicket (if applicable)
+  }
 }, { _id: false });
 
 const InningsSchema = new mongoose.Schema({
-  battingTeam: { // Name of the team batting
+  battingTeam: {
     type: String,
     required: true
   },
-  bowlingTeam: { // Name of the team bowling
+  bowlingTeam: {
     type: String,
     required: true
   },
-  runs: { // Total runs scored in this innings
+  runs: {
     type: Number,
     default: 0,
     min: 0
   },
-  wickets: { // Total wickets fallen in this innings
+  wickets: {
     type: Number,
     default: 0,
     min: 0
-    // max: playersPerTeam - 1 (cannot directly reference parent schema field here)
   },
-  overs: { // Overs bowled in this innings, e.g., "20.0" or "15.3"
+  overs: {
     type: String,
-    default: "0.0"
+    default: "0.0",
+    validate: {
+      validator: function(v) {
+        return /^\d+\.\d+$/.test(v);
+      },
+      message: props => `${props.value} is not a valid over format (e.g., "12.3")`
+    }
   },
   runRate: {
     type: Number,
     default: 0,
   },
-  batting: [BatsmanSchema], // Array of batsman performances
-  bowling: [BowlerSchema],  // Array of bowler performances
-  extras: ExtrasSchema,
-  fallOfWickets: [FallOfWicketSchema],
+  batting: {
+    type: [BatsmanSchema],
+    required: true,
+    validate: {
+      validator: function(v) {
+        return v.length > 0;
+      },
+      message: "At least one batsman is required"
+    }
+  },
+  bowling: {
+    type: [BowlerSchema],
+    required: true,
+    validate: {
+      validator: function(v) {
+        return v.length > 0;
+      },
+      message: "At least one bowler is required"
+    }
+  },
+  extras: {
+    type: ExtrasSchema,
+    required: true,
+    default: () => ({})
+  },
+  fallOfWickets: {
+    type: [FallOfWicketSchema],
+    default: []
+  },
   declared: {
     type: Boolean,
     default: false
   },
-  target: { // Only applicable for the chasing innings (usually innings2)
+  target: {
     type: Number,
     default: null
-  },
-  oversHistory: [mongoose.Schema.Types.Mixed], // Optional: For storing over-by-over ball details
-  ballByBallData: [mongoose.Schema.Types.Mixed] // Optional: For storing detailed ball-by-ball commentary/events
+  }
 }, { _id: false });
 
 const TeamSchema = new mongoose.Schema({
@@ -180,21 +197,23 @@ const TeamSchema = new mongoose.Schema({
   shortName: {
     type: String,
     trim: true
-  },
-  // Optional team details
-  // captain: String,
-  // wicketKeeper: String,
-  // players: [String] // List of player names for the team
+  }
 }, { _id: false });
 
 const MatchSchema = new mongoose.Schema({
   user: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: true,
-      ref: 'User', // This tells Mongoose the 'user' field refers to the 'User' model
-    },
-  teamA: TeamSchema,
-  teamB: TeamSchema,
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: 'User'
+  },
+  teamA: {
+    type: TeamSchema,
+    required: true
+  },
+  teamB: {
+    type: TeamSchema,
+    required: true
+  },
   date: {
     type: Date,
     required: true,
@@ -206,21 +225,14 @@ const MatchSchema = new mongoose.Schema({
   },
   matchType: {
     type: String,
-    enum: ["T20", "ODI", "Test", "Other"], // Add more types if needed
+    enum: ["T20", "ODI", "Test", "Other"],
     required: true
   },
-  series: { // Optional: Name of the tournament or series
-    type: String,
-    trim: true
-  },
   toss: {
-    winner: String, // Name of the team that won the toss
-    decision: String // "bat" or "bowl"
+    winner: String,
+    decision: String
   },
-  umpires: [String], // Optional: Array of umpire names
-  matchReferee: String, // Optional: Name of the match referee
-
-  totalOvers: { // Total overs intended for each innings (e.g., 20 for T20)
+  totalOvers: {
     type: Number,
     default: 20
   },
@@ -228,49 +240,70 @@ const MatchSchema = new mongoose.Schema({
     type: Number,
     default: 11
   },
-  ballsPerOver: { // Standard balls per over, usually 6
+  ballsPerOver: {
     type: Number,
     default: 6,
     min: 1,
-    max: 10 // Practical limit
+    max: 10
   },
-
-  result: { // Overall match result string, e.g., "Team A won by 20 runs"
+  result: {
     type: String,
     default: "Result TBD"
   },
   matchSummary: {
     playerOfMatch: String,
-    winner: String, // Name of the winning team or "Match Tied" / "No Result"
-    margin: String // e.g., "by 20 runs", "by 5 wickets"
+    winner: String,
+    margin: String,
+    netRunRates: mongoose.Schema.Types.Mixed
   },
-
-  innings1: InningsSchema,
-  innings2: InningsSchema, // innings2 might be null or empty if match ends after 1st innings
-
+  liveState: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  innings1: {
+    type: InningsSchema,
+    required: true
+  },
+  innings2: {
+    type: InningsSchema,
+    default: null
+  },
   status: {
     type: String,
     enum: ["scheduled", "in_progress", "completed", "abandoned", "innings_break"],
     default: "scheduled"
   }
 }, {
-  timestamps: true, // Adds createdAt and updatedAt timestamps
+  timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });
 
-// Virtual for a user-friendly match title
+// Virtuals
 MatchSchema.virtual("matchTitle").get(function() {
-  if (this.teamA && this.teamB) {
-    return `${this.teamA.name} vs ${this.teamB.name}`;
-  }
-  return "Match";
+  return `${this.teamA.name} vs ${this.teamB.name}`;
 });
 
-// Virtual to check if the match is a limited overs match
 MatchSchema.virtual("isLimitedOvers").get(function() {
   return ["T20", "ODI"].includes(this.matchType);
 });
 
+// Pre-save hook to ensure data consistency
+MatchSchema.pre('save', function(next) {
+  // Ensure outType is never empty
+  if (this.innings1?.batting) {
+    this.innings1.batting.forEach(batsman => {
+      if (!batsman.outType) batsman.outType = 'Not Out';
+    });
+  }
+  
+  if (this.innings2?.batting) {
+    this.innings2.batting.forEach(batsman => {
+      if (!batsman.outType) batsman.outType = 'Not Out';
+    });
+  }
+  
+  next();
+});
 
 module.exports = mongoose.model("Match", MatchSchema);

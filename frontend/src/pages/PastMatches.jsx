@@ -12,6 +12,12 @@ const PastMatches = ({ onResumeMatch }) => {
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
 
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [matchToDelete, setMatchToDelete] = useState(null);
+  
+  // NEW: State for the "Delete All" confirmation modal
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+
   useEffect(() => {
     if (user && user.token) {
       const fetchMatches = async () => {
@@ -20,13 +26,12 @@ const PastMatches = ({ onResumeMatch }) => {
           const userMatches = await matchService.getMyMatches(user.token);
           const sortedMatches = userMatches.sort((a, b) => {
             if (a.status === 'in_progress' && b.status !== 'in_progress') return -1;
-            if (b.status === 'in_progress' && a.status !== 'in_progress') return 1;
+            if (b.status !== 'in_progress' && a.status === 'in_progress') return 1;
             return new Date(b.updatedAt) - new Date(a.updatedAt);
           });
           setMatches(sortedMatches);
         } catch (err) {
           setError('Failed to fetch matches. Please try again later.');
-          console.error(err);
         } finally {
           setIsLoading(false);
         }
@@ -38,38 +43,50 @@ const PastMatches = ({ onResumeMatch }) => {
     }
   }, [user]);
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "Date not available";
-    return new Date(dateString).toLocaleDateString('en-GB', {
-      year: 'numeric', month: 'long', day: 'numeric',
-    });
+  const handleConfirmDelete = async () => {
+    if (!matchToDelete || !user?.token) return;
+    try {
+      await matchService.deleteMatch(matchToDelete._id, user.token);
+      setMatches(prevMatches => prevMatches.filter(m => m._id !== matchToDelete._id));
+      setShowConfirmModal(false);
+      setMatchToDelete(null);
+    } catch (err) {
+      setError('Failed to delete match. Please try again.');
+      setShowConfirmModal(false);
+    }
   };
 
-  const formatTime = (dateString) => {
-    if (!dateString) return "";
-    return new Date(dateString).toLocaleTimeString('en-GB', {
-      hour: '2-digit', minute: '2-digit'
-    });
+  const openDeleteConfirmation = (match) => {
+    setMatchToDelete(match);
+    setShowConfirmModal(true);
+  };
+  
+  // NEW: Function to handle deleting all matches
+  const handleDeleteAllMatches = async () => {
+    try {
+      // NOTE: This requires a new backend endpoint (see instructions below)
+      await matchService.deleteAllMatches(user.token);
+      setMatches([]); // Clear all matches from the UI
+      setShowDeleteAllConfirm(false);
+    } catch (err) {
+      setError('Failed to delete all matches. Please try again.');
+      setShowDeleteAllConfirm(false);
+    }
   };
 
-const renderMatchCard = (match, index) => {
+  const formatDate = (dateString) => new Date(dateString).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+  const formatTime = (dateString) => new Date(dateString).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+  const renderMatchCard = (match, index) => {
+    // FIX: More robust check for completed status
     const isCompleted = match.status === 'completed';
 
-    // --- THIS IS THE FIX ---
-    // This function now ONLY navigates to the URL. It does NOT send incomplete data.
-    // This forces FullScorecard.jsx to use its own logic to find the complete match data.
-    const viewFullScorecard = () => {
-      if (!match?._id) {
-        console.error("Cannot view scorecard, match ID is missing.");
-        return;
-      }
-      navigate(`/full-scorecard/${match._id}`);
-    };
+    const viewFullScorecard = () => navigate(`/full-scorecard/${match._id}`);
 
     return (
       <motion.div
         key={match._id}
-        className="match-card"
+        className={`match-card ${isCompleted ? 'completed' : 'in-progress'}`}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: index * 0.05 }}
@@ -77,130 +94,75 @@ const renderMatchCard = (match, index) => {
       >
         <div className="match-card-header">
           <div className="match-teams">
-            <span className="team-name">{match.teamA?.name || 'Team A'}</span>
+            <span>{match.teamA?.name || 'Team A'}</span>
             <span className="vs-text">vs</span>
-            <span className="team-name">{match.teamB?.name || 'Team B'}</span>
-          </div>
-          <div className="match-date-time">
-            <span className="match-date">{formatDate(match.createdAt)}</span>
-            <span className="match-time">{formatTime(match.createdAt)}</span>
+            <span>{match.teamB?.name || 'Team B'}</span>
           </div>
         </div>
-
         <div className="match-card-body">
           <div className="match-status">
-            <span className={`status-badge ${isCompleted ? 'completed' : 'in-progress'}`}>
-              {isCompleted ? 'Completed' : 'In Progress'}
-            </span>
-            <p className="match-result">{match.result || `Status: ${match.status}`}</p>
+            <span className={`status-badge ${isCompleted ? 'completed' : 'in-progress'}`}>{isCompleted ? 'Completed' : 'In Progress'}</span>
+            <p className="match-result">{match.result || `Updated ${formatDate(match.updatedAt)}`}</p>
           </div>
-
           <div className="match-actions">
             {isCompleted ? (
-              <motion.button 
-                onClick={viewFullScorecard}
-                className="action-button view-button"
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                View Scorecard
-              </motion.button>
+              <button onClick={viewFullScorecard} className="action-button view-button">View Scorecard</button>
             ) : (
-              <>
-                <motion.button 
-                  onClick={() => onResumeMatch(match)}
-                  className="action-button continue-button"
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  Continue Match
-                </motion.button>
-                <motion.button 
-                  onClick={viewFullScorecard}
-                  className="action-button view-button"
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  View Progress
-                </motion.button>
-              </>
+              <button onClick={() => onResumeMatch(match)} className="action-button continue-button">Continue Match</button>
             )}
+            <button onClick={() => openDeleteConfirmation(match)} className="action-button delete-button">Delete</button>
           </div>
         </div>
       </motion.div>
     );
   };
+  
+  // --- Modals ---
+  const renderConfirmModal = (title, message, onConfirm) => (
+    <div className="confirm-modal-overlay" onClick={() => { setShowConfirmModal(false); setShowDeleteAllConfirm(false); }}>
+      <div className="confirm-modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="confirm-modal-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9.4 3L14.6 3 21.9 15.5C22.7 17.1 21.5 19 19.7 19L4.3 19C2.5 19 1.3 17.1 2.1 15.5L9.4 3Z M12 14.25A.75.75 0 0 1 11.25 13.5L11.25 9.75A.75.75 0 0 1 12.75 9.75L12.75 13.5A.75.75 0 0 1 12 14.25ZM12 17a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z" />
+          </svg>
+        </div>
+        <h2 className="confirm-modal-title">{title}</h2>
+        <p className="confirm-modal-message">{message}</p>
+        <div className="confirm-modal-actions">
+          <button className="btn-modal btn-modal-secondary" onClick={() => { setShowConfirmModal(false); setShowDeleteAllConfirm(false); }}>Cancel</button>
+          <button className="btn-modal btn-modal-danger" onClick={onConfirm}>Delete</button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="past-matches-container">
-      <motion.div 
-        className="page-header"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-      >
-        <motion.button 
-          onClick={() => navigate('/dashboard')}
-          className="back-button"
-          whileHover={{ x: -3 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to Dashboard
-        </motion.button>
+      <div className="page-header">
+        <button onClick={() => navigate('/dashboard')} className="back-button">Back to Dashboard</button>
         <h1 className="page-title">Your Match History</h1>
-      </motion.div>
+        {/* NEW: Delete All Button */}
+        {matches.length > 0 && (
+          <button onClick={() => setShowDeleteAllConfirm(true)} className="delete-all-btn">Delete All</button>
+        )}
+      </div>
       
-      {isLoading && (
-        <motion.div 
-          className="loading-state"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-        >
-          <div className="loading-spinner"></div>
-          <p>Loading your matches...</p>
-        </motion.div>
+      {isLoading ? ( <div className="loading-state"><div className="loading-spinner"></div><p>Loading...</p></div> ) :
+       error ? ( <div className="error-state"><p>{error}</p></div> ) :
+       !matches.length ? (
+        <div className="empty-state">
+          <h3>No Matches Yet</h3>
+          <p>You haven't played any matches yet.</p>
+          <Link to="/match-setup" className="new-match-button">Start Your First Match</Link>
+        </div>
+       ) : (
+        <div className="matches-list">
+          {matches.map((match, index) => renderMatchCard(match, index))}
+        </div>
       )}
-
-      {error && (
-        <motion.div 
-          className="error-state"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-        >
-          <p>{error}</p>
-        </motion.div>
-      )}
-
-      {!isLoading && !error && (
-        matches.length > 0 ? (
-          <motion.div 
-            className="matches-list"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ staggerChildren: 0.1 }}
-          >
-            {matches.map((match, index) => renderMatchCard(match, index))}
-          </motion.div>
-        ) : (
-          <motion.div 
-            className="empty-state"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
-            <h3>No Matches Yet</h3>
-            <p>You haven't played any matches yet</p>
-            <Link to="/match-setup" className="new-match-button">
-              Start Your First Match
-            </Link>
-          </motion.div>
-        )
-      )}
+      
+      {showConfirmModal && renderConfirmModal("Delete Match?", "Are you sure? This action cannot be undone.", handleConfirmDelete)}
+      {showDeleteAllConfirm && renderConfirmModal("Delete All Matches?", "This will permanently delete your entire match history. Are you sure?", handleDeleteAllMatches)}
     </div>
   );
 };

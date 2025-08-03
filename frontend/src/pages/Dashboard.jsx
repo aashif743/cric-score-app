@@ -4,64 +4,106 @@ import { useContext } from 'react';
 import { AuthContext } from '../context/AuthContext.jsx';
 import { motion } from 'framer-motion';
 import styled from 'styled-components';
+import myLogo from '../assets/criczone.png';
 
-// Styled components for better organization
-const DashboardContainer = styled.div`
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
+const DashboardContainer = styled(motion.div)`
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
   min-height: 100vh;
+  box-sizing: border-box;
+
+  @media (max-width: 480px) {
+    padding: 0.75rem 0.5rem;
+    gap: 0.75rem;
+  }
+`;
+
+const LogoContainer = styled(motion.div)`
+  text-align: center;
+  margin-bottom: 1rem;
+
+  img {
+    width: 180px;
+    height: 180px;
+
+    @media (max-width: 480px) {
+      width: 180px;
+    }
+  }
 `;
 
 const WelcomeHeader = styled(motion.div)`
   text-align: center;
-  margin-bottom: 3rem;
+  margin-bottom: 1rem;
+
   h2 {
-    font-size: 2.5rem;
+    font-size: 1.75rem;
     color: #2d3748;
     margin-bottom: 0.5rem;
     font-weight: 700;
+
+    @media (max-width: 480px) {
+      font-size: 1.4rem;
+    }
   }
+
   p {
-    font-size: 1.2rem;
+    font-size: 1rem;
     color: #4a5568;
+
+    @media (max-width: 480px) {
+      font-size: 0.9rem;
+    }
   }
 `;
 
 const ActionGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-  margin-top: 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+  width: 100%;
 
-  @media (max-width: 768px) {
+  @media (max-width: 480px) {
     grid-template-columns: 1fr;
   }
 `;
 
 const ActionCard = styled(motion.div)`
   background: white;
-  border-radius: 16px;
-  padding: 2rem;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 8px 12px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 200px;
+  min-height: 180px;
   transition: all 0.3s ease;
   border: 1px solid #e2e8f0;
 
   h3 {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
     color: #2d3748;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
+
+    @media (max-width: 480px) {
+      font-size: 1.1rem;
+    }
   }
 
   p {
     color: #718096;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.2rem;
     text-align: center;
+    font-size: 0.95rem;
+
+    @media (max-width: 480px) {
+      font-size: 0.85rem;
+    }
   }
 
   &.disabled {
@@ -72,18 +114,18 @@ const ActionCard = styled(motion.div)`
 `;
 
 const ActionButton = styled(motion.button)`
-  padding: 12px 24px;
-  font-size: 1rem;
+  padding: 10px 20px;
+  font-size: 0.95rem;
   font-weight: 600;
   border-radius: 8px;
   border: none;
   cursor: pointer;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
   color: white;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   transition: all 0.3s ease;
   width: 100%;
-  max-width: 200px;
+  max-width: 180px;
 
   &:hover {
     transform: translateY(-2px);
@@ -104,7 +146,7 @@ const ComingSoonBadge = styled.span`
   color: #4a5568;
   padding: 4px 8px;
   border-radius: 12px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   margin-top: 1rem;
   font-weight: 500;
 `;
@@ -112,7 +154,6 @@ const ComingSoonBadge = styled.span`
 function Dashboard() {
   const { user } = useContext(AuthContext);
 
-  // Animation variants
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
@@ -138,6 +179,10 @@ function Dashboard() {
 
   return (
     <DashboardContainer>
+      <LogoContainer variants={itemVariants}>
+        <img src={myLogo} alt="CricZone Logo" />
+      </LogoContainer>
+
       <WelcomeHeader
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -151,13 +196,10 @@ function Dashboard() {
         variants={containerVariants}
         initial="hidden"
         animate="visible"
+        style={{ width: '100%' }}
       >
         <ActionGrid>
-          {/* Tournament Card */}
-          <ActionCard
-            variants={itemVariants}
-            className="disabled"
-          >
+          <ActionCard variants={itemVariants} className="disabled">
             <h3>Tournament</h3>
             <p>Organize or join competitive cricket tournaments</p>
             <ActionButton disabled whileHover={{ scale: 1.05 }}>
@@ -166,30 +208,20 @@ function Dashboard() {
             <ComingSoonBadge>Feature in development</ComingSoonBadge>
           </ActionCard>
 
-          {/* Quick Match Card */}
-          <ActionCard
-            variants={itemVariants}
-            whileHover={{ y: -5 }}
-          >
+          <ActionCard variants={itemVariants} whileHover={{ y: -5 }}>
             <h3>Quick Match</h3>
             <p>Start a friendly match with customizable rules</p>
-            <Link to="/match-setup" style={{ textDecoration: 'none', width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <Link
+              to="/match-setup"
+              style={{
+                textDecoration: 'none',
+                width: '100%',
+                display: 'flex',
+                justifyContent: 'center'
+              }}
+            >
               <ActionButton whileHover={{ scale: 1.05 }}>
                 Start Match
-              </ActionButton>
-            </Link>
-          </ActionCard>
-
-          {/* Past Matches Card */}
-          <ActionCard
-            variants={itemVariants}
-            whileHover={{ y: -5 }}
-          >
-            <h3>Past Matches</h3>
-            <p>Review your match history and statistics</p>
-            <Link to="/past-matches" style={{ textDecoration: 'none', width: '100%', display: 'flex', justifyContent: 'center' }}>
-              <ActionButton whileHover={{ scale: 1.05 }}>
-                View History
               </ActionButton>
             </Link>
           </ActionCard>

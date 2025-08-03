@@ -1,9 +1,26 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthContext } from '../context/AuthContext.jsx';
 import authService from '../utils/authService.js';
 import './AuthPage.css';
+import myLogo from '../assets/criczone.png'; // FIXED: Added the 'import' keyword
+import styled from 'styled-components';
+
+const LogoIcon = styled.div`
+  width: 200px;
+  height: 200px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  svg {
+    width: 18px;
+    height: 18px;
+    color: white;
+  }
+`;
 
 // Sample countries data - you might want to import this from a separate file
 const countries = [
@@ -31,6 +48,14 @@ const AuthPage = () => {
 
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
+
+  const formRef = useRef(null);
+
+  useEffect(() => {
+    if (otp.length === 6 && !isLoading) {
+      formRef.current?.requestSubmit();
+    }
+  }, [otp, isLoading]);
 
   const filteredCountries = countries.filter(country =>
     country.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -78,7 +103,7 @@ const AuthPage = () => {
       const userData = await authService.completeRegistration(phoneNumber, name);
       login(userData);
       navigate('/dashboard');
-    } catch (err) {
+    } catch (err) { // FIXED: Removed the incorrect '=>' from the catch block
       setError(err.response?.data?.message || 'Failed to register.');
     } finally {
       setIsLoading(false);
@@ -96,7 +121,7 @@ const AuthPage = () => {
     switch (step) {
       case 'otp':
         return (
-          <motion.form key="otp" onSubmit={handleVerifyOtp} {...formAnimation}>
+          <motion.form ref={formRef} key="otp" onSubmit={handleVerifyOtp} {...formAnimation}>
             <h2 className="auth-title">Enter Verification Code</h2>
             <p className="auth-subtitle">We've sent a 6-digit code to <strong>{phoneNumber}</strong></p>
             <input
@@ -248,9 +273,10 @@ const AuthPage = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.1 }}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M18 10a6 6 0 0 0-12 0v5h12v-5zm2 5.5v.5a2 2 0 0 1-2 2h-1v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-1H6a2 2 0 0 1-2-2v-5a8 8 0 1 1 16 0v5z" />
-          </svg>
+          <LogoIcon>
+                      {/* 2. Replace the SVG with an img tag */}
+                      <img src={myLogo} alt="CricZone Logo" style={{ height: '100%' }} />
+                  </LogoIcon>
           <span className="logo-text">CricZone</span>
         </motion.div>
         
@@ -283,10 +309,7 @@ const AuthPage = () => {
             onClick={() => navigate('/match-setup')} 
             className="guest-button"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
-            </svg>
-            Start a Quick Match
+            START A QUICK MATCH
           </button>
         </motion.div>
       </motion.div>

@@ -155,9 +155,48 @@
 }
 
 .match-result {
-  margin: 0;
-  font-size: 0.95rem;
-  color: #4a5568;
+  margin: 0.5rem 0;
+  font-size: 1rem;
+  color: #2d3748;
+  background-color: #f7fafc;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  border-left: 3px solid #4299e1;
+  font-weight: 500;
+}
+
+.match-result strong {
+  color: #2b6cb0;
+  font-weight: 700;
+}
+
+/* For completed matches only */
+.match-card.completed .match-result {
+  background-color: #ebf8ff;
+  border-left-color: #3182ce;
+}
+
+/* For in-progress matches */
+.match-card:not(.completed) .match-result {
+  color: #718096;
+}
+
+.match-card.completed .delete-button {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.match-card.completed .delete-button:hover {
+  background-color: #f5c6cb;
+}
+
+.match-card:not(.completed) .delete-button {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.match-card:not(.completed) .delete-button:hover {
+  background-color: #ffeeba;
 }
 
 .match-actions {

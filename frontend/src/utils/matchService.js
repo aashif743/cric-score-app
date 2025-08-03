@@ -1,52 +1,54 @@
-import axios from 'axios';
-
-const API_URL = '/api/matches/';
-
-
-const createMatch = async (matchData, token) => {
-  const config = {
+import API from '../api'; // ✅ FIX: Import the custom axios instance
+//https://cric-score-app.onrender.com
+// Helper function to create the authorization config object
+const getAuthConfig = (token) => {
+  if (!token) {
+    throw new Error('Authentication token is missing.');
+  }
+  return {
     headers: {
-      // This Authorization header is what the 'protect' middleware looks for
       Authorization: `Bearer ${token}`,
     },
   };
-
-  // Send the POST request with the match data and the authenticated config
-  const response = await axios.post(API_URL, matchData, config);
-
-  // The backend controller returns { success: true, data: savedMatch }
-  if (response.data && response.data.success) {
-    return response.data.data;
-  }
 };
 
+// Create a new match
+const createMatch = async (matchData, token) => {
+  const config = getAuthConfig(token);
+  // ✅ FIX: Use the API instance and a relative path
+  const response = await API.post('/matches', matchData, config);
+  return response.data.data;
+};
 
 // Get user's matches
-// The token is required for the protected route
 const getMyMatches = async (token) => {
-  const config = {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
-
-  const response = await axios.get(API_URL, config);
-
-  // The controller returns { success: true, data: matches }
-  // We'll just return the data part.
-  if (response.data && response.data.success) {
-    return response.data.data;
-  }
-  
-  return []; // Return empty array on failure
+  const config = getAuthConfig(token);
+  // ✅ FIX: Use the API instance and a relative path
+  const response = await API.get('/matches', config);
+  return response.data.data;
 };
 
-// You can add other match-related API calls here in the future
-// e.g., createMatch, getMatchById, etc.
+// Delete a match by its ID
+const deleteMatch = async (matchId, token) => {
+  const config = getAuthConfig(token);
+  // ✅ FIX: Use the API instance and a relative path
+  const response = await API.delete(`/matches/${matchId}`, config);
+  return response.data;
+};
+
+// Delete all matches for the logged-in user
+const deleteAllMatches = async (token) => {
+  const config = getAuthConfig(token);
+  // ✅ FIX: This will now work because API is imported
+  const response = await API.delete('/matches/all', config);
+  return response.data;
+};
 
 const matchService = {
   createMatch,
   getMyMatches,
+  deleteMatch,
+  deleteAllMatches,
 };
 
 export default matchService;
