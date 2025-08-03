@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useContext, useMemo } from 'react';
 import { FiSettings, FiArrowLeft, FiRefreshCw } from 'react-icons/fi';
 import { motion, AnimatePresence } from "framer-motion";
 import './ScorecardPage.css';
@@ -9,39 +9,59 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthContext } from '../context/AuthContext.jsx';
 
-const socket = io("https://cric-score-app.onrender.com"); 
-
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 
 const createInitialState = (matchSettings) => {
     // 1. Normalize all incoming data to ensure consistency
     const teamAName = matchSettings?.teamA?.name || matchSettings?.teamA || 'Team A';
     const teamBName = matchSettings?.teamB?.name || matchSettings?.teamB || 'Team B';
-    // This is the crucial fix for the overs issue
     const totalOvers = matchSettings?.totalOvers || matchSettings?.overs || 6;
     const playersPerTeam = matchSettings?.playersPerTeam || 11;
     const ballsPerOver = matchSettings?.ballsPerOver || 6;
 
-    // 2. Define a consistent way to create a team's player list
+    // 2. LAZY INITIALIZATION: Create lean player lists with only essential data.
+    // Other properties like runs, balls, spells, etc., will be added dynamically when needed.
+    // This dramatically reduces the initial state size.
     const createTeam = (name, pPerTeam) => ({
-        name,
-        batsmen: Array.from({ length: pPerTeam }, (_, i) => ({ id: uuidv4(), name: `Batsman ${i + 1}`, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: '', status: 'Did Not Bat' })),
-        bowlers: Array.from({ length: pPerTeam }, (_, i) => ({ id: uuidv4(), name: `Bowler ${i + 1}`, currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 }, previousSpells: [] }))
-    });
+    name,
+    batsmen: Array.from({ length: pPerTeam }, (_, i) => ({ 
+        id: uuidv4(), 
+        name: `Player ${i + 1}`,
+        // ✅ FIX: Initialize all required stats for batsmen
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        isOut: false,
+        status: 'Did Not Bat'
+    })),
+    bowlers: Array.from({ length: pPerTeam }, (_, i) => ({ 
+        id: uuidv4(), 
+        name: `Player ${i + 1}`,
+        // ✅ FIX: Initialize all required stats for bowlers
+        currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 },
+        previousSpells: []
+    }))
+});
 
-    // 3. Create the initial team structures using the normalized data
-    const initialTeamsState = {
+    const initialTeams = {
         teamA: createTeam(teamAName, playersPerTeam),
         teamB: createTeam(teamBName, playersPerTeam)
     };
+    
+    // Ensure the very first active players have their full stats objects to prevent crashes.
+    const initialStriker = initialTeams.teamA.batsmen[0] || { id: uuidv4(), name: 'Player 1'};
+    const initialNonStriker = initialTeams.teamA.batsmen[1] || { id: uuidv4(), name: 'Player 2'};
+    const initialBowler = initialTeams.teamB.bowlers[0] || { id: uuidv4(), name: 'Player 1'};
 
-    // 4. Return all initial state objects in one go. Everything is now guaranteed to be correct.
+    // 3. Return all initial state objects.
     return {
         settings: {
             noBallRuns: 1,
             wideBallRuns: 1,
             ...matchSettings,
-            overs: totalOvers, // Use the normalized value
+            overs: totalOvers,
             playersPerTeam,
             ballsPerOver
         },
@@ -49,15 +69,15 @@ const createInitialState = (matchSettings) => {
             _id: matchSettings?._id || null,
             runs: 0, wickets: 0, balls: 0, innings: 1, target: 0, isChasing: false, isComplete: false, result: '', fallOfWickets: [],
             extras: { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
-            battingTeam: teamAName, // Always a string
-            bowlingTeam: teamBName, // Always a string
+            battingTeam: teamAName,
+            bowlingTeam: teamBName,
             firstInningsSummary: null
         },
-        teams: initialTeamsState,
+        teams: initialTeams,
         players: {
-            striker: initialTeamsState.teamA.batsmen[0],
-            nonStriker: initialTeamsState.teamA.batsmen[1],
-            bowler: initialTeamsState.teamB.bowlers[0],
+            striker: { ...initialStriker, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, status: 'Not Out' },
+            nonStriker: { ...initialNonStriker, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, status: 'Not Out' },
+            bowler: { ...initialBowler, currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 }, previousSpells: [] },
             lastBowler: null
         }
     };
@@ -230,15 +250,14 @@ const calculateNetRunRates = (innings1, innings2, settings) => {
 const ScorecardPage = ({ matchSettings, onMatchEnd, onExitMatch, onShowFullScorecard }) => {
   
   const navigate = useNavigate();
-
   const { user } = useContext(AuthContext);
-
   const [initialState] = useState(() => createInitialState(matchSettings));
   
   const [settings, setSettings] = useState(initialState.settings);
   const [match, setMatch] = useState(initialState.match);
   const [teams, setTeams] = useState(initialState.teams);
   const [players, setPlayers] = useState(initialState.players);
+
 
   // UI state
   const [selectedAction, setSelectedAction] = useState(null);
@@ -256,135 +275,120 @@ const ScorecardPage = ({ matchSettings, onMatchEnd, onExitMatch, onShowFullScore
   const [allOversHistory, setAllOversHistory] = useState([]);
   const [showPrevOversModal, setShowPrevOversModal] = useState(false);
 
-  const lastCompletedOver = useRef(0);
+  const stateRef = useRef(); // Create the ref
+  stateRef.current = { match, teams, players, settings, allOversHistory, overHistory };
+  const debounceTimeout = useRef(null);
   const lastCompletedOverBallCount = useRef(0);
+  const lastSavedState = useRef(null);
   
 
   // Calculate derived values
-  const runs = match?.runs ?? 0;
-  const wickets = match?.wickets ?? 0;
-  const balls = match?.balls ?? 0;
+  const { runs, balls } = match; // Destructure runs and balls from the match state
 
-  const overs = `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`;
+  const overs = `${Math.floor(balls / settings.ballsPerOver)}.${balls % settings.ballsPerOver}`;
   const crr = balls > 0 ? (runs / (balls / settings.ballsPerOver)).toFixed(2) : "0.00";
-  const remainingBalls = (settings.overs * settings.ballsPerOver) - match.balls;
-  const remainingRuns = match.target - match.runs;
+  const remainingBalls = (settings.overs * settings.ballsPerOver) - balls;
+  const remainingRuns = match.target - runs;
   const requiredRunRate = remainingBalls > 0 ? (remainingRuns / (remainingBalls / settings.ballsPerOver)).toFixed(2) : '0.00';
 
-  useEffect(() => {
-        const currentMatchId = matchSettings?._id;
-        if (!currentMatchId) {
-            setIsLoading(false);
-            return;
+
+  const saveState = useCallback(() => {
+    setHistory(prev => [...prev.slice(-9), {
+      match: JSON.parse(JSON.stringify(match)),
+      players: JSON.parse(JSON.stringify(players)),
+      overHistory: [...overHistory],
+      lastCompletedOverBallCount: lastCompletedOverBallCount.current,
+    }]);
+  }, [match, players, overHistory]);
+
+
+
+
+
+
+
+// In ScoreCard.jsx, add this new helper function
+
+// This function reconstructs the full team stats by replaying the match history.
+const rehydrateTeamsFromHistory = (settings, allOversHistory) => {
+  // Start with a fresh, clean team structure
+  const freshState = createInitialState(settings);
+  const rehydratedTeams = JSON.parse(JSON.stringify(freshState.teams));
+
+  if (!allOversHistory || allOversHistory.length === 0) {
+    return rehydratedTeams; // Return fresh teams if there's no history to replay
+  }
+
+  // A helper to find a player in the teams object and initialize their stats if needed
+  const getPlayer = (teamName, playerName, playerType) => {
+    const teamKey = rehydratedTeams.teamA.name === teamName ? 'teamA' : 'teamB';
+    const playerList = playerType === 'batsman' ? rehydratedTeams[teamKey].batsmen : rehydratedTeams[teamKey].bowlers;
+    const player = playerList.find(p => p.name === playerName);
+    
+    if (player) {
+      // Initialize stats objects if they don't exist
+      if (playerType === 'batsman') {
+        if (player.runs === undefined) {
+          player.runs = 0; player.balls = 0; player.fours = 0; player.sixes = 0; player.isOut = false; player.status = 'Did Not Bat';
         }
-
-        const savedMatchRaw = localStorage.getItem(`matchState_${currentMatchId}`);
-        if (savedMatchRaw) {
-            try {
-                const parsedData = JSON.parse(savedMatchRaw);
-                console.log("✅ Restoring match from localStorage.");
-                setSettings(parsedData.settings);
-                setMatch(parsedData.match);
-                setTeams(parsedData.teams);
-                setPlayers(parsedData.players);
-                setHistory(parsedData.history || []);
-                setOverHistory(parsedData.overHistory || []);
-                setAllOversHistory(parsedData.allOversHistory || []);
-            } catch (e) {
-                console.error("Failed to parse saved match state", e);
-                localStorage.removeItem(`matchState_${currentMatchId}`);
-            }
+      } else { // Bowler
+        if (!player.currentSpell) {
+          player.currentSpell = { runs: 0, wickets: 0, balls: 0, maidens: 0 };
+          player.previousSpells = [];
         }
-        
-        setIsLoading(false); // Done loading
+      }
+    }
+    return player;
+  };
 
-        // Socket setup
-        socket.connect();
-        socket.emit("join-match", currentMatchId);
-        // ... your socket listeners
+  // Replay history in chronological order
+  const historyToReplay = [...allOversHistory].reverse();
 
-        return () => {
-            socket.emit("leave-match", currentMatchId);
-            socket.disconnect();
-        };
+  historyToReplay.forEach(over => {
+    // This is a simplified rehydration logic.
+    // It processes the totals from each over summary.
+    const bowler = getPlayer(over.bowlingTeamName, over.bowlerName, 'bowler');
+    if (bowler) {
+      bowler.currentSpell.runs += over.runs || 0;
+      bowler.currentSpell.wickets += over.wickets || 0;
+      bowler.currentSpell.balls += over.balls.length || 0; // Approximate balls from length
+      if (over.maiden) {
+        bowler.currentSpell.maidens += 1;
+      }
+      // Archive the spell at the end of each replayed over
+      bowler.previousSpells.push(bowler.currentSpell);
+      bowler.currentSpell = { runs: 0, wickets: 0, balls: 0, maidens: 0 };
+    }
+    // Note: Rebuilding batsman stats ball-by-ball is very complex.
+    // This simplified model focuses on getting bowler stats right, which are often heavier.
+  });
 
-    }, [matchSettings]); // This effect runs only once when the component mounts with new settings.
+  return rehydratedTeams;
+};
 
 
-    // EFFECT 2: Save state to localStorage (runs on changes)
-    useEffect(() => {
-        if (isLoading || !match?._id) return;
-        
-        const matchStateToSave = { settings, match, teams, players, overHistory, allOversHistory, history };
-        localStorage.setItem(`matchState_${match?._id}`, JSON.stringify(matchStateToSave));
+const stateHasChanged = useCallback(() => {
+  // Combine all relevant state into a single object
+  const currentState = {
+    settings,
+    match,
+    teams,
+    players,
+    overHistory,
+    allOversHistory
+  };
 
-    }, [settings, match, teams, players, overHistory, allOversHistory, history, isLoading]);
+  // Convert the current state to a string for comparison
+  const currentStateString = JSON.stringify(currentState);
 
+  // If the new string is different from the last saved one, the state has changed.
+  if (currentStateString !== lastSavedState.current) {
+    lastSavedState.current = currentStateString; // Update the ref with the new state
+    return true; // Return true to indicate a change
+  }
 
-    useEffect(() => {
-        if (match.isComplete || isLoading) return;
-
-        const ballsPerOver = settings.ballsPerOver;
-        const currentBallCount = match.balls;
-        const isOverComplete = currentBallCount > 0 && currentBallCount % ballsPerOver === 0;
-
-        // Check if a new over has just been completed
-        if (isOverComplete && currentBallCount !== lastCompletedOverBallCount.current) {
-            // Update the ref to prevent this from running again for the same ball count
-            lastCompletedOverBallCount.current = currentBallCount;
-            
-            console.log(`✅ Over ${currentBallCount / ballsPerOver} complete. Changing bowler.`);
-            
-            // 1. Save the current state for the undo stack
-            saveState();
-            
-            // 2. Archive the completed over's history
-            const overNumber = currentBallCount / ballsPerOver;
-            const completedOverData = {
-                overNumber,
-                bowlerName: players.bowler.name,
-                balls: [...overHistory],
-                innings: match.innings
-            };
-            setAllOversHistory(prev => [completedOverData, ...prev]);
-
-            // 3. Update the `teams` state to archive the old bowler's spell
-            const bowlerId = players.bowler.id;
-            const currentBowlingTeamKey = teams.teamA.name === match.bowlingTeam ? 'teamA' : 'teamB';
-            
-            setTeams(prevTeams => {
-                const updatedTeams = JSON.parse(JSON.stringify(prevTeams));
-                const bowlerToUpdate = updatedTeams[currentBowlingTeamKey]?.bowlers.find(b => b.id === bowlerId);
-                if (bowlerToUpdate) {
-                    bowlerToUpdate.previousSpells.push({ ...bowlerToUpdate.currentSpell });
-                    bowlerToUpdate.currentSpell = { runs: 0, wickets: 0, balls: 0, maidens: 0 };
-                }
-                return updatedTeams;
-            });
-
-            // 4. Update the `players` state to set the new bowler and swap batsmen
-            setPlayers(prevPlayers => {
-                const allBowlers = teams[currentBowlingTeamKey].bowlers;
-                const currentBowlerIndex = allBowlers.findIndex(b => b.id === prevPlayers.bowler.id);
-                
-                let nextBowler = prevPlayers.bowler;
-                if (currentBowlerIndex !== -1 && allBowlers.length > 1) {
-                    const nextBowlerIndex = (currentBowlerIndex + 1) % allBowlers.length;
-                    nextBowler = allBowlers[nextBowlerIndex];
-                }
-
-                return {
-                    striker: prevPlayers.nonStriker,
-                    nonStriker: prevPlayers.striker,
-                    bowler: nextBowler,
-                    lastBowler: prevPlayers.bowler.id
-                };
-            });
-
-            // 5. Reset the over history display for the new over
-            setOverHistory([]);
-        }
-    }, [match.balls, match.isComplete, isLoading]);
+  return false; // Return false if nothing has changed
+}, [settings, match, teams, players, overHistory, allOversHistory]);
 
 
 const sendMatchUpdate = useCallback(async () => {
@@ -402,13 +406,12 @@ const sendMatchUpdate = useCallback(async () => {
     }
 
     try {
-        // This is the fix: Create an authorization header with the user's token.
+        // Ensure the Authorization header is properly formatted
         const config = {
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${user.token}`
-            },
-            timeout: 7000
+            }
         };
 
         const currentBattingTeamKey = teams.teamA.name === match.battingTeam ? 'teamA' : 'teamB';
@@ -419,7 +422,6 @@ const sendMatchUpdate = useCallback(async () => {
             return;
         }
 
-        // The functions formatBatsmenForUpdate and formatBowlersForUpdate must be defined in your component
         const updatePayload = {
             status: match.isComplete ? "completed" : "in_progress",
             currentInningsNumber: match.innings,
@@ -437,11 +439,10 @@ const sendMatchUpdate = useCallback(async () => {
             },
         };
 
-        // Send the request with the payload AND the authorization config
         const response = await axios.put(
-            `/api/matches/${backendMatchId}`, // Use relative path for proxy
-            updatePayload,
-            config // Pass the config here
+          `${API_BASE}/api/matches/${backendMatchId}`,
+          updatePayload,
+          config
         );
 
         console.log("✅ Match updated successfully on server:", response.data.message);
@@ -457,41 +458,68 @@ const sendMatchUpdate = useCallback(async () => {
 }, [match, teams, settings, matchSettings, user]);
 
 
-const saveState = useCallback(() => {
-  setHistory(prev => [...prev, {
-    match: JSON.parse(JSON.stringify(match)),
-    players: JSON.parse(JSON.stringify(players)),
-    teams: JSON.parse(JSON.stringify(teams)),
-    overHistory: [...overHistory],
-    allOversHistory: [...allOversHistory],  // Ensure we save a copy of the overs history
-    lastCompletedOver: lastCompletedOver.current,  // Save the ref value
-    lastCompletedOverBallCount: lastCompletedOverBallCount.current  // Save the ref value
-  }].slice(-10));  // Keep only last 10 states
-}, [match, players, teams, overHistory, allOversHistory]);
 
   
   // Undo functionality
-  const handleUndo = () => {
+const handleUndo = () => {
   if (history.length === 0) return;
 
   const previousState = history[history.length - 1];
-  
-  // Restore all state from history
+
+  // Restore the primary, fast-moving states directly from history
   setMatch(previousState.match);
   setPlayers(previousState.players);
-  setTeams(previousState.teams);
   setOverHistory(previousState.overHistory);
-  setAllOversHistory(previousState.allOversHistory);
   
+  // Synchronize the main 'teams' state to match the reverted player stats
+  setTeams(currentTeams => {
+      const updatedTeams = JSON.parse(JSON.stringify(currentTeams)); // Deep copy for safe mutation
+      
+      // Get team details from the previous state for accuracy
+      const battingTeamName = previousState.match.battingTeam;
+      const bowlingTeamName = previousState.match.bowlingTeam;
+      const battingKey = updatedTeams.teamA.name === battingTeamName ? 'teamA' : 'teamB';
+      const bowlingKey = updatedTeams.teamA.name === bowlingTeamName ? 'teamA' : 'teamB';
+
+      // --- Helper to revert a batsman's stats in the main list ---
+      const revertBatsman = (batsmanToRevert) => {
+          if (!batsmanToRevert) return;
+          const batsmanInList = updatedTeams[battingKey]?.batsmen.find(b => b.id === batsmanToRevert.id);
+          if (batsmanInList) {
+              // **FIX**: Revert all relevant batting stats, including out status
+              batsmanInList.runs = batsmanToRevert.runs || 0;
+              batsmanInList.balls = batsmanToRevert.balls || 0;
+              batsmanInList.fours = batsmanToRevert.fours || 0;
+              batsmanInList.sixes = batsmanToRevert.sixes || 0;
+              batsmanInList.isOut = batsmanToRevert.isOut || false;
+              batsmanInList.outType = batsmanToRevert.outType || '';
+              batsmanInList.status = batsmanToRevert.status || 'Did Not Bat';
+          }
+      };
+      
+      // Revert stats for both the striker and non-striker from the previous state
+      revertBatsman(previousState.players.striker);
+      revertBatsman(previousState.players.nonStriker);
+      
+      // --- Revert the bowler's current spell ---
+      const bowlerToRevert = previousState.players.bowler;
+      const bowlerInList = updatedTeams[bowlingKey]?.bowlers.find(b => b.id === bowlerToRevert.id);
+      if (bowlerInList) {
+          // **FIX**: Ensure the entire current spell is reverted
+          bowlerInList.currentSpell = bowlerToRevert.currentSpell || { runs: 0, wickets: 0, balls: 0, maidens: 0 };
+      }
+      
+      return updatedTeams;
+  });
+
   // Restore the ref values for over tracking
-  lastCompletedOver.current = previousState.lastCompletedOver;
   lastCompletedOverBallCount.current = previousState.lastCompletedOverBallCount;
 
-  // Remove the state we just restored from history
-  setHistory(history.slice(0, -1));
+  // Remove the state we just restored from the history array
+  setHistory(prev => prev.slice(0, -1));
   
-  // Reset any selected action
-  setSelectedAction(null);
+  // Reset any selected action in the UI
+  setShowModal(null);
 };
 
 
@@ -557,25 +585,32 @@ const updateBowlerStats = (runs = 0, isWicket = false, countBall = true) => {
 
   // Handle runs scoring
 const handleRuns = (runsScored) => {
+  if (isLoading) {
+    console.warn("Cannot score - match is still loading");
+    return;
+  }
+
     saveState();
     const strikerId = players.striker.id;
     const currentBattingTeamKey = teams.teamA.name === match.battingTeam ? 'teamA' : 'teamB';
     const currentBowlingTeamKey = currentBattingTeamKey === 'teamA' ? 'teamB' : 'teamA';
 
-    // 1. Update overall match score
     setMatch(prev => ({
       ...prev,
       runs: prev.runs + runsScored,
       balls: prev.balls + 1,
     }));
 
-    // 2. Update stats in the main `teams` state for both bowler and batsman
     setTeams(prevTeams => {
-      const updatedTeams = JSON.parse(JSON.stringify(prevTeams)); // Deep clone for safe mutation
-
+      const updatedTeams = JSON.parse(JSON.stringify(prevTeams));
+      
       // Update bowler's spell
       const bowlerToUpdate = updatedTeams[currentBowlingTeamKey]?.bowlers.find(b => b.id === players.bowler.id);
       if (bowlerToUpdate) {
+        // **FIX**: Initialize the spell if it doesn't exist
+        if (!bowlerToUpdate.currentSpell) {
+            bowlerToUpdate.currentSpell = { runs: 0, wickets: 0, balls: 0, maidens: 0 };
+        }
         bowlerToUpdate.currentSpell.runs += runsScored;
         bowlerToUpdate.currentSpell.balls += 1;
       }
@@ -583,16 +618,16 @@ const handleRuns = (runsScored) => {
       // Update striker's score
       const batsmanToUpdate = updatedTeams[currentBattingTeamKey]?.batsmen.find(b => b.id === strikerId);
       if (batsmanToUpdate) {
-        batsmanToUpdate.runs += runsScored;
-        batsmanToUpdate.balls += 1;
-        if (runsScored === 4) batsmanToUpdate.fours += 1;
-        if (runsScored === 6) batsmanToUpdate.sixes += 1;
+        // **FIX**: Initialize stats with || 0 before adding to them
+        batsmanToUpdate.runs = (batsmanToUpdate.runs || 0) + runsScored;
+        batsmanToUpdate.balls = (batsmanToUpdate.balls || 0) + 1;
+        if (runsScored === 4) batsmanToUpdate.fours = (batsmanToUpdate.fours || 0) + 1;
+        if (runsScored === 6) batsmanToUpdate.sixes = (batsmanToUpdate.sixes || 0) + 1;
         batsmanToUpdate.status = 'Not Out';
       }
       return updatedTeams;
     });
 
-    // 3. Update the local `players` state for immediate UI feedback and strike rotation
     setPlayers(prev => {
       const updatedStriker = {
         ...prev.striker,
@@ -601,8 +636,7 @@ const handleRuns = (runsScored) => {
         fours: runsScored === 4 ? (prev.striker.fours || 0) + 1 : (prev.striker.fours || 0),
         sixes: runsScored === 6 ? (prev.striker.sixes || 0) + 1 : (prev.striker.sixes || 0),
       };
-
-      // Rotate strike on odd runs
+      
       const strikeRotated = runsScored % 2 !== 0;
       return {
         ...prev,
@@ -612,14 +646,17 @@ const handleRuns = (runsScored) => {
     });
 
     setOverHistory(prev => [...prev, runsScored.toString()]);
-    setSelectedAction(null);
     setShowModal(null);
-    // sendMatchUpdate(); // Consider batching updates or calling after a short delay
-  }; 
+};
 
 
     // Handle extras
   const handleExtras = (type, runsFromExtras = 0) => {
+    if (isLoading) {
+    console.warn("Cannot score - match is still loading");
+    return;
+  }
+
     saveState();
     const strikerId = players.striker.id;
     const currentBattingTeamKey = teams.teamA.name === match.battingTeam ? 'teamA' : 'teamB';
@@ -739,7 +776,11 @@ const onOverComplete = useCallback(() => {
     maiden: completedSpell.runs === 0 && completedSpell.balls === settings.ballsPerOver
   };
   
-  setAllOversHistory(prev => [completedOverData, ...prev]);
+  setAllOversHistory(prev => {
+    const newHistory = [completedOverData, ...prev].slice(0, 20);
+    localStorage.setItem(`oversHistory_${matchId}`, JSON.stringify(newHistory));
+    return newHistory;
+  });
 
   // Archive bowler's spell and reset it
   setTeams(prevTeams => {
@@ -777,9 +818,12 @@ const onOverComplete = useCallback(() => {
 
 
 
-// In ScoreCard.jsx, replace the entire function
-
 const handleWicket = useCallback((dismissalInfo) => {
+  if (isLoading) {
+    console.warn("Cannot score - match is still loading");
+    return;
+  }
+
     saveState();
 
     // --- 1. Get Dismissal Details, now including 'isWide' flag ---
@@ -896,341 +940,524 @@ const handleWicket = useCallback((dismissalInfo) => {
 
 }, [saveState, match, players, teams, settings, updateBowlerStats, sendMatchUpdate]);
 
-  const startSecondInnings = useCallback(() => {
-    console.log("🔄 Starting second innings setup...");
-    // ... (rest of your startSecondInnings logic, ensure it uses up-to-date state or props)
-    // For example, if it uses 'match.runs' for target, 'match' should be a dependency.
 
-    const firstInningsActualBattingTeamName = match.battingTeam || (matchSettings?.firstBatting || teams.teamA.name);
-    const firstInningsActualBowlingTeamName = match.bowlingTeam || (firstInningsActualBattingTeamName === teams.teamA.name ? teams.teamB.name : teams.teamA.name);
 
-    const firstInningsBattingTeamKey = teams.teamA.name === firstInningsActualBattingTeamName ? 'teamA' : 'teamB';
-    const firstInningsBowlingTeamKey = firstInningsBattingTeamKey === 'teamA' ? 'teamB' : 'teamA';
+const startSecondInnings = useCallback(() => {
+  console.log("🔄 Starting second innings setup...");
 
-    if (!teams[firstInningsBattingTeamKey] || !teams[firstInningsBowlingTeamKey]) {
-      console.error("❌ Critical error in startSecondInnings: Cannot determine team keys for first innings summary.");
-      return;
-    }
-    const formatBowlersForSummaryInContext = (bowlersList = [], ballsPerOverSettings) => {
-        return bowlersList.map(b => {
-          const allSpells = [...(b.previousSpells || [])];
-          if (b.currentSpell && (b.currentSpell.balls > 0 || b.currentSpell.runs > 0 || b.currentSpell.wickets > 0)) { // only include if active
-            allSpells.push(b.currentSpell);
-          }
-          let totalBalls = 0, totalRunsConceded = 0, totalWicketsTaken = 0, totalMaidens = 0;
-          allSpells.forEach(spell => {
-            totalBalls += spell.balls || 0;
-            totalRunsConceded += spell.runs || 0;
-            totalWicketsTaken += spell.wickets || 0;
-            totalMaidens += spell.maidens || 0;
-          });
-          return {
-            name: b.name,
-            overs: `${Math.floor(totalBalls / ballsPerOverSettings)}.${totalBalls % ballsPerOverSettings}`,
-            runs: totalRunsConceded,
-            wickets: totalWicketsTaken,
-            maidens: totalMaidens,
-            economyRate: totalBalls > 0 ? ((totalRunsConceded / totalBalls) * ballsPerOverSettings).toFixed(2) : "0.00",
-          };
-        });
+  // Step 1: Validate match state
+  if (!match || typeof match.runs !== "number" || typeof match.wickets !== "number") {
+    console.error("❌ Cannot start second innings: Incomplete match state.");
+    return;
+  }
+
+  if (!teams?.teamA?.batsmen || !teams?.teamB?.batsmen) {
+    console.error("❌ Cannot start second innings: Teams are not set up correctly.");
+    return;
+  }
+
+  // Step 2: Resolve team names from settings or match state
+  const firstInningsActualBattingTeamName = match.battingTeam || (matchSettings?.firstBatting || teams.teamA.name);
+  const firstInningsActualBowlingTeamName = match.bowlingTeam || (
+    firstInningsActualBattingTeamName === teams.teamA.name ? teams.teamB.name : teams.teamA.name
+  );
+
+  const firstInningsBattingTeamKey = teams.teamA.name === firstInningsActualBattingTeamName ? 'teamA' : 'teamB';
+  const firstInningsBowlingTeamKey = firstInningsBattingTeamKey === 'teamA' ? 'teamB' : 'teamA';
+
+  if (!teams[firstInningsBattingTeamKey] || !teams[firstInningsBowlingTeamKey]) {
+    console.error("❌ Critical error in startSecondInnings: Cannot determine team keys for first innings summary.");
+    return;
+  }
+
+  // Step 3: Build complete over history for innings 1
+  let completeHistoryForInnings1 = allOversHistory.filter(o => o.innings === 1);
+  if (overHistory.length > 0) {
+    completeHistoryForInnings1.unshift({
+      overNumber: Math.floor(match.balls / settings.ballsPerOver) + 1,
+      bowlerName: players.bowler.name,
+      balls: [...overHistory],
+      innings: 1
+    });
+  }
+
+  const formatBowlersForSummaryInContext = (bowlersList = [], ballsPerOverSettings) => {
+    return bowlersList.map(b => {
+      const allSpells = [...(b.previousSpells || [])];
+      if (b.currentSpell && (b.currentSpell.balls > 0 || b.currentSpell.runs > 0 || b.currentSpell.wickets > 0)) {
+        allSpells.push(b.currentSpell);
+      }
+
+      let totalBalls = 0, totalRunsConceded = 0, totalWicketsTaken = 0, totalMaidens = 0;
+      allSpells.forEach(spell => {
+        totalBalls += spell.balls || 0;
+        totalRunsConceded += spell.runs || 0;
+        totalWicketsTaken += spell.wickets || 0;
+        totalMaidens += spell.maidens || 0;
+      });
+
+      return {
+        name: b.name,
+        overs: `${Math.floor(totalBalls / ballsPerOverSettings)}.${totalBalls % ballsPerOverSettings}`,
+        runs: totalRunsConceded,
+        wickets: totalWicketsTaken,
+        maidens: totalMaidens,
+        economyRate: totalBalls > 0 ? ((totalRunsConceded / totalBalls) * ballsPerOverSettings).toFixed(2) : "0.00",
       };
-
-    const innings1OverHistory = allOversHistory.filter(o => o.innings === 1);
-
-    const innings1CompleteSummary = {
-      teamName: teams[firstInningsBattingTeamKey].name,
-      batting: formatBatsmenData(
-          teams[firstInningsBattingTeamKey].batsmen,
-          players.striker,
-          players.nonStriker
-      ),
-      bowling: formatBowlersForSummaryInContext(teams[firstInningsBowlingTeamKey].bowlers, settings.ballsPerOver),
-      runs: match.runs,
-      wickets: match.wickets,
-      overs: `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`,
-      extras: { ...(match.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 }) },
-      fallOfWickets: [...(match.fallOfWickets || [])],
-      runRate: match.balls > 0 ? (match.runs / (match.balls / settings.ballsPerOver)).toFixed(2) : "0.00",
-      overHistory: innings1OverHistory
-    };
-    console.log("✅ First Innings Summary Prepared:", innings1CompleteSummary);
-
-    const secondInningsBattingTeamName = firstInningsActualBowlingTeamName;
-    const secondInningsBowlingTeamName = firstInningsActualBattingTeamName;
-    const secondInningsBattingTeamKey = teams.teamA.name === secondInningsBattingTeamName ? 'teamA' : 'teamB';
-    const secondInningsBowlingTeamKey = teams.teamA.name === secondInningsBowlingTeamName ? 'teamA' : 'teamB';
-
-    setTeams(prevTeams => { // Reset player stats for 2nd innings
-        const newTeams = JSON.parse(JSON.stringify(prevTeams)); // Deep clone
-        if (newTeams[secondInningsBattingTeamKey]) {
-            newTeams[secondInningsBattingTeamKey].batsmen = newTeams[secondInningsBattingTeamKey].batsmen.map(b => ({
-                ...b, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: '', strikeRate: '0.00', status: 'Did Not Bat', atCrease: false
-            }));
-        }
-        if (newTeams[secondInningsBowlingTeamKey]) {
-            newTeams[secondInningsBowlingTeamKey].bowlers = newTeams[secondInningsBowlingTeamKey].bowlers.map(b => ({
-                ...b, previousSpells: [], currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 }
-            }));
-        }
-        return newTeams;
     });
+  };
 
+  // Step 4: Prepare innings 1 summary
+  const innings1CompleteSummary = {
+    teamName: teams[firstInningsBattingTeamKey].name,
+    battingTeam: teams[firstInningsBattingTeamKey].name,
+    bowlingTeam: teams[firstInningsBowlingTeamKey].name,
+    batting: formatBatsmenForSummary(
+      teams[firstInningsBattingTeamKey].batsmen,
+      players.striker,
+      players.nonStriker
+    ),
+    bowling: formatBowlersForSummaryInContext(
+      teams[firstInningsBowlingTeamKey].bowlers,
+      settings.ballsPerOver
+    ),
+    runs: match.runs,
+    wickets: match.wickets,
+    overs: `${Math.floor(match.balls / settings.ballsPerOver)}.${match.balls % settings.ballsPerOver}`,
+    extras: { ...(match.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 }) },
+    fallOfWickets: [...(match.fallOfWickets || [])],
+    runRate: match.balls > 0 ? (match.runs / (match.balls / settings.ballsPerOver)).toFixed(2) : "0.00",
+    overHistory: completeHistoryForInnings1
+  };
 
-    setMatch(prev => ({
-      ...prev,
-      _id: prev._id || matchId,
-      innings: 2,
-      isChasing: true,
-      target: prev.runs + 1,
-      firstInningsSummary: innings1CompleteSummary,
-      runs: 0, wickets: 0, balls: 0,
-      extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 },
-      fallOfWickets: [],
-      battingTeam: secondInningsBattingTeamName,
-      bowlingTeam: secondInningsBowlingTeamName,
-      isComplete: false, // Ensure match is not marked complete yet
-    }));
+  console.log("✅ First Innings Summary Prepared:", innings1CompleteSummary);
 
-    const newStrikerFromList = teams[secondInningsBattingTeamKey]?.batsmen[0];
-    const newNonStrikerFromList = teams[secondInningsBattingTeamKey]?.batsmen[1];
-    const newBowlerFromList = teams[secondInningsBowlingTeamKey]?.bowlers[0];
+  // Step 5: Setup second innings
+  const secondInningsBattingTeamName = firstInningsActualBowlingTeamName;
+  const secondInningsBowlingTeamName = firstInningsActualBattingTeamName;
+  const secondInningsBattingTeamKey = teams.teamA.name === secondInningsBattingTeamName ? 'teamA' : 'teamB';
+  const secondInningsBowlingTeamKey = teams.teamA.name === secondInningsBowlingTeamName ? 'teamA' : 'teamB';
 
-    setPlayers({
-      striker: newStrikerFromList ? { ...newStrikerFromList, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: '', status: 'Not Out' } : { id: uuidv4(), name: `${secondInningsBattingTeamName} Batsman 1`, runs: 0, balls: 0, isOut: false, outType: '', status: 'Not Out' },
-      nonStriker: newNonStrikerFromList ? { ...newNonStrikerFromList, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: '', status: 'Not Out' } : { id: uuidv4(), name: `${secondInningsBattingTeamName} Batsman 2`, runs: 0, balls: 0, isOut: false, outType: '', status: 'Not Out' },
-      bowler: newBowlerFromList ? { ...newBowlerFromList, currentSpell: {runs:0, wickets:0, balls:0, maidens:0}, previousSpells:[] } : { id: uuidv4(), name: `${secondInningsBowlingTeamName} Bowler 1`, currentSpell: {runs:0, wickets:0, balls:0, maidens:0}, previousSpells:[] },
-      nextBatsmanId: (newNonStrikerFromList?.id || 1) + 1, // This logic might need review based on how IDs are assigned
-      lastBowler: null
-    });
+  setTeams(prevTeams => {
+    const newTeams = JSON.parse(JSON.stringify(prevTeams));
+    if (newTeams[secondInningsBattingTeamKey]) {
+      newTeams[secondInningsBattingTeamKey].batsmen = newTeams[secondInningsBattingTeamKey].batsmen.map(b => ({
+        ...b,
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        isOut: false,
+        outType: '',
+        strikeRate: '0.00',
+        status: 'Did Not Bat',
+        atCrease: false,
+      }));
+    }
 
-    setOverHistory([]);
-    setSelectedAction(null);
-    console.log(`✅ Second innings ready. Batting: ${secondInningsBattingTeamName}, Bowling: ${secondInningsBowlingTeamName}. Target: ${match.runs + 1}`);
-    sendMatchUpdate();
+    if (newTeams[secondInningsBowlingTeamKey]) {
+      newTeams[secondInningsBowlingTeamKey].bowlers = newTeams[secondInningsBowlingTeamKey].bowlers.map(b => ({
+        ...b,
+        previousSpells: [],
+        currentSpell: {
+          runs: 0,
+          wickets: 0,
+          balls: 0,
+          maidens: 0
+        }
+      }));
+    }
 
-  }, [match, teams, players, settings, matchSettings, matchId, sendMatchUpdate]);
+    return newTeams;
+  });
+
+  // Step 6: Set match state for second innings
+  setMatch(prev => ({
+    ...prev,
+    _id: prev._id || matchId,
+    innings: 2,
+    isChasing: true,
+    target: prev.runs + 1,
+    firstInningsSummary: innings1CompleteSummary,
+    runs: 0,
+    wickets: 0,
+    balls: 0,
+    extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 },
+    fallOfWickets: [],
+    battingTeam: secondInningsBattingTeamName,
+    bowlingTeam: secondInningsBowlingTeamName,
+    isComplete: false,
+  }));
+
+  // Step 7: Reset player state
+  const newStriker = teams[secondInningsBattingTeamKey]?.batsmen[0];
+  const newNonStriker = teams[secondInningsBattingTeamKey]?.batsmen[1];
+  const newBowler = teams[secondInningsBowlingTeamKey]?.bowlers[0];
+
+  setPlayers({
+    striker: newStriker ? { ...newStriker, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: '', status: 'Not Out' } : {
+      id: uuidv4(),
+      name: `${secondInningsBattingTeamName} Batsman 1`,
+      runs: 0,
+      balls: 0,
+      isOut: false,
+      outType: '',
+      status: 'Not Out'
+    },
+    nonStriker: newNonStriker ? { ...newNonStriker, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: '', status: 'Not Out' } : {
+      id: uuidv4(),
+      name: `${secondInningsBattingTeamName} Batsman 2`,
+      runs: 0,
+      balls: 0,
+      isOut: false,
+      outType: '',
+      status: 'Not Out'
+    },
+    bowler: newBowler ? {
+      ...newBowler,
+      currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 },
+      previousSpells: []
+    } : {
+      id: uuidv4(),
+      name: `${secondInningsBowlingTeamName} Bowler 1`,
+      currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 },
+      previousSpells: []
+    },
+    nextBatsmanId: (newNonStriker?.id || 1) + 1,
+    lastBowler: null
+  });
+
+  // Step 8: Cleanup UI state
+  setOverHistory([]);
+  setSelectedAction(null);
+
+  console.log(`✅ Second innings ready. Batting: ${secondInningsBattingTeamName}, Bowling: ${secondInningsBowlingTeamName}. Target: ${match.runs + 1}`);
+  sendMatchUpdate();
+
+}, [match, teams, players, settings, matchSettings, matchId, sendMatchUpdate]);
+
 
 
   
 const endMatch = useCallback(async () => {
-    if (match.isComplete) {
-        console.warn("endMatch called but match is already complete.");
-        return;
-    }
+  console.log("[MATCH END] Starting match end process");
+  const { match: currentMatch, teams: currentTeams, settings: currentSettings } = stateRef.current;
 
-    const finalMatchId = matchSettings?._id || match?._id;
-    if (!finalMatchId) {
-        console.error("CRITICAL ERROR: Could not determine Match ID in endMatch.");
-        alert("A critical error occurred: Match ID is missing. Cannot end match.");
-        return;
-    }
-
-    // 1. Finalize Match State
-    const finalMatchState = { ...match, isComplete: true, status: "completed" };
-
-    const calculateFinalResult = (finalState) => {
-        if (!finalState.isChasing) return "Match Abandoned or Incomplete";
-        if (finalState.runs >= finalState.target) {
-            const wicketsRemaining = (settings.playersPerTeam - 1) - finalState.wickets;
-            return `${finalState.battingTeam} won by ${wicketsRemaining} wicket${wicketsRemaining !== 1 ? 's' : ''}`;
-        }
-        if (finalState.target > finalState.runs) {
-            const runMargin = finalState.target - finalState.runs - 1;
-            if (runMargin < 0) return `${finalState.battingTeam} won by ${Math.abs(runMargin)} wicket(s)`;
-            if (runMargin === 0) return 'Match tied';
-            return `${finalState.firstInningsSummary?.teamName || 'The opposition'} won by ${runMargin} run${runMargin !== 1 ? 's' : ''}`;
-        }
-        return 'Result not determined';
-    };
-
-    finalMatchState.result = calculateFinalResult(finalMatchState);
-    setMatch(finalMatchState);
-
-    // 2. Format Final Data
-    const formatFinalBatsmen = (batsmenList = []) => batsmenList.map(b => ({
-        id: b.id,
-        name: b.name,
-        status: b.isOut ? (b.outType || 'Out') : (b.balls > 0 || b.runs > 0 ? 'Not Out' : 'Did Not Bat'),
-        runs: b.runs || 0, 
-        balls: b.balls || 0, 
-        fours: b.fours || 0, 
-        sixes: b.sixes || 0,
-        strikeRate: b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(2) : "0.00",
-    }));
-
-    const formatFinalBowlers = (bowlersList = []) => bowlersList.map(b => {
-        const allSpells = [...(b.previousSpells || []), ...(b.currentSpell ? [b.currentSpell] : [])];
-        const totals = allSpells.reduce((acc, spell) => ({
-            balls: acc.balls + (spell.balls || 0), 
-            runs: acc.runs + (spell.runs || 0),
-            wickets: acc.wickets + (spell.wickets || 0), 
-            maidens: acc.maidens + (spell.maidens || 0)
-        }), { balls: 0, runs: 0, wickets: 0, maidens: 0 });
-        
-        return {
-            id: b.id,
-            name: b.name,
-            overs: `${Math.floor(totals.balls / settings.ballsPerOver)}.${totals.balls % settings.ballsPerOver}`,
-            runs: totals.runs, 
-            wickets: totals.wickets, 
-            maidens: totals.maidens,
-            economyRate: totals.balls > 0 ? ((totals.runs / totals.balls) * settings.ballsPerOver).toFixed(2) : "0.00"
-        };
-    });
-
-    // 3. Prepare Innings Data
-    const innings1OverHistory = allOversHistory.filter(o => o.innings === 1);
-    const innings2OverHistory = allOversHistory.filter(o => o.innings === 2);
-    const finalExtras = { ...(finalMatchState.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 }) };
-
-    // Helper function to format batsmen data consistently
-    const getFormattedBatsmen = (teamKey) => {
-        return formatBatsmenData(
-            teams[teamKey].batsmen,
-            players.striker,
-            players.nonStriker
-        );
-    };
-
-    let innings1Data;
-    if (finalMatchState.firstInningsSummary) {
-        innings1Data = { 
-            ...finalMatchState.firstInningsSummary, 
-            overHistory: innings1OverHistory 
-        };
-    } else {
-        const battingTeamKey = matchSettings.firstBatting === teams.teamA.name ? 'teamA' : 'teamB';
-        const bowlingTeamKey = battingTeamKey === 'teamA' ? 'teamB' : 'teamA';
-        
-        innings1Data = {
-            teamName: teams[battingTeamKey].name,
-            batting: getFormattedBatsmen(battingTeamKey),
-            bowling: formatFinalBowlers(teams[bowlingTeamKey].bowlers),
-            runs: finalMatchState.runs,
-            wickets: finalMatchState.wickets,
-            extras: finalExtras,
-            overs: `${Math.floor(finalMatchState.balls / settings.ballsPerOver)}.${finalMatchState.balls % settings.ballsPerOver}`,
-            overHistory: innings1OverHistory
-        };
-    }
-
-    let innings2Data = null;
-    if (finalMatchState.innings === 2) {
-        const battingTeamKey = teams.teamA.name === finalMatchState.battingTeam ? 'teamA' : 'teamB';
-        const bowlingTeamKey = battingTeamKey === 'teamA' ? 'teamB' : 'teamA';
-        
-        innings2Data = {
-            teamName: teams[battingTeamKey].name,
-            batting: getFormattedBatsmen(battingTeamKey),
-            bowling: formatFinalBowlers(teams[bowlingTeamKey].bowlers),
-            runs: finalMatchState.runs,
-            wickets: finalMatchState.wickets,
-            extras: finalExtras,
-            overs: `${Math.floor(finalMatchState.balls / settings.ballsPerOver)}.${finalMatchState.balls % settings.ballsPerOver}`,
-            target: finalMatchState.target,
-            overHistory: innings2OverHistory
-        };
-    }
-
-    // 4. Create Final Payloads
-  const finalMatchDataPayload = {
-  _id: finalMatchId,
-  teamA: { 
-    name: teams.teamA.name, 
-    shortName: teams.teamA.name.substring(0, 3).toUpperCase() 
-  },
-  teamB: { 
-    name: teams.teamB.name, 
-    shortName: teams.teamB.name.substring(0, 3).toUpperCase() 
-  },
-  date: new Date().toISOString(),
-  venue: settings.venue, 
-  toss: settings.toss, 
-  matchType: settings.matchType,
-  totalOvers: settings.overs, 
-  status: "completed", 
-  result: finalMatchState.result,
-  innings1: {
-    teamName: innings1Data.teamName,
-    batting: innings1Data.batting,
-    bowling: innings1Data.bowling,
-    runs: innings1Data.runs,
-    wickets: innings1Data.wickets,
-    overs: innings1Data.overs,
-    extras: innings1Data.extras,
-    fallOfWickets: innings1Data.fallOfWickets,
-    target: innings1Data.target,
-    overHistory: innings1Data.overHistory
-  },
-  innings2: innings2Data ? {
-    teamName: innings2Data.teamName,
-    batting: innings2Data.batting,
-    bowling: innings2Data.bowling,
-    runs: innings2Data.runs,
-    wickets: innings2Data.wickets,
-    overs: innings2Data.overs,
-    extras: innings2Data.extras,
-    fallOfWickets: innings2Data.fallOfWickets,
-    target: innings2Data.target,
-    overHistory: innings2Data.overHistory
-  } : null,
-  matchSummary: {
-    playerOfMatch: determinePlayerOfMatch(innings1Data, innings2Data),
-    netRunRates: calculateNetRunRates(innings1Data, innings2Data, settings)
+  if (currentMatch.isComplete) {
+    console.warn("endMatch called but match is already complete.");
+    return;
   }
-};
+  
+  const finalMatchId = matchSettings?._id || currentMatch?._id;
+  if (!finalMatchId) {
+    alert("A critical error occurred: Match ID is missing. Cannot end match.");
+    return;
+  }
 
-    const finalApiPayload = {
-        status: "completed", 
-        result: finalMatchState.result,
-        innings1: innings1Data, 
-        innings2: innings2Data,
+  // --- 1. Finalize Match State with Correct Result Logic ---
+  const calculateFinalResult = (finalState, settings) => {
+    if (finalState.innings < 2 || !finalState.target) return "Match Incomplete";
+    const { runs, wickets, battingTeam, bowlingTeam, target } = finalState;
+
+    // **FIX**: Corrected win/loss/tie logic
+    if (runs >= target) {
+      const wicketsRemaining = settings.playersPerTeam - 1 - wickets;
+      return `${battingTeam} won by ${wicketsRemaining} wicket${wicketsRemaining !== 1 ? 's' : ''}`;
+    } else if (runs === target - 1) {
+      return "Match Tied";
+    } else {
+      const runMargin = target - 1 - runs;
+      return `${bowlingTeam} won by ${runMargin} run${runMargin !== 1 ? 's' : ''}`;
+    }
+  };
+  const finalMatchState = { 
+    ...currentMatch, 
+    isComplete: true, 
+    status: "completed",
+    result: calculateFinalResult(currentMatch, currentSettings)
+  };
+
+  // --- 2. Safely Prepare Innings Data ---
+  const innings1Data = currentMatch.firstInningsSummary;
+  let innings2Data = null;
+
+  if (!innings1Data) {
+    alert("Critical Error: First innings summary is missing. Cannot end match.");
+    return;
+  }
+
+  if (currentMatch.innings === 2) {
+    const battingKey = currentTeams.teamA.name === currentMatch.battingTeam ? 'teamA' : 'teamB';
+    const bowlingKey = battingKey === 'teamA' ? 'teamB' : 'teamA';
+    innings2Data = {
+      battingTeam: currentMatch.battingTeam,
+      bowlingTeam: currentMatch.bowlingTeam,
+      runs: currentMatch.runs,
+      wickets: currentMatch.wickets,
+      overs: `${Math.floor(currentMatch.balls / currentSettings.ballsPerOver)}.${currentMatch.balls % currentSettings.ballsPerOver}`,
+      batting: formatBatsmenForSummary(currentTeams[battingKey].batsmen),
+      bowling: formatBowlersForSummary(currentTeams[bowlingKey].bowlers, currentSettings.ballsPerOver),
+      extras: currentMatch.extras,
+      fallOfWickets: currentMatch.fallOfWickets || [],
+      target: currentMatch.target,
+    };
+  }
+
+  // --- 3. Create Payloads with Correct Schema Structure ---
+  const finalMatchDataPayload = { // For frontend navigation
+    _id: finalMatchId,
+    teamA: { name: currentTeams.teamA.name },
+    teamB: { name: currentTeams.teamB.name },
+    date: new Date().toISOString(),
+    result: finalMatchState.result,
+    innings1: innings1Data,
+    innings2: innings2Data,
+    matchSummary: {
+      playerOfMatch: determinePlayerOfMatch(innings1Data, innings2Data),
+      netRunRates: calculateNetRunRates(innings1Data, innings2Data, currentSettings)
+    }
+  };
+  
+  // **FIX**: This payload now perfectly matches your backend schema
+  const finalApiPayload = {
+    status: "completed",
+    result: finalMatchState.result,
+    innings1: innings1Data,
+    innings2: innings2Data,
+    matchSummary: finalMatchDataPayload.matchSummary
+  };
+
+  // --- 4. Save to Server and Navigate ---
+  try {
+    if (!finalMatchId.startsWith('guest_') && user?.token) {
+      const config = { headers: { 'Authorization': `Bearer ${user.token}`, 'Content-Type': 'application/json' } };
+      await axios.put(`${API_BASE}/api/matches/${finalMatchId}/end`, finalApiPayload, config);
+      console.log("✅ Final match data saved to server successfully.");
+    }
+    
+    // **FIX**: Navigation now only happens AFTER a successful save.
+    if (typeof onMatchEnd === 'function') {
+      onMatchEnd(finalMatchDataPayload); 
+    }
+
+  } catch (error) {
+    console.error("❌ Failed to save final match data to server:", {
+        message: error.message,
+        response: error.response?.data
+    });
+    alert("An error occurred while saving the final match results.");
+  }
+}, [matchSettings, onMatchEnd, user]); // **FIX**: Added matchSettings to dependency array
+
+const socket = useMemo(() => io(import.meta.env.VITE_BACKEND_URL || "https://cric-score-app.onrender.com"), []);
+
+// EFFECT 1: Load match state from server on mount
+  useEffect(() => {
+    const loadMatch = async () => {
+        const currentMatchId = matchSettings?._id;
+        if (!currentMatchId || currentMatchId.startsWith('guest_')) {
+            setIsLoading(false);
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            const config = { headers: { 'Authorization': `Bearer ${user.token}` } };
+            const response = await axios.get(`${API_BASE}/api/matches/${currentMatchId}`, config);
+
+            if (response.data.success) {
+                const data = response.data.data;
+                console.log("✅ State successfully loaded from server.", data);
+
+                // **THE FIX IS HERE**:
+                // Check if the server returned a 'liveState' object for resuming.
+                if (data.settings && data.match && data.teams && data.players) {
+                    // This is a liveState object for an in-progress match. Load it directly.
+                    setSettings(data.settings);
+                    setMatch(data.match);
+                    setTeams(data.teams);
+                    setPlayers(data.players);
+                    setOverHistory(data.overHistory || []);
+                    setAllOversHistory(data.allOversHistory || []);
+                } else {
+                // ✅ FIX: This is a fresh match document from the DB.
+                // Initialize the entire component's state from this data.
+                const initialStateFromDb = createInitialState(data);
+                setSettings(initialStateFromDb.settings);
+                setMatch(initialStateFromDb.match);
+                setTeams(initialStateFromDb.teams);
+                setPlayers(initialStateFromDb.players);
+            }
+            }
+        } catch (error) {
+            console.error("❌ Failed to load match from server", error);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
-    // 5. Persist Data
-    try {
-        console.log("Caching full match data to localStorage...");
-        localStorage.setItem(`finalMatchData_${finalMatchId}`, JSON.stringify(finalMatchDataPayload));
+    const isResumption = !matchSettings?.teamA?.name;
 
-        if (!finalMatchId.startsWith('guest_') && user && user.token) {
-            console.log("Saving final match data to server...");
-            const config = { 
-                headers: { 
-                    'Authorization': `Bearer ${user.token}`,
-                    'Content-Type': 'application/json'
-                } 
-            };
-            
-            await axios.put(
-                `/api/matches/${finalMatchId}`, 
-                finalApiPayload, 
-                config
-            );
-            console.log("✅ Core match data saved to server successfully.");
-        }
-
-        if (onMatchEnd) {
-            onMatchEnd(finalMatchDataPayload);
-        }
-
-    } catch (error) {
-        console.error("❌ Failed to save final match data:", {
-            message: error.message,
-            response: error.response?.data
-        });
-        alert("Error: Could not save the final match results. Please check your connection.");
+    // Only call loadMatch() if it's a resumption scenario.
+    if (user?.token && isResumption) {
+        loadMatch();
+    } else {
+        // If it's a new match, just stop the loading spinner immediately.
+        setIsLoading(false);
     }
-}, [
-    match, 
-    teams, 
-    players, 
-    settings, 
-    matchSettings, 
-    onMatchEnd, 
-    user, 
-    allOversHistory, 
-    axios,
-]);
+
+    // Socket setup (this can remain as is)
+    const currentMatchId = matchSettings?._id;
+    if (currentMatchId) {
+        socket.connect();
+        socket.emit("join-match", currentMatchId);
+    }
+    return () => {
+        if (currentMatchId) {
+            socket.emit("leave-match", currentMatchId);
+            socket.disconnect();
+        }
+    };
+}, [matchSettings, user]);
+
+
+
+  // EFFECT 2: Debounced save to server on state change
+useEffect(() => {
+  if (isLoading || match.isComplete || !match?._id || match._id.startsWith('guest_')) {
+    return;
+  }
+
+  // Clear previous timer
+  if (debounceTimeout.current) {
+    clearTimeout(debounceTimeout.current);
+  }
+
+  // Only save if there are actual changes
+  if (stateHasChanged()) { // Implement this function to check for meaningful changes
+    debounceTimeout.current = setTimeout(() => {
+      const saveUpdate = async () => {
+        try {
+          const config = { headers: { 'Authorization': `Bearer ${user.token}` } };
+          await axios.put(`${API_BASE}/api/matches/${match._id}`, {
+            settings, match, teams, players, overHistory, allOversHistory
+          }, config);
+        } catch (error) {
+          console.error("Save error:", error);
+        }
+      };
+      saveUpdate();
+    }, 1000); // Reduced from 2000ms to 1000ms
+  }
+
+  return () => clearTimeout(debounceTimeout.current);
+}, [settings, match, teams, players, overHistory, allOversHistory, isLoading, user, stateHasChanged]);
+
+
+// EFFECT 3: Handle Over Completion
+  useEffect(() => {
+    if (match.isComplete || isLoading) return;
+
+    const ballsPerOver = settings.ballsPerOver;
+    const currentBallCount = match.balls;
+    const isOverComplete = currentBallCount > 0 && currentBallCount % ballsPerOver === 0;
+
+    if (isOverComplete && currentBallCount !== lastCompletedOverBallCount.current) {
+        lastCompletedOverBallCount.current = currentBallCount;
+        saveState();
+        
+        const overNumber = currentBallCount / ballsPerOver;
+        const completedOverData = { overNumber, bowlerName: players.bowler.name, balls: [...overHistory], innings: match.innings };
+        setAllOversHistory(prev => [completedOverData, ...prev]);
+
+        const bowlerId = players.bowler.id;
+        const currentBowlingTeamKey = teams.teamA.name === match.bowlingTeam ? 'teamA' : 'teamB';
+        
+        setTeams(prevTeams => {
+            const updatedTeams = JSON.parse(JSON.stringify(prevTeams));
+            const bowlerToUpdate = updatedTeams[currentBowlingTeamKey]?.bowlers.find(b => b.id === bowlerId);
+            if (bowlerToUpdate) {
+                bowlerToUpdate.previousSpells = [...(bowlerToUpdate.previousSpells || []), { ...bowlerToUpdate.currentSpell }];
+                bowlerToUpdate.currentSpell = { runs: 0, wickets: 0, balls: 0, maidens: 0 };
+            }
+            return updatedTeams;
+        });
+        
+        setPlayers(prevPlayers => {
+            const allBowlers = teams[currentBowlingTeamKey].bowlers;
+            const currentBowlerIndex = allBowlers.findIndex(b => b.id === prevPlayers.bowler.id);
+            let nextBowlerFromList = allBowlers[(currentBowlerIndex + 1) % allBowlers.length];
+
+            // **THE FIX IS HERE**: Ensure the next bowler object is complete
+            const completeNextBowler = {
+                ...(nextBowlerFromList || prevPlayers.bowler),
+                currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 },
+                previousSpells: nextBowlerFromList?.previousSpells || []
+            };
+
+            return {
+                striker: prevPlayers.nonStriker, nonStriker: prevPlayers.striker,
+                bowler: completeNextBowler, lastBowler: prevPlayers.bowler.id
+            };
+        });
+        setOverHistory([]);
+    }
+  }, [match.balls, match.isComplete, isLoading, settings.ballsPerOver, teams, players, saveState]); // Note: saveState is a dependency
+
+
+  // EFFECT 4: End Match
+  useEffect(() => {
+        if (isLoading || !match || !settings || match.isComplete) return;
+
+        const allOut = match.wickets >= (settings.playersPerTeam - 1);
+        // The core fix: `settings.overs` is now reliable
+        const oversDone = match.balls >= settings.overs * settings.ballsPerOver;
+        const targetReached = match.isChasing && match.runs >= match.target;
+
+        if (targetReached) {
+            endMatch();
+        } else if (allOut || oversDone) {
+            if (match.innings === 1) {
+                startSecondInnings();
+            } else {
+                endMatch();
+            }
+        }
+    }, [match, settings, endMatch, startSecondInnings, isLoading]);
+
+
+// EFFECT 5
+useEffect(() => {
+  return () => {
+    // Clean up old matches when component unmounts
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
+    
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('matchState_')) {
+        try {
+          const matchData = JSON.parse(localStorage.getItem(key));
+          
+          // Check if matchData has the expected structure and has a match object
+          if (matchData?.match) {
+            // Use match date if available, otherwise use current time (will be kept)
+            const matchDate = matchData.match.date 
+              ? new Date(matchData.match.date).getTime() 
+              : now;
+            
+            if (now - matchDate > oneDay) {
+              localStorage.removeItem(key);
+            }
+          }
+        } catch (e) {
+          console.error("Error cleaning up match data:", e);
+          localStorage.removeItem(key); // Remove corrupted data
+        }
+      }
+    });
+  };
+}, []);
+
 
 
 const calculateNetRunRates = (innings1, innings2, settings) => {
@@ -1540,39 +1767,39 @@ const handleRetire = (type, batter) => {
 
 
   // Handle bowler change
-// In ScoreCard.jsx, replace the existing handleBowlerChange function
+  const handleBowlerChange = (newBowlerId) => {
+    const currentBowlingTeamKey = teams.teamA.name === match.bowlingTeam ? 'teamA' : 'teamB';
+    const bowlerToChangeFromId = players.bowler.id;
 
-const handleBowlerChange = (newBowlerId) => {
-  const currentBowlingTeam = match.innings === 1 ? 'teamB' : 'teamA';
-  
-  // First archive the current bowler's spell
-  setTeams(prevTeams => {
-    const updatedTeams = { ...prevTeams };
-    const currentBowlerId = players.bowler.id;
-    
-    updatedTeams[currentBowlingTeam] = {
-      ...updatedTeams[currentBowlingTeam],
-      bowlers: updatedTeams[currentBowlingTeam].bowlers.map(bowler => {
-        if (bowler.id === currentBowlerId) {
-          return {
-            ...bowler,
-            previousSpells: [...bowler.previousSpells, bowler.currentSpell],
-            currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 }
-          };
+    // First, archive the current bowler's spell in the teams list
+    setTeams(prevTeams => {
+        const newTeams = JSON.parse(JSON.stringify(prevTeams));
+        const bowlerToUpdate = newTeams[currentBowlingTeamKey]?.bowlers.find(b => b.id === bowlerToChangeFromId);
+        if (bowlerToUpdate && bowlerToUpdate.currentSpell?.balls > 0) {
+            bowlerToUpdate.previousSpells.push({ ...bowlerToUpdate.currentSpell });
         }
-        return bowler;
-      })
-    };
-    return updatedTeams;
-  });
+        return newTeams;
+    });
 
-  // Then set the new bowler
-  const newBowler = teams[currentBowlingTeam].bowlers.find(b => b.id === newBowlerId);
-  setPlayers(prev => ({
-    ...prev,
-    bowler: newBowler,
-    lastBowler: prev.bowler.id
-  }));
+    // Find the lean new bowler object from the teams list
+    const newBowlerFromList = teams[currentBowlingTeamKey].bowlers.find(b => b.id === newBowlerId);
+    if (!newBowlerFromList) return;
+
+    // **THE FIX**: Create a complete bowler object with a fresh spell before setting it as active.
+    const completeNewBowler = {
+        ...newBowlerFromList,
+        currentSpell: { runs: 0, wickets: 0, balls: 0, maidens: 0 },
+        previousSpells: newBowlerFromList.previousSpells || []
+    };
+
+    // Set the new, complete bowler object as the active player
+    setPlayers(prev => ({
+        ...prev,
+        bowler: completeNewBowler,
+        lastBowler: prev.bowler.id
+    }));
+    
+    setShowModal(null);
 };
 
 
@@ -2029,49 +2256,35 @@ const savePlayerName = () => {
 
 
 const currentBowler = players.bowler; // Get the current bowler object
-let aggBowlerRuns = 0;
-let aggBowlerWickets = 0;
-let aggBowlerBalls = 0;
-let aggBowlerMaidens = 0; // For displaying total maiden overs bowled by this bowler
+  let aggBowlerRuns = 0;
+  let aggBowlerWickets = 0;
+  let aggBowlerBalls = 0;
+  let aggBowlerMaidens = 0; // For displaying total maiden overs bowled by this bowler
 
-if (currentBowler) {
-  // Add stats from the current spell (the over currently being bowled)
-  if (currentBowler.currentSpell) {
-    aggBowlerRuns += currentBowler.currentSpell.runs || 0;
-    aggBowlerWickets += currentBowler.currentSpell.wickets || 0;
-    aggBowlerBalls += currentBowler.currentSpell.balls || 0;
-    // Note: currentSpell.maidens is usually 0 while the over is in progress.
+  if (currentBowler) {
+    // Add stats from the current spell (the over currently being bowled)
+    if (currentBowler.currentSpell) {
+      aggBowlerRuns += currentBowler.currentSpell.runs || 0;
+      aggBowlerWickets += currentBowler.currentSpell.wickets || 0;
+      aggBowlerBalls += currentBowler.currentSpell.balls || 0;
+      // Note: currentSpell.maidens is usually 0 while the over is in progress.
+    }
+
+    // Add stats from all previously completed spells (overs)
+    if (currentBowler.previousSpells) {
+      currentBowler.previousSpells.forEach(spell => {
+        aggBowlerRuns += spell.runs || 0;
+        aggBowlerWickets += spell.wickets || 0;
+        aggBowlerBalls += spell.balls || 0;
+        aggBowlerMaidens += spell.maidens || 0; // Sum up maiden overs from previous spells
+      });
+    }
   }
 
-  // Add stats from all previously completed spells (overs)
-  if (currentBowler.previousSpells) {
-    currentBowler.previousSpells.forEach(spell => {
-      aggBowlerRuns += spell.runs || 0;
-      aggBowlerWickets += spell.wickets || 0;
-      aggBowlerBalls += spell.balls || 0;
-      aggBowlerMaidens += spell.maidens || 0; // Sum up maiden overs from previous spells
-    });
-  }
-}
+    
+    
+    
 
-useEffect(() => {
-        if (isLoading || !match || !settings || match.isComplete) return;
-
-        const allOut = match.wickets >= (settings.playersPerTeam - 1);
-        // The core fix: `settings.overs` is now reliable
-        const oversDone = match.balls >= settings.overs * settings.ballsPerOver;
-        const targetReached = match.isChasing && match.runs >= match.target;
-
-        if (targetReached) {
-            endMatch();
-        } else if (allOut || oversDone) {
-            if (match.innings === 1) {
-                startSecondInnings();
-            } else {
-                endMatch();
-            }
-        }
-    }, [match, settings, endMatch, startSecondInnings, isLoading]);
 
 
 
@@ -2275,13 +2488,13 @@ const renderRunOutDetails = () => (
         <div className="batter-selection">
             <button
                 onClick={() => setModalData(prev => ({ ...prev, batsmanOut: 'striker' }))}
-                className={modalData.batsmanOut === 'striker' ? 'selected' : ''}
+                className={`option-button ${modalData.batsmanOut === 'striker' ? 'selected' : ''}`}
             >
                 {players.striker.name} (Striker)
             </button>
             <button
                 onClick={() => setModalData(prev => ({ ...prev, batsmanOut: 'nonStriker' }))}
-                className={modalData.batsmanOut === 'nonStriker' ? 'selected' : ''}
+                className={`option-button ${modalData.batsmanOut === 'nonStriker' ? 'selected' : ''}`}
             >
                 {players.nonStriker.name} (Non-Striker)
             </button>
@@ -2305,9 +2518,11 @@ const renderRunOutDetails = () => (
 
 
 
+// In ScoreCard.jsx, replace your existing renderNoBallOptions function
+
 const renderNoBallOptions = () => (
     <div className="no-ball-options">
-      {/* Section 1: Select runs scored off the bat */}
+      {/* Section 1: Select runs scored off the bat (always visible) */}
       <h4>Runs Scored Off Bat</h4>
       <p className="modal-subtitle">(In addition to the No Ball penalty)</p>
       <div className="number-grid">
@@ -2317,38 +2532,64 @@ const renderNoBallOptions = () => (
             onClick={() => setModalData(prev => ({ ...prev, value: num }))}
             className={modalData.value === num ? 'selected' : ''}
           >
-            {/* This line is changed to format the button text */}
             {num === 0 ? 'NB' : `NB+${num}`}
           </button>
         ))}
       </div>
 
-      {/* Section 2: Directly select the batsman who was run out */}
+      {/* NEW: Updated section to toggle the Run Out flow */}
       <div className="direct-wicket-section">
-        <h4 className="wicket-title">Run Out (Optional)</h4>
-        <p className="modal-subtitle">If a batsman was run out, select them below.</p>
-        <div className="batter-selection">
-          <button
-            // FIX: If clicked again, it deselects the batsman.
-            onClick={() => setModalData(prev => ({ ...prev, batsmanOut: prev.batsmanOut === 'striker' ? null : 'striker' }))}
-            className={modalData.batsmanOut === 'striker' ? 'selected' : ''}
-          >
-            {players.striker.name} (Striker)
-          </button>
-          <button
-            // FIX: If clicked again, it deselects the batsman.
-            onClick={() => setModalData(prev => ({ ...prev, batsmanOut: prev.batsmanOut === 'nonStriker' ? null : 'nonStriker' }))}
-            className={modalData.batsmanOut === 'nonStriker' ? 'selected' : ''}
-          >
-            {players.nonStriker.name} (Non-Striker)
-          </button>
+        <h4 className="wicket-title">Wicket Event (Optional)</h4>
+        <div className="button-group">
+            <button
+                // This button now toggles the visibility of the run-out details
+                onClick={() => setModalData(prev => ({ 
+                    ...prev, 
+                    isRunOutFlow: !prev.isRunOutFlow, 
+                    batsmanOut: null // Clear batsman selection when toggling
+                }))}
+                className={`option-button ${modalData.isRunOutFlow ? 'selected' : ''}`}
+            >
+                Run Out
+            </button>
         </div>
       </div>
+
+      {/* This section now only appears if 'isRunOutFlow' is true */}
+      <AnimatePresence>
+        {modalData.isRunOutFlow && (
+            <motion.div
+                initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                animate={{ opacity: 1, height: 'auto', marginTop: '1rem' }}
+                exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                className="run-out-details-wrapper"
+            >
+                <h4>Which Batsman Was Out?</h4>
+                <div className="batter-selection">
+                  <button
+                    onClick={() => setModalData(prev => ({ ...prev, batsmanOut: 'striker' }))}
+                    className={`option-button ${modalData.batsmanOut === 'striker' ? 'selected' : ''}`}
+                  >
+                    {players.striker.name} (Striker)
+                  </button>
+                  <button
+                    onClick={() => setModalData(prev => ({ ...prev, batsmanOut: 'nonStriker' }))}
+                    className={`option-button ${modalData.batsmanOut === 'nonStriker' ? 'selected' : ''}`}
+                  >
+                    {players.nonStriker.name} (Non-Striker)
+                  </button>
+                </div>
+            </motion.div>
+        )}
+      </AnimatePresence>
     </div>
 );
 
+// In ScoreCard.jsx, replace the existing renderWideBallOptions function
+
 const renderWideBallOptions = () => (
     <div className="wide-ball-options">
+      {/* Section 1: Select runs from byes (always visible) */}
       <h4>Runs Scored (Byes)</h4>
       <p className="modal-subtitle">(In addition to the Wide penalty)</p>
       <div className="number-grid">
@@ -2358,30 +2599,56 @@ const renderWideBallOptions = () => (
             onClick={() => setModalData(prev => ({ ...prev, value: num }))}
             className={modalData.value === num ? 'selected' : ''}
           >
-            {/* Change is here: Use a conditional to format the button text */}
             {num === 0 ? 'WD' : `WD+${num}`}
           </button>
         ))}
       </div>
 
+      {/* NEW: Updated section to toggle the Run Out flow */}
       <div className="direct-wicket-section">
-        <h4 className="wicket-title">Run Out (Optional)</h4>
-        <p className="modal-subtitle">If a batsman was run out, select them below.</p>
-        <div className="batter-selection">
-          <button
-            onClick={() => setModalData(prev => ({ ...prev, batsmanOut: prev.batsmanOut === 'striker' ? null : 'striker' }))}
-            className={modalData.batsmanOut === 'striker' ? 'selected' : ''}
-          >
-            {players.striker.name} (Striker)
-          </button>
-          <button
-            onClick={() => setModalData(prev => ({ ...prev, batsmanOut: prev.batsmanOut === 'nonStriker' ? null : 'nonStriker' }))}
-            className={modalData.batsmanOut === 'nonStriker' ? 'selected' : ''}
-          >
-            {players.nonStriker.name} (Non-Striker)
-          </button>
+        <h4 className="wicket-title">Wicket Event (Optional)</h4>
+        <div className="button-group">
+            <button
+                // This button now toggles the visibility of the run-out details
+                onClick={() => setModalData(prev => ({ 
+                    ...prev, 
+                    isRunOutFlow: !prev.isRunOutFlow, 
+                    batsmanOut: null // Clear batsman selection when toggling
+                }))}
+                className={`option-button ${modalData.isRunOutFlow ? 'selected' : ''}`}
+            >
+                Run Out
+            </button>
         </div>
       </div>
+
+      {/* This section now only appears if 'isRunOutFlow' is true */}
+      <AnimatePresence>
+        {modalData.isRunOutFlow && (
+            <motion.div
+                initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                animate={{ opacity: 1, height: 'auto', marginTop: '1rem' }}
+                exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                className="run-out-details-wrapper"
+            >
+                <h4>Which Batsman Was Out?</h4>
+                <div className="batter-selection">
+                  <button
+                    onClick={() => setModalData(prev => ({ ...prev, batsmanOut: 'striker' }))}
+                    className={`option-button ${modalData.batsmanOut === 'striker' ? 'selected' : ''}`}
+                  >
+                    {players.striker.name} (Striker)
+                  </button>
+                  <button
+                    onClick={() => setModalData(prev => ({ ...prev, batsmanOut: 'nonStriker' }))}
+                    className={`option-button ${modalData.batsmanOut === 'nonStriker' ? 'selected' : ''}`}
+                  >
+                    {players.nonStriker.name} (Non-Striker)
+                  </button>
+                </div>
+            </motion.div>
+        )}
+      </AnimatePresence>
     </div>
 );
 
@@ -2757,8 +3024,8 @@ return (
                 <span className="live-dot"></span>
               </div>
               <div className="batsman-stats">
-                <span className="batsman-runs">{players.striker.runs}</span>
-                <span className="batsman-balls">({players.striker.balls})</span>
+                <span className="batsman-runs">{players?.striker?.runs || 0}</span>
+                <span className="batsman-balls">({players?.striker?.balls || 0})</span>
               </div>
               {players.striker.isOut && (
                 <span className="out-status">{players.striker.outType}</span>

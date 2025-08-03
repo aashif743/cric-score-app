@@ -16,21 +16,30 @@ const app = express();
 // ✅ Create HTTP server from the Express app
 const server = http.createServer(app);
 
-// ✅ Initialize socket.io using the correct server variable
+const allowedOrigins = [
+  "https://red-shrew-841581.hostingersite.com", // Your deployed frontend
+  "http://localhost:3000",                      // Your local React dev server
+  "http://localhost:5173"                       // Your local Vite dev server (if applicable)
+];
+
+// Correct CORS configuration for Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: "https://red-shrew-841581.hostingersite.com", // Your frontend domain
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
 
-// Middleware
+// Correct CORS configuration for Express API routes
 app.use(cors({
-  origin: "https://red-shrew-841581.hostingersite.com",
+  origin: allowedOrigins,
   credentials: true,
 }));
+
+
 app.use(express.json());
+
 
 // API Routes
 app.use("/api/matches", matchRoutes);

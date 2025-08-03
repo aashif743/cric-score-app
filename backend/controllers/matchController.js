@@ -1,11 +1,49 @@
 const Match = require("../models/Match");
 const mongoose = require("mongoose");
 
+// Helper function to process innings data
+const processInnings = (inningsData) => {
+  if (!inningsData) return null;
+  
+  return {
+    battingTeam: inningsData.battingTeam,
+    bowlingTeam: inningsData.bowlingTeam,
+    runs: inningsData.runs || 0,
+    wickets: inningsData.wickets || 0,
+    overs: inningsData.overs || "0.0",
+    runRate: parseFloat(inningsData.runRate) || 0,
+    batting: (inningsData.batting || []).map(b => ({
+      name: b.name,
+      runs: b.runs || 0,
+      balls: b.balls || 0,
+      fours: b.fours || 0,
+      sixes: b.sixes || 0,
+      isOut: b.isOut || false,
+      outType: b.outType || 'Not Out',
+      strikeRate: parseFloat(b.strikeRate) || 0
+    })),
+    bowling: (inningsData.bowling || []).map(b => ({
+      name: b.name,
+      overs: b.overs || "0.0",
+      runs: b.runs || 0,
+      wickets: b.wickets || 0,
+      maidens: b.maidens || 0,
+      economyRate: parseFloat(b.economyRate) || 0
+    })),
+    extras: inningsData.extras || {
+      total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0
+    },
+    fallOfWickets: inningsData.fallOfWickets || [],
+    target: inningsData.target || null
+  };
+};
+
+
 // Create a new match
 exports.createMatch = async (req, res) => {
   try {
     if (!req.user) {
-        return res.status(401).json({ success: false, error: "User not authenticated." });
+      return res.status(401).json({ success: false, error: "User not authenticated." });
     }
 
     const {
@@ -14,8 +52,8 @@ exports.createMatch = async (req, res) => {
       venue,
       matchType,
       toss,
-      firstBatting, // Will be used to determine innings1.battingTeam
-      overs, // Assuming this is total overs for the match
+      firstBatting,
+      overs,
       ballsPerOver,
       playersPerTeam,
     } = req.body;
@@ -30,26 +68,33 @@ exports.createMatch = async (req, res) => {
     // Determine initial batting and bowling teams
     const tossWinner = toss?.winner || teamA.name;
     const tossDecision = toss?.decision || "bat";
-    let innings1BattingTeamName = firstBatting || teamA.name; // Default if not provided
-    let innings1BowlingTeamName =
-      innings1BattingTeamName === teamA.name ? teamB.name : teamA.name;
+    let innings1BattingTeamName = firstBatting || teamA.name;
+    let innings1BowlingTeamName = innings1BattingTeamName === teamA.name ? teamB.name : teamA.name;
 
     if (tossWinner) {
       if (tossDecision === "bat") {
         innings1BattingTeamName = tossWinner;
       } else {
-        // If toss winner chose to bowl
         innings1BattingTeamName = tossWinner === teamA.name ? teamB.name : teamA.name;
       }
-      innings1BowlingTeamName =
-        innings1BattingTeamName === teamA.name ? teamB.name : teamA.name;
+      innings1BowlingTeamName = innings1BattingTeamName === teamA.name ? teamB.name : teamA.name;
     }
 
+    // Create default players
+    const createDefaultPlayers = (teamName, count) => {
+      return Array.from({ length: count || 11 }, (_, i) => ({
+        name: `${teamName} Player ${i + 1}`,
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        isOut: false,
+        outType: "Not Out"
+      }));
+    };
 
-    const matchDataForSchema = {
-
+    const matchData = {
       user: req.user.id,
-
       teamA: {
         name: teamA.name,
         shortName: teamA.shortName || teamA.name.substring(0, 3).toUpperCase(),
@@ -59,18 +104,19 @@ exports.createMatch = async (req, res) => {
         shortName: teamB.shortName || teamB.name.substring(0, 3).toUpperCase(),
       },
       venue: venue || "Unknown Venue",
-      matchType: matchType || "T20", // Make sure this is one of MatchSchema enums
+      matchType: matchType || "T20",
       toss: {
         winner: tossWinner,
         decision: tossDecision,
       },
-      totalOvers: overs || 20, // Assuming MatchSchema has 'totalOvers'
-      ballsPerOver: ballsPerOver || 6, // MatchSchema has this
-      playersPerTeam: playersPerTeam || 11, // Assuming MatchSchema has 'playersPerTeam'
+      totalOvers: overs || 20,
+      ballsPerOver: ballsPerOver || 6,
+      playersPerTeam: playersPerTeam || 11,
       status: "scheduled",
-      matchSummary: { // Default empty summary
+      matchSummary: {
         playerOfMatch: "",
         winner: "",
+        margin: ""
       },
       innings1: {
         battingTeam: innings1BattingTeamName,
@@ -81,37 +127,43 @@ exports.createMatch = async (req, res) => {
         runRate: 0,
         extras: { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
         fallOfWickets: [],
-        batting: [], // Will be populated during the match
-        bowling: [], // Will be populated during the match
+        batting: createDefaultPlayers(innings1BattingTeamName, playersPerTeam),
+        bowling: createDefaultPlayers(innings1BowlingTeamName, playersPerTeam),
         declared: false,
-      },
-      // innings2 will be initialized when innings1 ends
+      }
     };
 
-    const newMatch = new Match(matchDataForSchema);
+    const newMatch = new Match(matchData);
     const savedMatch = await newMatch.save();
 
     res.status(201).json({ success: true, data: savedMatch });
   } catch (error) {
-    console.error("Create match error:", error.message, error.stack);
+    console.error("Create match error:", {
+      message: error.message,
+      stack: error.stack,
+      validationErrors: error.errors
+    });
+    
     res.status(500).json({
       success: false,
       error: "Internal server error during match creation.",
-      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
 
 // Get all matches - (No changes, seems fine)
-exports.getMyMatches = async (req, res) => { 
+exports.getMyMatches = async (req, res) => {
   try {
-    // Note: The `protect` middleware gives us the logged-in user on req.user
     if (!req.user) {
-        return res.status(401).json({ success: false, error: "User not authenticated." });
+      return res.status(401).json({ success: false, error: "User not authenticated." });
     }
 
-    // Find all matches where the 'user' field matches the logged-in user's ID
-    const matches = await Match.find({ user: req.user.id }).sort({ createdAt: -1 });
+    // Find all matches for the user and select specific fields to send back.
+    // Crucially, we now include 'result'.
+    const matches = await Match.find({ user: req.user.id })
+      .select('teamA teamB status result createdAt updatedAt') // Select the fields you need for the list
+      .sort({ updatedAt: -1 }); // Sort by most recently updated
 
     res.json({
       success: true,
@@ -133,7 +185,7 @@ exports.getMatchById = async (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid match ID" });
     }
 
-    const match = await Match.findById(id);
+    const match = await Match.findById(id).lean();
 
     if (!match) {
       return res.status(404).json({ success: false, error: "Match not found" });
@@ -143,7 +195,16 @@ exports.getMatchById = async (req, res) => {
         return res.status(401).json({ success: false, error: "Not authorized to view this match" });
     }
 
-    res.json({ success: true, data: match });
+    // **KEY LOGIC**: If the match is in progress and has a saved liveState, return that.
+    // Otherwise, return the main match document for viewing a completed scorecard.
+    if (match.status === "in_progress" && match.liveState) {
+        console.log(`Resuming match ${id} from saved liveState.`);
+        res.json({ success: true, data: match.liveState });
+    } else {
+        console.log(`Loading completed match ${id} data.`);
+        res.json({ success: true, data: match });
+    }
+
   } catch (error) {
     console.error("Get match error:", error);
     res.status(500).json({ success: false, error: "Failed to fetch match" });
@@ -151,11 +212,12 @@ exports.getMatchById = async (req, res) => {
 };
 
 // Update match - Placeholder for robust live updates
-// For your immediate problem, endMatch is more critical.
 // A full live update here would need to carefully merge player stats into innings.batting/bowling arrays.
 exports.updateMatch = async (req, res) => {
   try {
     const { id } = req.params;
+    
+    // Basic validation
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: "Invalid match ID" });
     }
@@ -164,61 +226,56 @@ exports.updateMatch = async (req, res) => {
     if (!match) {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
-
     if (match.user.toString() !== req.user.id) {
-        return res.status(401).json({ success: false, error: "Not authorized to update this match" });
+      return res.status(403).json({ success: false, error: "Not authorized" });
     }
 
-    const { _id, createdAt, updatedAt, ...updateDataFromFrontend } = req.body;
+    // Process live state data
+    const processLiveState = (state) => {
+      if (!state) return null;
+      
+      return {
+        ...state,
+        // Ensure required fields exist in live state
+        match: {
+          ...state.match,
+          battingTeam: state.match?.battingTeam || match.innings1?.battingTeam,
+          bowlingTeam: state.match?.bowlingTeam || match.innings1?.bowlingTeam
+        },
+        players: {
+          ...state.players,
+          striker: {
+            ...state.players?.striker,
+            outType: state.players?.striker?.outType || 'Not Out'
+          },
+          nonStriker: {
+            ...state.players?.nonStriker,
+            outType: state.players?.nonStriker?.outType || 'Not Out'
+          }
+        }
+      };
+    };
 
-    const activeInningsKey = (match.innings1 && match.status === "in_progress" && (!match.innings2 || match.innings2.overs === "0.0")) ? "innings1" : "innings2";
+    match.liveState = processLiveState(req.body);
+    match.status = "in_progress";
+    
+    await match.save();
 
-    if (match.status !== "in_progress" && match.status !== "scheduled") { // 'scheduled' if first ball update
-        return res.status(400).json({ success: false, error: "Match is not in progress or scheduled to start." });
-    }
+    res.status(200).json({
+      success: true,
+      message: "Live state updated successfully"
+    });
 
-    if (activeInningsKey) {
-        if (updateDataFromFrontend.runs !== undefined) {
-            match[activeInningsKey].runs = updateDataFromFrontend.runs;
-        }
-        if (updateDataFromFrontend.wickets !== undefined) {
-            match[activeInningsKey].wickets = updateDataFromFrontend.wickets;
-        }
-        if (updateDataFromFrontend.overs !== undefined) { // 'overs' is the string like "10.2"
-            match[activeInningsKey].overs = updateDataFromFrontend.overs;
-        }
-         if (updateDataFromFrontend.runRate !== undefined) {
-            match[activeInningsKey].runRate = parseFloat(updateDataFromFrontend.runRate) || 0;
-        }
-        if (updateDataFromFrontend.extras) { // Assuming extras is an object
-            match[activeInningsKey].extras = { ...match[activeInningsKey].extras, ...updateDataFromFrontend.extras };
-        }
-        if (updateDataFromFrontend.fallOfWickets) { // Assuming FOW is an array
-            match[activeInningsKey].fallOfWickets = updateDataFromFrontend.fallOfWickets;
-        }
-        if (updateDataFromFrontend.batting) { // Sent from frontend
-            match[activeInningsKey].batting = updateDataFromFrontend.batting;
-        }
-        if (updateDataFromFrontend.bowling) { // Sent from frontend
-             match[activeInningsKey].bowling = updateDataFromFrontend.bowling;
-        }
-    }
-
-    if (updateDataFromFrontend.status) {
-        match.status = updateDataFromFrontend.status;
-    }
-     if (updateDataFromFrontend.target && activeInningsKey === 'innings2') { // Target is for 2nd innings
-        match.innings2.target = updateDataFromFrontend.target;
-    }
-
-    const updatedMatch = await match.save();
-
-    res.json({ success: true, data: updatedMatch, message: "Match updated successfully" });
   } catch (error) {
-    console.error("Update match error:", error.message, error.stack);
-    res.status(500).json({ success: false, error: "Failed to update match", message: error.message });
+    console.error("Update match error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server error during match update",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
+
 
 // Delete match (No changes, seems fine)
 exports.deleteMatch = async (req, res) => {
@@ -321,120 +378,130 @@ exports.endInnings = async (req, res) => {
 };
 
 
-// End match - This processes the comprehensive matchData from ScoreCard.jsx
+// End match
 exports.endMatch = async (req, res) => {
   try {
-    const { id } = req.params;
-    // ScoreCard.jsx sends the entire match data payload under the key 'matchData'
-    const fullMatchDataFromFrontend = req.body.matchData; 
+    console.log('End match request received:', {
+      params: req.params,
+      body: req.body,
+      user: req.user
+    });
 
-    if (!fullMatchDataFromFrontend) {
-      return res.status(400).json({ success: false, error: "Match data not provided in request body." });
+    const { id } = req.params;
+    const { innings1, innings2, result, matchSummary } = req.body;
+
+    // Validate required data
+    if (!innings1 || !result) {
+      console.error('Validation failed - missing innings1 or result');
+      return res.status(400).json({ 
+        success: false, 
+        error: "Innings1 data and result are required.",
+        received: { innings1: !!innings1, result: !!result }
+      });
     }
 
-    const match = await Match.findById(req.params.id);
-    if (match && match.user.toString() !== req.user.id) {
+    const match = await Match.findById(id);
+    if (!match) {
+      console.error(`Match not found with id: ${id}`);
+      return res.status(404).json({ success: false, error: "Match not found" });
+    }
+    if (match.user.toString() !== req.user.id) {
+      console.error(`User ${req.user.id} not authorized for match ${id}`);
       return res.status(401).json({ success: false, error: "Not authorized" });
     }
 
-    // Destructure data from the frontend payload
-    const {
-      innings1: feInnings1,
-      innings2: feInnings2,
-      matchSummary: feMatchSummary,
-      result: feResult,
-    } = fullMatchDataFromFrontend;
-
-    // --- Populate Innings 1 ---
-    if (feInnings1) {
-      match.innings1 = {
-        battingTeam: feInnings1.teamName || match.teamA.name, // Fallback, but should be in feInnings1
-        bowlingTeam: feInnings2?.teamName || (feInnings1.teamName === match.teamA.name ? match.teamB.name : match.teamA.name),
-        runs: feInnings1.runs || 0,
-        wickets: feInnings1.wickets || 0,
-        overs: feInnings1.overs || "0.0",
-        runRate: parseFloat(feInnings1.runRate) || 0,
-        extras: feInnings1.extras || { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
-        fallOfWickets: feInnings1.fallOfWickets || [],
-        batting: (feInnings1.batting || []).map(b => ({
-          name: b.name,
-          runs: b.runs || 0,
-          balls: b.balls || 0,
-          fours: b.fours || 0, // Frontend must send this
-          sixes: b.sixes || 0, // Frontend must send this
-          isOut: b.isOut || false,
-          outType: b.outType || null,
-          strikeRate: parseFloat(b.strikeRate) || 0,
-        })),
-        bowling: (feInnings1.bowling || []).map(b => ({ // Storing aggregated stats
-          name: b.name,
-          overs: b.overs, // String like "4.0"
-          runs: b.runs || 0,
-          wickets: b.wickets || 0,
-          maidens: b.maidens || 0, // Frontend must send this
-        })),
-        declared: feInnings1.declared || false,
-      };
-    } else if (match.status !== "abandoned"){ // Should not happen for a completed match sent from frontend
-        console.warn(`Match ${id}: feInnings1 data was missing in endMatch payload.`);
-        // Ensure innings1 exists if it should
-        match.innings1 = match.innings1 || { battingTeam: match.teamA.name, bowlingTeam: match.teamB.name, runs: 0, wickets: 0, overs: "0.0", batting: [], bowling:[], extras: {total: 0, wides:0, noBalls:0, byes:0, legByes:0}, fallOfWickets:[] };
-    }
-
-
-    // --- Populate Innings 2 ---
-    if (feInnings2) {
-      match.innings2 = {
-        battingTeam: feInnings2.teamName || match.teamB.name, // Fallback
-        bowlingTeam: feInnings1?.teamName || (feInnings2.teamName === match.teamB.name ? match.teamA.name : match.teamB.name),
-        runs: feInnings2.runs || 0,
-        wickets: feInnings2.wickets || 0,
-        overs: feInnings2.overs || "0.0",
-        runRate: parseFloat(feInnings2.runRate) || 0,
-        extras: feInnings2.extras || { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
-        fallOfWickets: feInnings2.fallOfWickets || [],
-        batting: (feInnings2.batting || []).map(b => ({
+    // Process innings data with proper defaults
+    const processInnings = (inningsData) => {
+      if (!inningsData) return null;
+      
+      return {
+        battingTeam: inningsData.battingTeam,
+        bowlingTeam: inningsData.bowlingTeam,
+        runs: inningsData.runs || 0,
+        wickets: inningsData.wickets || 0,
+        overs: inningsData.overs || "0.0",
+        runRate: parseFloat(inningsData.runRate) || 0,
+        batting: (inningsData.batting || []).map(b => ({
           name: b.name,
           runs: b.runs || 0,
           balls: b.balls || 0,
           fours: b.fours || 0,
           sixes: b.sixes || 0,
           isOut: b.isOut || false,
-          outType: b.outType || null,
-          strikeRate: parseFloat(b.strikeRate) || 0,
+          outType: b.outType || 'Not Out', // Ensure valid outType
+          strikeRate: parseFloat(b.strikeRate) || 0
         })),
-        bowling: (feInnings2.bowling || []).map(b => ({ // Storing aggregated stats
+        bowling: (inningsData.bowling || []).map(b => ({
           name: b.name,
-          overs: b.overs,
+          overs: b.overs || "0.0",
           runs: b.runs || 0,
           wickets: b.wickets || 0,
           maidens: b.maidens || 0,
+          economyRate: parseFloat(b.economyRate) || 0
         })),
-        declared: feInnings2.declared || false,
-        target: match.innings1 ? ((match.innings1.runs || 0) + 1) : (feInnings1 ? (feInnings1.runs || 0) + 1 : 0),
+        extras: inningsData.extras || {
+          total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0
+        },
+        fallOfWickets: inningsData.fallOfWickets || [],
+        target: inningsData.target || null
       };
-    } else if (match.status !== "abandoned" && feInnings1) { // If match not abandoned and there was a first innings, innings2 should exist.
-        console.warn(`Match ${id}: feInnings2 data was missing in endMatch payload. Initializing.`);
-        match.innings2 = match.innings2 || { battingTeam: feInnings1?.bowlingTeam || match.teamB.name, bowlingTeam: feInnings1?.teamName || match.teamA.name, runs: 0, wickets: 0, overs: "0.0", batting: [], bowling:[], extras: {total: 0, wides:0, noBalls:0, byes:0, legByes:0}, fallOfWickets:[] };
-    }
+    };
 
-    // --- Populate Match Summary & Result ---
-    if (feMatchSummary) {
-      match.matchSummary = {
-        playerOfMatch: feMatchSummary.playerOfMatch || "TBD",
-        winner: feMatchSummary.winner || "TBD",
-        // If your MatchSchema is updated to include 'margin':
-        // margin: feMatchSummary.margin || "" 
-      };
-    }
-    match.result = feResult || "Result TBD";
-    match.status = "completed"; // Mark as completed
+    // Update match document
+    match.innings1 = processInnings(innings1);
+    match.innings2 = processInnings(innings2);
+    match.result = result;
+    match.status = "completed";
+    match.matchSummary = {
+      playerOfMatch: matchSummary?.playerOfMatch || "",
+      winner: matchSummary?.winner || "",
+      margin: matchSummary?.margin || "",
+      netRunRates: matchSummary?.netRunRates || {}
+    };
+    match.liveState = null;
 
-    const savedMatch = await match.save();
-    res.json({ success: true, message: "Match ended and result updated successfully.", data: savedMatch });
+    await match.save();
+
+    res.json({
+      success: true,
+      message: "Match ended successfully",
+      data: match
+    });
 
   } catch (error) {
-    console.error("End match error:", error.message, error.stack);
-    res.status(500).json({ success: false, error: "Internal server error while ending match.", message: error.message });
+    console.error("End match error:", {
+      message: error.message,
+      stack: error.stack,
+      validationErrors: error.errors,
+      receivedData: req.body
+    });
+    
+    res.status(500).json({
+      success: false,
+      error: "Failed to end match",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
+};
+
+// Add this new exported function
+exports.deleteAllMatches = async (req, res) => {
+  try {
+    await Match.deleteMany({ user: req.user.id });
+    res.json({ success: true, message: "All matches deleted successfully." });
+  } catch (error) {
+    console.error("Delete all matches error:", error);
+    res.status(500).json({ success: false, error: "Failed to delete all matches." });
+  }
+};
+
+module.exports = {
+  createMatch: exports.createMatch,
+  getMyMatches: exports.getMyMatches,
+  getMatchById: exports.getMatchById,
+  updateMatch: exports.updateMatch,
+  deleteMatch: exports.deleteMatch,
+  endInnings: exports.endInnings,
+  endMatch: exports.endMatch,
+  deleteAllMatches: exports.deleteAllMatches,
 };

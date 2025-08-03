@@ -3,10 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthContext } from '../context/AuthContext.jsx';
 import styled from 'styled-components';
+import myLogo from '../assets/criczone.png';
 
 // Styled Components
 const HeaderContainer = styled.header`
-  display: flex;
+  display: none; /* Hidden by default on mobile */
   justify-content: space-between;
   align-items: center;
   padding: 1rem 2rem;
@@ -17,36 +18,44 @@ const HeaderContainer = styled.header`
   top: 0;
   z-index: 100;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+
+  @media (min-width: 769px) {
+    display: flex; /* Becomes visible on screens wider than 768px */
+  }
 `;
 
 const LogoLink = styled(Link)`
   text-decoration: none;
-  color: #2d3748;
-  font-weight: 700;
-  font-size: 1.5rem;
+  font-weight: 600;
+  font-size: 1.3rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   transition: all 0.3s ease;
-  
+
+  background: linear-gradient(90deg,rgb(0, 105, 204),rgb(93, 185, 241));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+
   &:hover {
-    color: #4f46e5;
+    background: linear-gradient(90deg, #4f46e5, #3b82f6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 `;
 
 const LogoIcon = styled.div`
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+  width: 40px;
+  height: 40px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   
-  svg {
-    width: 18px;
-    height: 18px;
-    color: white;
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 `;
 
@@ -155,12 +164,10 @@ function Header() {
     <HeaderContainer>
       <LogoLink to={user ? "/dashboard" : "/"}>
         <LogoIcon>
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-          </svg>
+            <img src={myLogo} alt="CricZone Logo" />
         </LogoIcon>
         CricZone
-      </LogoLink>
+    </LogoLink>
 
       <NavContainer>
         {user ? (
@@ -198,13 +205,13 @@ function Header() {
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <DropdownItem onClick={() => navigate('/dashboard')}>
+                  <DropdownItem onClick={() => { navigate('/dashboard'); setShowDropdown(false); }}>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                     </svg>
                     Dashboard
                   </DropdownItem>
-                  <DropdownItem onClick={() => navigate('/profile')}>
+                  <DropdownItem onClick={() => { navigate('/profile'); setShowDropdown(false); }}>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                     </svg>

@@ -3,9 +3,9 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { AuthContext } from '../context/AuthContext.jsx';
 import axios from "axios";
-import domtoimage from 'dom-to-image';
 import io from "socket.io-client";
 import "./FullScorecard.css";
+import { toPng } from 'html-to-image';
 
 const socket = io(import.meta.env.VITE_BACKEND_URL || "https://cric-score-app.onrender.com");
 
@@ -103,72 +103,129 @@ const normalizeMatchData = useCallback((data) => {
   return normalized;
 }, []);
 
-  useEffect(() => {
+
+
+// In FullScorecard.jsx
+
+useEffect(() => {
     const loadMatchData = async () => {
-      const resolvedMatchId = matchIdParam;
-      setIsLoading(true);
-      setError(null);
+        const resolvedMatchId = matchIdParam;
+        setIsLoading(true);
+        setError(null);
 
-      if (state?.matchData) {
-        console.log("Using state match data");
-        setDisplayMatchData(normalizeMatchData(state.matchData));
-        setIsLoading(false);
-        return;
-      }
+        // 1. Use navigation state if available (from ending a live match)
+        if (state?.matchData) {
+            setDisplayMatchData(normalizeMatchData(state.matchData));
+            setIsLoading(false);
+            return;
+        }
 
-      const cachedMatchData = localStorage.getItem(`finalMatchData_${resolvedMatchId}`);
-    if (cachedMatchData) {
-      try {
-        const parsedData = JSON.parse(cachedMatchData);
-        console.log("✅ Restoring match from localStorage:", parsedData);
-        setDisplayMatchData(normalizeMatchData(parsedData));
+        // 2. If no navigation state (e.g., coming from Past Matches), fetch from API.
+        if (resolvedMatchId && !resolvedMatchId.startsWith('guest_')) {
+            if (!user?.token) {
+                setError("You must be logged in to view past match scorecards.");
+                setIsLoading(false);
+                return;
+            }
+            try {
+                const config = { headers: { 'Authorization': `Bearer ${user.token}` } };
+                // FIX: The endpoint should fetch a single match by its ID
+                const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/matches/${resolvedMatchId}`, config);
+                if (response.data.success) {
+                    setDisplayMatchData(normalizeMatchData(response.data.data));
+                } else {
+                    setError(response.data.error || "Could not find the specified match.");
+                }
+            } catch (err) {
+                setError(`Failed to fetch match data. ${err.response?.data?.error || err.message}`);
+            }
+        } else {
+            setError("No match data available or invalid match ID.");
+        }
         setIsLoading(false);
-        return;
-      } catch (err) {
-        console.error("Failed to parse cached match data", err);
-      }
-    }
-      
-      if (resolvedMatchId && !resolvedMatchId.startsWith('guest_')) {
-        if (!user || !user.token) {
-          setError("You must be logged in to view past match scorecards.");
-          setIsLoading(false);
-          return;
-        }
-        try {
-          const config = { headers: { 'Authorization': `Bearer ${user.token}` } };
-          const response = await axios.get(`/api/matches/${resolvedMatchId}`, config);
-          setDisplayMatchData(normalizeMatchData(response.data.data));
-        } catch (err) {
-          setError(`Failed to fetch match data. ${err.response?.data?.message || err.message}`);
-        }
-      } else {
-        setError("No match data found. The session may have expired or been cleared.");
-      }
-      
-      setIsLoading(false);
     };
 
     loadMatchData();
-  }, [matchIdParam, state, user, normalizeMatchData]);
+}, [matchIdParam, state, user, normalizeMatchData]);
+
+
+
+  useEffect(() => {
+  console.log("FullScorecard mounted with:", {
+    matchId: matchIdParam,
+    locationState: location.state,
+    localStorageData: localStorage.getItem(`finalMatchData_${matchIdParam}`)
+  });
+}, []);
+
+
+const calculateNetRunRates = (innings1, innings2, settings) => {
+  if (!innings1?.teamName || !innings2?.teamName) return {};
+  const ballsPerOver = settings?.ballsPerOver || 6;
+  const playersPerTeam = settings?.playersPerTeam || 11;
+  const maxOvers = settings?.overs || 6;
+
+  const parseOvers = (oversStr) => {
+    if (!oversStr) return 0;
+    const [overInt, balls] = String(oversStr).split('.').map(Number);
+    return (overInt || 0) + ((balls || 0) / ballsPerOver);
+  };
+
+  const team1AllOut = innings1.wickets === playersPerTeam - 1;
+  const team2AllOut = innings2.wickets === playersPerTeam - 1;
+
+  const team1Runs = innings1.runs || 0;
+  const team2Runs = innings2.runs || 0;
+
+  const team1Overs = team1AllOut ? maxOvers : parseOvers(innings1.overs);
+  const team2Overs = team2AllOut ? maxOvers : parseOvers(innings2.overs);
+
+  const team1RR = team1Overs > 0 ? (team1Runs / team1Overs) : 0;
+  const team2RR = team2Overs > 0 ? (team2Runs / team2Overs) : 0;
+
+  return {
+    [innings1.teamName]: (team1RR - team2RR).toFixed(3),
+    [innings2.teamName]: (team2RR - team1RR).toFixed(3),
+  };
+};
+
   
 
-  const handleDownloadImage = useCallback(() => {
-    const node = scorecardRef.current;
-    if (node) {
-      domtoimage.toPng(node)
-        .then((dataUrl) => {
-          const link = document.createElement("a");
-          link.download = `scorecard-${displayMatchData?.teamA?.name}-vs-${displayMatchData?.teamB?.name}.png`;
-          link.href = dataUrl;
-          link.click();
-        })
-        .catch((err) => {
-          console.error("Download failed:", err);
-          setError("Sorry, the scorecard could not be downloaded.");
-        });
+const handleDownloadImage = useCallback(async () => {
+  try {
+    if (!scorecardRef.current) {
+      throw new Error("Scorecard element not found");
     }
-  }, [displayMatchData]);
+
+    // Wait briefly to ensure the component is fully rendered
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const dataUrl = await toPng(scorecardRef.current, {
+      quality: 1,
+      backgroundColor: 'white',
+      pixelRatio: 2,
+      cacheBust: true,
+      filter: (node) => {
+        // Exclude the download button from the image
+        return !(node.classList && node.classList.contains('btn-download'));
+      }
+    });
+
+    const link = document.createElement("a");
+    link.download = `scorecard-${displayMatchData?.teamA?.name || 'TeamA'}-vs-${
+      displayMatchData?.teamB?.name || 'TeamB'
+    }-${new Date().toISOString().slice(0, 10)}.png`;
+    link.href = dataUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (err) {
+    console.error("Download error:", err);
+    setError(`Failed to generate image: ${err.message}`);
+  }
+}, [displayMatchData]);
+
+
 
   const formatDate = (dateString) => {
     if (!dateString) return "Date N/A";
@@ -432,11 +489,15 @@ const renderInningsSection = (inningsData, defaultTeamName, inningsLabel) => {
 
   // --- FIX: Filter the lists before rendering ---
   const playedBatsmen = inningsData.batting?.filter(
-    (batsman) => batsman.status !== 'Did Not Bat'
+    (batsman) => (batsman.runs || 0) > 0 || (batsman.balls || 0) > 0 || batsman.isOut === true
   ) || [];
 
   const bowledBowlers = inningsData.bowling?.filter(
-    (bowler) => bowler.overs && bowler.overs !== "0.0"
+    (bowler) => {
+        if (!bowler.overs || bowler.overs === "0.0") return false;
+        const [whole, part] = bowler.overs.toString().split('.').map(Number);
+        return (whole || 0) > 0 || (part || 0) > 0;
+    }
   ) || [];
 
   return (
@@ -596,13 +657,14 @@ const renderInningsSection = (inningsData, defaultTeamName, inningsLabel) => {
   } = displayMatchData;
 
   return (
-    <motion.div 
-      className="full-scorecard-container"
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
-      ref={scorecardRef}
-    >
+    <div className="full-scorecard-page"> {/* Add this wrapper div */}
+      <motion.div 
+        className="full-scorecard-container"
+        initial="hidden"
+        animate="visible"
+        variants={containerVariants}
+        ref={scorecardRef}  // Move the ref here
+      >
       <motion.div 
         className="scorecard-card"
         initial={{ opacity: 0, y: 20 }}
@@ -624,7 +686,7 @@ const renderInningsSection = (inningsData, defaultTeamName, inningsLabel) => {
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
                 </svg>
-                Live View
+                Back
               </motion.button>
               <motion.button 
                 className="btn btn-primary"
@@ -651,36 +713,45 @@ const renderInningsSection = (inningsData, defaultTeamName, inningsLabel) => {
             </div>
           </div>
           <div className="match-meta">
-            {matchType && <span><strong>Type:</strong> {matchType} {totalOvers && totalOvers !== "N/A" ? `(${totalOvers} overs)` : ''}</span>}
+            {matchType && <span><strong>Type:</strong> {totalOvers && totalOvers !== "N/A" ? `(${totalOvers} overs)` : ''} Match</span>}
             {date && <span><strong>Date:</strong> {formatDate(date)}</span>}
-            {venue && <span><strong>Venue:</strong> {venue}</span>}
-            {toss?.winner && <span><strong>Toss:</strong> {`${toss.winner} won and chose to ${toss.decision}`}</span>}
+            {/*   {venue && <span><strong>Venue:</strong> {venue}</span>}   */}
+            {/*   {toss?.winner && <span><strong>Toss:</strong> {`${toss.winner} won and chose to ${toss.decision}`}</span>}   */}
           </div>
           {result && (
             <motion.div 
-              className="match-result"
+              className="match-result-container"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
             >
-              <strong>Result:</strong> {result}
-            </motion.div>
-          )}
+              <div className="match-result-highlight">
+                <strong className="result-label">MATCH RESULT:</strong>
+                <div className="result-text">
+                  {result.split(' ').map((word, index) => (
+                    <span 
+                      key={index} 
+                      className={word === displayMatchData?.teamA?.name || word === displayMatchData?.teamB?.name ? 'team-name' : ''}
+                    >
+                      {word}{' '}
+                    </span>
+            ))}
+      </div>
+    </div>
+  </motion.div>
+)}
         
-          {matchSummary?.netRunRates && (
-            <motion.div 
-              className="net-run-rate-summary"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-            >
-              <h3>Net Run Rate</h3>
-              <div className="nrr-details">
-                <p><strong>{teamA.name}</strong>: {matchSummary.netRunRates[teamA.name] || 'N/A'}</p>
-                <p><strong>{teamB.name}</strong>: {matchSummary.netRunRates[teamB.name] || 'N/A'}</p>
-              </div>
-            </motion.div>
-          )}
+          {displayMatchData?.innings1 && displayMatchData?.innings2 && (
+          <div className="nrr-section">
+            <h4>Net Run Rate</h4>
+            {Object.entries(
+              calculateNetRunRates(displayMatchData.innings1, displayMatchData.innings2, displayMatchData.settings)
+            ).map(([team, nrr]) => (
+              <p key={team}><strong>{team}:</strong> {nrr}</p>
+            ))}
+          </div>
+        )}
+        
         </header>
 
         <main className="score-sections">
@@ -702,6 +773,7 @@ const renderInningsSection = (inningsData, defaultTeamName, inningsLabel) => {
       
       {renderOverHistoryModal()}
     </motion.div>
+    </div>
   );
 };
 

@@ -1,29 +1,25 @@
 const express = require("express");
 const router = express.Router();
-const matchController = require("../controllers/matchController");
+const matchController = require("../controllers/matchController"); 
 
-// Import the authentication middleware
+const { validateEndMatch } = require("../utils/matchValidation");
 const { protect } = require('../middleware/authMiddleware');
 
-// Apply the 'protect' middleware to all routes.
-// Now, a user must be logged in to perform any of these actions.
+// --- Main Match Routes ---
+router.route("/")
+    .post(protect, matchController.createMatch)          // Create new match
+    .get(protect, matchController.getMyMatches);         // Get all matches for user
 
-// The route to create a new match.
-router.post("/", protect, matchController.createMatch);
+router.delete("/all", protect, matchController.deleteAllMatches);
 
-// The route to get all matches for the LOGGED-IN user.
-// Note the change from getAllMatches to getMyMatches.
-router.get("/", protect, matchController.getMyMatches);
+// --- Specific Match Routes ---
+router.route("/:id")
+    .get(protect, matchController.getMatchById)          // Get match details
+    .put(protect, matchController.updateMatch)           // Update match (live updates)
+    .delete(protect, matchController.deleteMatch);       // Delete match
 
-// Routes for a specific match, all protected.
-router.get("/:id", protect, matchController.getMatchById);
-router.put("/:id", protect, matchController.updateMatch);
-router.delete("/:id", protect, matchController.deleteMatch);
-
-// Routes for managing match state, all protected.
-router.post("/:id/end-innings", protect, matchController.endInnings);
-router.post("/:id/end-match", protect, matchController.endMatch);
-router.post("/:id/end", protect, matchController.endMatch); // This was in your original file
-
+// --- Match State Management ---
+router.post("/:id/end-innings", protect, matchController.endInnings);    // End current innings
+router.put("/:id/end", protect, validateEndMatch, matchController.endMatch); // Finalize match
 
 module.exports = router;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef } from "react";
+import React, { useState, useEffect, useContext, useRef, useCallback } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -7,16 +7,49 @@ import {
   useNavigate,
   useLocation
 } from "react-router-dom";
+import styled from 'styled-components';
 
 // Page and Component Imports
 import MatchSetup from "./pages/MatchSetup";
-import ScorecardPage from "./pages/ScoreCard"; 
-import FullScorecardPage from "./pages/FullScorecard"; 
+import ScorecardPage from "./pages/ScoreCard";
+import FullScorecardPage from "./pages/FullScorecard";
 import AuthPage from './pages/AuthPage';
 import Dashboard from './pages/Dashboard';
 import Header from './components/Header';
+import BottomNav from './components/BottomNav'; // New Component
 import PastMatches from './pages/PastMatches';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
+
+// --- Placeholder Components for Future Features ---
+const PlaceholderContainer = styled.div`
+  padding: 3rem 1.5rem;
+  text-align: center;
+  color: #4a5568;
+  h2 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 1rem;
+  }
+  p {
+    font-size: 1.1rem;
+  }
+`;
+
+const PointsSystem = () => (
+  <PlaceholderContainer>
+    <h2>Points System</h2>
+    <p>This feature is currently in development. Come back soon!</p>
+  </PlaceholderContainer>
+);
+
+const Profile = () => (
+  <PlaceholderContainer>
+    <h2>User Profile</h2>
+    <p>This feature is currently in development. Come back soon!</p>
+  </PlaceholderContainer>
+);
+
 
 // This is the main content component that handles all the routing and state logic.
 function AppContent() {
@@ -25,9 +58,20 @@ function AppContent() {
   const location = useLocation();
 
   const [matchSettings, setMatchSettings] = useState(null);
-  
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
   // This ref is used to correctly handle guest sessions vs. user logouts.
   const prevUser = useRef(user);
+
+  // Effect to handle window resizing for responsive components
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
 
   useEffect(() => {
     // If a user is logged in, check if they have a match to resume.
@@ -47,7 +91,7 @@ function AppContent() {
           localStorage.removeItem("currentMatch");
         }
       }
-    } 
+    }
     // If a user has just logged out, clear any active match state.
     else if (prevUser.current && !user) {
       setMatchSettings(null);
@@ -57,108 +101,139 @@ function AppContent() {
     prevUser.current = user;
   }, [user, navigate]);
 
-  // This function is called from MatchSetup to begin a match.
+
+
+
+// This function is called from MatchSetup to begin a match.
   const handleStartMatch = (settingsFromSetup) => {
-    const newMatchSettings = {
-      ...settingsFromSetup,
-      matchId: settingsFromSetup._id,
-      createdAt: new Date().toISOString(),
+    // settingsFromSetup is the full match object returned from your server
+    const matchId = settingsFromSetup._id;
+
+    // 1. Pass the FULL match object to the ScorecardPage component directly.
+    // This allows the match to start instantly with all the correct data.
+    setMatchSettings(settingsFromSetup);
+    
+    // 2. Save ONLY a minimal object with the ID to localStorage.
+    // This is just for resuming the session if the user reloads the browser.
+    // This small object will NEVER exceed the storage quota.
+    const sessionData = {
+      settings: {
+        _id: matchId,
+        matchId: matchId // Include both for compatibility
+      }
     };
-    setMatchSettings(newMatchSettings);
-    localStorage.setItem("currentMatch", JSON.stringify({ settings: newMatchSettings }));
+    localStorage.setItem("currentMatch", JSON.stringify(sessionData));
+    
+    // 3. Navigate to the scorecard.
     navigate('/scorecard');
-  };
+};
 
-  // In app.jsx
 
-const handleMatchEnd = (finalMatchData) => {
-  const matchId = finalMatchData?._id;
 
-  if (!matchId) {
-    console.error("Match ended without a valid ID.");
-    navigate(user ? '/dashboard' : '/');
+
+// In app.jsx
+
+// In app.jsx
+
+// In app.jsx
+
+const handleMatchEnd = useCallback((finalMatchData) => {
+  console.log("handleMatchEnd triggered.");
+
+  if (!finalMatchData || !finalMatchData._id) {
+    console.error("Match end error: Received invalid data.", finalMatchData);
+    alert("An error occurred while finishing the match.");
+    navigate('/dashboard');
     return;
   }
   
-  // 1. Navigate to the full scorecard page with the final data.
+  const matchId = finalMatchData._id;
+  console.log(`Navigating to Full Scorecard for match ID: ${matchId}`);
+  
+  // ✅ FIX: Navigate to the new page FIRST.
   navigate(`/full-scorecard/${matchId}`, {
-    state: { matchData: finalMatchData }
+    state: { 
+      matchData: finalMatchData,
+      fromMatchEnd: true
+    }
+    // Note: 'replace: true' was removed as it might not be desired here.
+    // You typically want the full scorecard to be a new page in history.
   });
 
-  // 2. Perform cleanup that DOES NOT trigger a re-render redirect.
-  //    The 'currentMatch' is what would resume the match, so removing it is key.
+  // THEN, clean up the state. This will no longer interfere.
+  setMatchSettings(null);
   localStorage.removeItem("currentMatch");
-  localStorage.removeItem(`matchState_${matchId}`);
-  
-  // 3. DO NOT setMatchSettings(null) here. This is the fix.
-  //    The state will be naturally cleared when the user starts a new match
-  //    or exits via the dashboard.
-};
-  
+
+}, [navigate]);
+
+
+
   // This function handles when a user exits a match without finishing.
   const handleExitMatch = () => {
-    const matchId = matchSettings?._id;
-    
+    // Remove the flag that tells the app a match is active on reload.
+    // This prevents the app from automatically navigating you back to the scorecard.
     localStorage.removeItem("currentMatch");
+    
+    // Clear the active match settings from the app's state.
+    // This will cause the router to unmount the ScorecardPage component.
     setMatchSettings(null);
+
+    // Explicitly navigate the user to the dashboard.
     navigate(user ? '/dashboard' : '/');
   };
 
-  const handleResumeMatch = (matchToResume) => {
-    if (!matchToResume?._id) {
-      console.error("Cannot resume match: Invalid match data provided.");
-      return;
-    }
-    
-    // Retrieve the detailed, live state of the match from localStorage
-    const savedMatchStateRaw = localStorage.getItem(`matchState_${matchToResume._id}`);
-    
-    if (savedMatchStateRaw) {
-      try {
-        const parsedState = JSON.parse(savedMatchStateRaw);
-        
-        // Set this as the active match state
-        setMatchSettings(parsedState.settings);
-        
-        // Also update the 'currentMatch' so it persists on refresh
-        localStorage.setItem("currentMatch", JSON.stringify({ settings: parsedState.settings }));
-        
-        // Navigate to the live scorecard to continue the match
-        navigate('/scorecard');
-        
-      } catch (e) {
-        console.error("Failed to parse saved match state for resumption.", e);
-        // Fallback: If parsing fails, remove the broken item
-        localStorage.removeItem(`matchState_${matchToResume._id}`);
-      }
-    } else {
-      console.error("Could not find saved state for this match to resume it.");
-      alert("Error: Could not find the saved data to resume this match.");
-    }
-  };
+// In app.jsx
 
-  // Conditionally show the header on all pages except the landing and auth pages.
-  const showHeader = location.pathname !== '/';
+const handleResumeMatch = (matchToResume) => {
+    if (!matchToResume?._id) {
+        console.error("Cannot resume match: Invalid match data provided.");
+        return;
+    }
+    
+    // 1. Create a minimal "lean" settings object with just the ID.
+    const leanMatchSettings = {
+        _id: matchToResume._id,
+        matchId: matchToResume._id, // Include for compatibility
+    };
+
+    // 2. Set the lean settings in the app state. This tells ScorecardPage it needs to fetch full data.
+    setMatchSettings(leanMatchSettings);
+    
+    // 3. Save the minimal session data to localStorage to handle page reloads.
+    localStorage.setItem("currentMatch", JSON.stringify({ settings: leanMatchSettings }));
+    
+    // 4. Navigate to the scorecard page.
+    navigate('/scorecard');
+};
+
+
+  // --- Conditional Rendering Logic for Navigation ---
+  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/'];
+  const isNavHidden = pathsWithoutNav.some(path => location.pathname.startsWith(path) && path !== '/');
+  
+  const showHeader = !isMobile && location.pathname !== '/';
+  const showBottomNav = isMobile && !isNavHidden && location.pathname !== '/auth';
+
 
   return (
     <>
       {showHeader && <Header />}
-      <main style={showHeader ? { padding: '1rem' } : {}}>
+      <main style={{ paddingBottom: showBottomNav ? '80px' : '0' }}>
         <Routes>
           {/* --- Public Routes --- */}
           <Route path="/" element={!user ? <AuthPage /> : <Navigate to="/dashboard" />} />
           <Route path="/auth" element={!user ? <AuthPage /> : <Navigate to="/dashboard" />} />
           <Route path="/match-setup" element={<MatchSetup onStartMatch={handleStartMatch} />} />
-          {/* The FullScorecardPage route is now public to allow guests to view their finished match */}
           <Route path="/full-scorecard/:matchIdParam" element={<FullScorecardPage />} />
 
           {/* --- Protected Routes (Require Login) --- */}
           <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/auth" />} />
+          <Route path="/past-matches" element={user ? <PastMatches onResumeMatch={handleResumeMatch} /> : <Navigate to="/auth" />} />
           
-          <Route 
-          path="/past-matches" 
-          element={user ? <PastMatches onResumeMatch={handleResumeMatch} /> : <Navigate to="/auth" />} 
-        />
+          {/* --- New Routes for Future Features --- */}
+          <Route path="/points-system" element={user ? <PointsSystem /> : <Navigate to="/auth" />} />
+          <Route path="/profile" element={user ? <Profile /> : <Navigate to="/auth" />} />
+
 
           {/* --- Dynamic Route (Works for Guests & Users) --- */}
           <Route
@@ -167,12 +242,12 @@ const handleMatchEnd = (finalMatchData) => {
               matchSettings ? (
                 <ScorecardPage
                   matchSettings={matchSettings}
-                  onMatchEnd={handleMatchEnd} // Use the new handler
-                  onExitMatch={handleExitMatch} // Use the exit handler
-                  key={matchSettings.matchId} 
+                  onMatchEnd={handleMatchEnd}
+                  onExitMatch={handleExitMatch}
+                  key={matchSettings.matchId}
                 />
               ) : (
-                <Navigate to={user ? "/dashboard" : "/"} replace />
+                null
               )
             }
           />
@@ -181,6 +256,7 @@ const handleMatchEnd = (finalMatchData) => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      {showBottomNav && <BottomNav />}
     </>
   );
 }
