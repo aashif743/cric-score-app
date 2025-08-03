@@ -1,5 +1,5 @@
 import API from '../api'; // ✅ FIX: Import the custom axios instance
-//https://cric-score-app.onrender.com
+
 // Helper function to create the authorization config object
 const getAuthConfig = (token) => {
   if (!token) {

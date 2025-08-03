@@ -18,6 +18,7 @@ import Dashboard from './pages/Dashboard';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav'; // New Component
 import PastMatches from './pages/PastMatches';
+import ProfilePage from './pages/ProfilePage'; 
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
 
 // --- Placeholder Components for Future Features ---
@@ -39,13 +40,6 @@ const PlaceholderContainer = styled.div`
 const PointsSystem = () => (
   <PlaceholderContainer>
     <h2>Points System</h2>
-    <p>This feature is currently in development. Come back soon!</p>
-  </PlaceholderContainer>
-);
-
-const Profile = () => (
-  <PlaceholderContainer>
-    <h2>User Profile</h2>
     <p>This feature is currently in development. Come back soon!</p>
   </PlaceholderContainer>
 );
@@ -232,7 +226,7 @@ const handleResumeMatch = (matchToResume) => {
           
           {/* --- New Routes for Future Features --- */}
           <Route path="/points-system" element={user ? <PointsSystem /> : <Navigate to="/auth" />} />
-          <Route path="/profile" element={user ? <Profile /> : <Navigate to="/auth" />} />
+          <Route path="/profile" element={user ? <ProfilePage /> : <Navigate to="/auth" />} />
 
 
           {/* --- Dynamic Route (Works for Guests & Users) --- */}
