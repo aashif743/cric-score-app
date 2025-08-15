@@ -19,6 +19,7 @@ import Header from './components/Header';
 import BottomNav from './components/BottomNav'; // New Component
 import PastMatches from './pages/PastMatches';
 import ProfilePage from './pages/ProfilePage'; 
+import PointsSystem from './pages/PointsSystem';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
 
 // --- Placeholder Components for Future Features ---
@@ -36,13 +37,6 @@ const PlaceholderContainer = styled.div`
     font-size: 1.1rem;
   }
 `;
-
-const PointsSystem = () => (
-  <PlaceholderContainer>
-    <h2>Points System</h2>
-    <p>This feature is currently in development. Come back soon!</p>
-  </PlaceholderContainer>
-);
 
 
 // This is the main content component that handles all the routing and state logic.
@@ -125,12 +119,6 @@ function AppContent() {
 
 
 
-// In app.jsx
-
-// In app.jsx
-
-// In app.jsx
-
 const handleMatchEnd = useCallback((finalMatchData) => {
   console.log("handleMatchEnd triggered.");
 
@@ -205,8 +193,9 @@ const handleResumeMatch = (matchToResume) => {
   const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/'];
   const isNavHidden = pathsWithoutNav.some(path => location.pathname.startsWith(path) && path !== '/');
   
-  const showHeader = !isMobile && location.pathname !== '/';
-  const showBottomNav = isMobile && !isNavHidden && location.pathname !== '/auth';
+  // Corrected code
+const showBottomNav = !isNavHidden && location.pathname !== '/auth';
+const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will work
 
 
   return (
