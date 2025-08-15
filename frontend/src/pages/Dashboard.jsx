@@ -23,21 +23,21 @@ const DashboardContainer = styled(motion.div)`
 
 const LogoContainer = styled(motion.div)`
   text-align: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.1rem;
 
   img {
-    width: 180px;
-    height: 180px;
+    width: 100px;
+    height: 100px;
 
     @media (max-width: 480px) {
-      width: 180px;
+      width: 100px;
     }
   }
 `;
 
 const WelcomeHeader = styled(motion.div)`
   text-align: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.3rem;
 
   h2 {
     font-size: 1.75rem;
@@ -46,7 +46,7 @@ const WelcomeHeader = styled(motion.div)`
     font-weight: 700;
 
     @media (max-width: 480px) {
-      font-size: 1.4rem;
+      font-size: 1rem;
     }
   }
 
@@ -55,7 +55,7 @@ const WelcomeHeader = styled(motion.div)`
     color: #4a5568;
 
     @media (max-width: 480px) {
-      font-size: 0.9rem;
+      font-size: 0.7rem;
     }
   }
 `;
@@ -75,13 +75,13 @@ const ActionGrid = styled.div`
 const ActionCard = styled(motion.div)`
   background: white;
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 1.1rem;
   box-shadow: 0 8px 12px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 180px;
+  min-height: 160px;
   transition: all 0.3s ease;
   border: 1px solid #e2e8f0;
 
@@ -91,7 +91,7 @@ const ActionCard = styled(motion.div)`
     margin-bottom: 0.75rem;
 
     @media (max-width: 480px) {
-      font-size: 1.1rem;
+      font-size: 1rem;
     }
   }
 
@@ -102,7 +102,7 @@ const ActionCard = styled(motion.div)`
     font-size: 0.95rem;
 
     @media (max-width: 480px) {
-      font-size: 0.85rem;
+      font-size: 0.8rem;
     }
   }
 
@@ -188,8 +188,8 @@ function Dashboard() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
       >
-        <h2>Welcome to CricZone</h2>
-        <p>Hello, <strong>{user?.name || 'Player'}</strong>! What would you like to do today?</p>
+        <h2>Your Digital Scorer</h2>
+        <p>Effortlessly track every run, wicket, and over with professional precision. Let's get the game started, <strong>{user?.name || 'Player'}</strong>!</p>
       </WelcomeHeader>
 
       <motion.div

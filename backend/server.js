@@ -4,7 +4,8 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const http = require("http");
 const { Server } = require("socket.io");
-//https://cric-score-app.onrender.com
+
+
 // Import your route files
 const matchRoutes = require("./routes/matchRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -18,8 +19,8 @@ const server = http.createServer(app);
 
 const allowedOrigins = [
   "https://cric-zone.com", // Your deployed frontend
-  "http://localhost:3000",                      // Your local React dev server
-  "http://localhost:5173"                       // Your local Vite dev server (if applicable)
+  "http://localhost:3000", // Your local React dev server
+  "http://localhost:5173", // Your local Vite dev server (if applicable)
 ];
 
 // Correct CORS configuration for Socket.IO
@@ -32,14 +33,14 @@ const io = new Server(server, {
 });
 
 // Correct CORS configuration for Express API routes
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true,
-}));
-
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
 
 app.use(express.json());
-
 
 // API Routes
 app.use("/api/matches", matchRoutes);

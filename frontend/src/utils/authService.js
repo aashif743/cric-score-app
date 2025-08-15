@@ -1,14 +1,14 @@
-import axios from 'axios';
+import axios from "axios";
 
 // The base URL for our custom user authentication API
-const API_URL = 'https://cric-score-app.onrender.com/api/users/';
+const API_URL = "http://localhost:5000/api/users/";
 
 /**
  * Requests an OTP from our backend.
  * @param {string} phoneNumber - The user's full phone number.
  */
 const sendOtp = async (phoneNumber) => {
-  const response = await axios.post(API_URL + 'send-otp', { phoneNumber });
+  const response = await axios.post(API_URL + "send-otp", { phoneNumber });
   return response.data;
 };
 
@@ -19,10 +19,13 @@ const sendOtp = async (phoneNumber) => {
  * @returns {object} Response data, including user info and JWT if successful.
  */
 const verifyOtp = async (phoneNumber, otp) => {
-  const response = await axios.post(API_URL + 'verify-otp', { phoneNumber, otp });
+  const response = await axios.post(API_URL + "verify-otp", {
+    phoneNumber,
+    otp,
+  });
   // If the response contains a token, it means login was successful
   if (response.data.token) {
-    localStorage.setItem('user', JSON.stringify(response.data));
+    localStorage.setItem("user", JSON.stringify(response.data));
   }
   return response.data;
 };
@@ -34,10 +37,13 @@ const verifyOtp = async (phoneNumber, otp) => {
  * @returns {object} The full user object with JWT.
  */
 const completeRegistration = async (phoneNumber, name) => {
-  const response = await axios.post(API_URL + 'complete-registration', { phoneNumber, name });
+  const response = await axios.post(API_URL + "complete-registration", {
+    phoneNumber,
+    name,
+  });
   // If the response contains a token, registration was successful
   if (response.data.token) {
-    localStorage.setItem('user', JSON.stringify(response.data));
+    localStorage.setItem("user", JSON.stringify(response.data));
   }
   return response.data;
 };
