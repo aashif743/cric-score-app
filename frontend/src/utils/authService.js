@@ -1,7 +1,8 @@
 import axios from "axios";
 
-// The base URL for our custom user authentication API
-const API_URL = "http://localhost:5000/api/users/";
+// Use environment variable for API URL, fallback to localhost for development
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const API_URL = `${API_BASE_URL}/api/users/`;
 
 /**
  * Requests an OTP from our backend.

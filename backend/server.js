@@ -18,27 +18,39 @@ const app = express();
 const server = http.createServer(app);
 
 const allowedOrigins = [
-  "https://cric-zone.com", // Your deployed frontend
-  "http://localhost:3000", // Your local React dev server
-  "http://localhost:5173", // Your local Vite dev server (if applicable)
+  "https://cric-zone.com",           // Production frontend
+  "https://cric-score-app.onrender.com", // Render backend URL (for same-origin requests)
+  "http://localhost:3000",           // Local React dev server
+  "http://localhost:5173",           // Local Vite dev server
+  "http://localhost:5002",           // Local mobile dev server
 ];
 
-// Correct CORS configuration for Socket.IO
+// Function to handle CORS for mobile apps (they don't send origin header)
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all origins for mobile app compatibility
+    }
+  },
+  credentials: true,
+};
+
+// CORS configuration for Socket.IO (supports mobile apps)
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: corsOptions.origin,
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
 
-// Correct CORS configuration for Express API routes
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-  })
-);
+// CORS configuration for Express API routes
+app.use(cors(corsOptions));
 
 app.use(express.json());
 
