@@ -12,12 +12,13 @@ import {
   Animated,
   Platform,
   Keyboard,
-  TouchableWithoutFeedback,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
+import suggestionService from '../utils/suggestionService';
+import AutocompleteInput from '../components/AutocompleteInput';
 import { colors, spacing, borderRadius, fontSizes, fontWeights, shadows } from '../utils/theme';
 import io from 'socket.io-client';
 import { SOCKET_URL } from '../api/config';
@@ -83,25 +84,36 @@ const ScoreCardScreen = ({ navigation, route }) => {
     isChasing: false,
   });
 
-  // Settings
+  // Settings - use matchSettings first, then fallback to matchData, then defaults
   const [settings, setSettings] = useState({
-    overs: matchSettings?.totalOvers || 6,
-    ballsPerOver: matchSettings?.ballsPerOver || 6,
-    playersPerTeam: matchSettings?.playersPerTeam || 6,
+    overs: matchSettings?.totalOvers || matchData?.totalOvers || 6,
+    ballsPerOver: matchSettings?.ballsPerOver || matchData?.ballsPerOver || 6,
+    playersPerTeam: matchSettings?.playersPerTeam || matchData?.playersPerTeam || 6,
     noBallRuns: 1,
     wideRuns: 1,
   });
 
+  // Debug: Log settings on mount
+  console.log('ScoreCard Settings:', {
+    fromMatchSettings: matchSettings,
+    fromMatchData: { totalOvers: matchData?.totalOvers, ballsPerOver: matchData?.ballsPerOver, playersPerTeam: matchData?.playersPerTeam },
+    finalSettings: { overs: matchSettings?.totalOvers || matchData?.totalOvers || 6 }
+  });
+
   // Generate default player names
-  const generatePlayerNames = (teamName, count) => {
-    return Array.from({ length: count }, (_, i) => `${teamName} Player ${i + 1}`);
+  const generateBatsmanNames = (count) => {
+    return Array.from({ length: count }, (_, i) => `Batsman ${i + 1}`);
   };
 
-  // Teams
+  const generateBowlerNames = (count) => {
+    return Array.from({ length: count }, (_, i) => `Bowler ${i + 1}`);
+  };
+
+  // Teams - Team A bats first by default, Team B bowls first
   const [teams, setTeams] = useState({
     teamA: {
       name: matchData?.teamA?.name || 'Team A',
-      playerNames: generatePlayerNames(matchData?.teamA?.name || 'Team A', matchSettings?.playersPerTeam || 6),
+      playerNames: generateBatsmanNames(matchSettings?.playersPerTeam || 6),
       batsmen: [],
       bowlers: [],
       runs: 0,
@@ -110,7 +122,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     },
     teamB: {
       name: matchData?.teamB?.name || 'Team B',
-      playerNames: generatePlayerNames(matchData?.teamB?.name || 'Team B', matchSettings?.playersPerTeam || 6),
+      playerNames: generateBowlerNames(matchSettings?.playersPerTeam || 6),
       batsmen: [],
       bowlers: [],
       runs: 0,
@@ -150,6 +162,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
   // Store first innings data for full scorecard
   const [firstInningsData, setFirstInningsData] = useState(null);
 
+  // Track which innings to display in scorecard view (1 or 2)
+  const [scorecardInningsView, setScorecardInningsView] = useState(1);
+
   // Modals
   const [showRunsModal, setShowRunsModal] = useState(false);
   const [showWicketModal, setShowWicketModal] = useState(false);
@@ -157,7 +172,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [showChangeBowlerModal, setShowChangeBowlerModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showEndInningsModal, setShowEndInningsModal] = useState(false);
+  const [endInningsPromptDismissed, setEndInningsPromptDismissed] = useState(false); // Track if user dismissed end innings prompt
   const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [showMatchEndModal, setShowMatchEndModal] = useState(false); // For 2nd innings end confirmation
+  const [pendingMatchEnd, setPendingMatchEnd] = useState(null); // Store match end data temporarily
   const [showWideModal, setShowWideModal] = useState(false);
   const [showNoBallModal, setShowNoBallModal] = useState(false);
   const [showByeModal, setShowByeModal] = useState(false);
@@ -322,9 +340,91 @@ const ScoreCardScreen = ({ navigation, route }) => {
       : (matchData?.toss?.winner === matchData?.teamA?.name ? 'teamB' : 'teamA');
   };
 
-  // Initialize batsmen and bowlers
+  // Initialize batsmen and bowlers (or restore saved state)
   useEffect(() => {
     const initializePlayers = () => {
+      // Check if there's saved state to restore
+      const savedState = matchData?.currentState;
+      const currentInningsNum = matchData?.innings || 1;
+      const savedInnings = currentInningsNum === 2 ? matchData?.innings2 : matchData?.innings1;
+
+      // Debug logging
+      console.log('Match restore check:', {
+        hasCurrentState: !!savedState,
+        hasSavedInnings: !!savedInnings,
+        status: matchData?.status,
+        innings: currentInningsNum,
+        hasBatting: savedInnings?.batting?.length > 0,
+        hasBowling: savedInnings?.bowling?.length > 0,
+      });
+
+      // Restore if we have currentState and innings data with actual player data
+      if (savedState && savedInnings && savedInnings.batting?.length > 0) {
+        // Restore saved match state
+        setMatch({
+          runs: savedState.runs || 0,
+          wickets: savedState.wickets || 0,
+          balls: savedState.balls || 0,
+          innings: matchData.innings || 1,
+          target: matchData.target || 0,
+          isChasing: matchData.innings === 2,
+        });
+
+        // Restore batsmen
+        if (savedInnings.batting && savedInnings.batting.length > 0) {
+          setAllBatsmen(savedInnings.batting);
+          if (savedState.striker && savedState.nonStriker) {
+            setCurrentBatsmen({
+              striker: savedState.striker,
+              nonStriker: savedState.nonStriker,
+            });
+          } else {
+            // Find current batsmen from saved batting array
+            const activeBatsmen = savedInnings.batting.filter(b => !b.isOut && !b.isRetired);
+            if (activeBatsmen.length >= 2) {
+              setCurrentBatsmen({
+                striker: activeBatsmen[0],
+                nonStriker: activeBatsmen[1],
+              });
+            }
+          }
+        }
+
+        // Restore bowlers
+        if (savedInnings.bowling && savedInnings.bowling.length > 0) {
+          setAllBowlers(savedInnings.bowling);
+          if (savedState.currentBowler) {
+            setCurrentBowler(savedState.currentBowler);
+          } else {
+            setCurrentBowler(savedInnings.bowling[0]);
+          }
+        }
+
+        // Restore extras
+        if (savedInnings.extras) {
+          setExtras(savedInnings.extras);
+        }
+
+        // Restore fall of wickets
+        if (savedInnings.fallOfWickets) {
+          setFallOfWickets(savedInnings.fallOfWickets);
+        }
+
+        // Restore current over balls
+        if (savedState.currentOverBalls) {
+          setCurrentOverBalls(savedState.currentOverBalls);
+        }
+
+        // Restore first innings data if in second innings
+        if (matchData.innings === 2 && matchData.innings1) {
+          setFirstInningsData(matchData.innings1);
+          setScorecardInningsView(2); // Show current innings by default
+        }
+
+        return; // Skip fresh initialization
+      }
+
+      // Fresh initialization (no saved state)
       const battingTeamKey = matchData?.toss?.decision === 'bat'
         ? (matchData?.toss?.winner === matchData?.teamA?.name ? 'teamA' : 'teamB')
         : (matchData?.toss?.winner === matchData?.teamA?.name ? 'teamB' : 'teamA');
@@ -332,9 +432,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
       // Get player names from teams state (or generate defaults)
       const battingPlayerNames = teams[battingTeamKey]?.playerNames ||
-        generatePlayerNames(teams[battingTeamKey]?.name || 'Team', settings.playersPerTeam);
+        generateBatsmanNames(settings.playersPerTeam);
       const bowlingPlayerNames = teams[bowlingTeamKey]?.playerNames ||
-        generatePlayerNames(teams[bowlingTeamKey]?.name || 'Team', settings.playersPerTeam);
+        generateBowlerNames(settings.playersPerTeam);
 
       // Initialize batsmen array - order 1 to last
       const batsmenArray = [];
@@ -358,12 +458,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
         nonStriker: batsmenArray[1],
       });
 
-      // Initialize bowlers array - order last to 1 (reverse)
+      // Initialize bowlers array - Bowler 1 first
       const bowlersArray = [];
-      for (let i = settings.playersPerTeam - 1; i >= 0; i--) {
+      for (let i = 0; i < settings.playersPerTeam; i++) {
         bowlersArray.push({
-          id: settings.playersPerTeam - i,
-          name: bowlingPlayerNames[i] || `Bowler ${settings.playersPerTeam - i}`,
+          id: i + 1,
+          name: bowlingPlayerNames[i] || `Bowler ${i + 1}`,
           overs: '0.0',
           runs: 0,
           wickets: 0,
@@ -425,6 +525,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
   // Handle run scoring
   const handleRuns = (runs, isExtra = false, extraType = '') => {
+    try {
     // Save state before action for undo
     saveToHistory(`${isExtra ? extraType.toUpperCase() + ' ' : ''}${runs} run${runs !== 1 ? 's' : ''}`);
 
@@ -518,6 +619,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     setShowRunsModal(false);
     setShowExtrasModal(false);
+    } catch (error) {
+      console.error('Error in handleRuns:', error);
+    }
   };
 
   // Update batsman runs - uses functional update to avoid stale closures
@@ -668,55 +772,55 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
   // Handle end of over
   const handleEndOfOver = () => {
-    // Save over history
-    const overData = {
-      overNumber: Math.floor((match.balls + 1) / settings.ballsPerOver),
-      bowlerName: currentBowler.name,
-      balls: [...currentOverBalls],
-      runs: currentOverRuns,
-      wickets: currentOverWickets,
-    };
-    setOverHistory(prev => [...prev, overData]);
+    try {
+      // Save over history
+      const overData = {
+        overNumber: Math.floor((match.balls + 1) / settings.ballsPerOver),
+        bowlerName: currentBowler.name,
+        balls: [...currentOverBalls],
+        runs: currentOverRuns,
+        wickets: currentOverWickets,
+      };
+      setOverHistory(prev => [...prev, overData]);
 
-    // Check for maiden - use functional updates to avoid stale state
-    const isMaiden = currentOverRuns === 0 && currentOverBalls.every(b => !b.includes('WD') && !b.includes('NB'));
-    const currentBowlerId = currentBowler.id;
+      // Check for maiden - use functional updates to avoid stale state
+      const isMaiden = currentOverRuns === 0 && currentOverBalls.every(b => !b.includes('WD') && !b.includes('NB'));
+      const currentBowlerId = currentBowler.id;
 
-    if (isMaiden) {
-      // Update maiden count using functional update to get latest state
-      setCurrentBowler(prev => ({ ...prev, maidens: prev.maidens + 1 }));
-      setAllBowlers(prev => prev.map(b =>
-        b.id === currentBowlerId ? { ...b, maidens: b.maidens + 1 } : b
-      ));
-    }
+      if (isMaiden) {
+        // Update maiden count using functional update to get latest state
+        setCurrentBowler(prev => ({ ...prev, maidens: prev.maidens + 1 }));
+        setAllBowlers(prev => prev.map(b =>
+          b.id === currentBowlerId ? { ...b, maidens: b.maidens + 1 } : b
+        ));
+      }
 
-    // Set previous bowler (cannot bowl next over)
-    setPreviousBowlerId(currentBowlerId);
+      // Set previous bowler (cannot bowl next over)
+      setPreviousBowlerId(currentBowlerId);
 
-    // Reset over tracking
-    setCurrentOverBalls([]);
-    setCurrentOverRuns(0);
-    setCurrentOverWickets(0);
+      // Reset over tracking
+      setCurrentOverBalls([]);
+      setCurrentOverRuns(0);
+      setCurrentOverWickets(0);
 
-    // Rotate strike at end of over
-    rotateStrike();
+      // Rotate strike at end of over
+      rotateStrike();
 
-    // Automatically select next available bowler
-    // Find next bowler by ID (their stats will be fetched fresh when they bowl)
-    const nextBowlerId = allBowlers.find(b => b.id !== currentBowlerId)?.id;
-    if (nextBowlerId) {
-      // Use functional update to set current bowler with latest stats from allBowlers
-      setCurrentBowler(prev => {
-        // We need to get stats from allBowlers, but we can't access updated state here
-        // So we find the bowler and use their current stats (will sync on next action)
-        const bowler = allBowlers.find(b => b.id === nextBowlerId);
-        return bowler ? { ...bowler } : prev;
-      });
+      // Auto-select next bowler (not the one who just bowled)
+      const availableBowlers = allBowlers.filter(b => b.id !== currentBowlerId);
+      if (availableBowlers.length > 0) {
+        // Select the first available bowler (or could be the one with least overs)
+        const nextBowler = availableBowlers[0];
+        setCurrentBowler(nextBowler);
+      }
+    } catch (error) {
+      console.error('Error in handleEndOfOver:', error);
     }
   };
 
   // Handle wicket
   const handleWicket = (wicketType) => {
+    try {
     // Save state before action for undo
     saveToHistory(`Wicket - ${wicketType}`);
 
@@ -790,6 +894,14 @@ const ScoreCardScreen = ({ navigation, route }) => {
       handleEndInnings();
     }
 
+    // Check for end of over (wicket counts as a ball)
+    // Use setTimeout to ensure this runs after all state updates are processed
+    if ((match.balls + 1) % settings.ballsPerOver === 0) {
+      setTimeout(() => {
+        handleEndOfOver();
+      }, 100);
+    }
+
     // Compute pending bowler update
     const isWicket = wicketType !== 'Run Out';
     const [overs, balls] = currentBowler.overs.split('.').map(Number);
@@ -824,6 +936,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
     setSelectedWicketType('');
     setSelectedRuns(0);
     setRunOutBatsman(null);
+    } catch (error) {
+      console.error('Error in handleWicket:', error);
+    }
   };
 
   // Handle Wide Ball submission
@@ -1417,7 +1532,23 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
   // Check match end conditions
   const checkMatchEndConditions = (runs, wickets, balls, pendingBowlerUpdate = null, pendingBatsmanUpdate = null) => {
+    try {
     const maxBalls = settings.overs * settings.ballsPerOver;
+
+    // Debug logging
+    console.log('checkMatchEndConditions:', {
+      runs, wickets, balls, maxBalls,
+      settingsOvers: settings.overs,
+      ballsPerOver: settings.ballsPerOver,
+      playersPerTeam: settings.playersPerTeam,
+      oversCompleted: Math.floor(balls / settings.ballsPerOver),
+      ballsInOver: balls % settings.ballsPerOver,
+      wicketsLimit: settings.playersPerTeam - 1,
+      ballsCondition: balls >= maxBalls,
+      wicketsCondition: wickets >= settings.playersPerTeam - 1,
+      matchDataTotalOvers: matchData?.totalOvers,
+      matchSettingsTotalOvers: matchSettings?.totalOvers,
+    });
 
     // Build current data snapshot with pending updates
     const buildMatchSnapshot = () => {
@@ -1461,25 +1592,47 @@ const ScoreCardScreen = ({ navigation, route }) => {
       }
     } else {
       // Second innings - chasing
-      if (runs > match.target) {
+      // Target is runs needed to win (first innings score + 1)
+      // Team wins when they reach or exceed the target
+      if (runs >= match.target) {
         // Team chasing wins
         handleMatchEnd(`${getBattingTeam()} won by ${settings.playersPerTeam - 1 - wickets} wickets`, buildMatchSnapshot());
       } else if (balls >= maxBalls || wickets >= settings.playersPerTeam - 1) {
-        // Team batting first wins or tie
-        if (runs === match.target) {
+        // Innings over but target not reached
+        if (runs === match.target - 1) {
+          // Scores are level - it's a tie
           handleMatchEnd('Match Tied', buildMatchSnapshot());
         } else {
-          handleMatchEnd(`${getBowlingTeam()} won by ${match.target - runs} runs`, buildMatchSnapshot());
+          // Team batting first wins
+          handleMatchEnd(`${getBowlingTeam()} won by ${match.target - 1 - runs} runs`, buildMatchSnapshot());
         }
       }
+    }
+    } catch (error) {
+      console.error('Error in checkMatchEndConditions:', error);
     }
   };
 
   // Handle end of innings
   const handleEndInnings = (matchSnapshot = null) => {
     if (match.innings === 1) {
-      // For first innings, we show the modal - snapshot will be created when starting 2nd innings
-      setShowEndInningsModal(true);
+      // Calculate if innings is truly over (overs complete)
+      const maxBalls = settings.overs * settings.ballsPerOver;
+      const isOversComplete = match.balls >= maxBalls;
+      const isAllOut = match.wickets >= settings.playersPerTeam - 1;
+
+      // If overs are complete or all out, always show (ignore dismissed flag)
+      // If just a mid-innings trigger, respect the dismissed flag
+      if (isOversComplete || isAllOut) {
+        // Innings is genuinely over - must end
+        if (!showEndInningsModal) {
+          setEndInningsPromptDismissed(false); // Reset flag
+          setShowEndInningsModal(true);
+        }
+      } else if (!endInningsPromptDismissed && !showEndInningsModal) {
+        // Mid-innings trigger (shouldn't happen, but handle gracefully)
+        setShowEndInningsModal(true);
+      }
     } else {
       // For second innings, use the snapshot data
       const runs = matchSnapshot ? matchSnapshot.runs : match.runs;
@@ -1517,6 +1670,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
       overHistory: overHistory.map(o => ({ ...o })),
     };
     setFirstInningsData(innings1Data);
+
+    // Set scorecard view to show current innings by default
+    setScorecardInningsView(2);
 
     // Reset for second innings
     setMatch({
@@ -1574,8 +1730,8 @@ const ScoreCardScreen = ({ navigation, route }) => {
     setShowSummaryModal(false);
   };
 
-  // Handle match end
-  const handleMatchEnd = async (result, matchSnapshot = null) => {
+  // Handle match end - show confirmation modal instead of navigating immediately
+  const handleMatchEnd = (result, matchSnapshot = null) => {
     // Build complete innings data using snapshot if provided (for accurate data)
     let innings1, innings2;
 
@@ -1632,17 +1788,124 @@ const ScoreCardScreen = ({ navigation, route }) => {
       date: new Date().toISOString(),
     };
 
+    // Store the data and show confirmation modal
+    setPendingMatchEnd(matchEndData);
+    setShowMatchEndModal(true);
+  };
+
+  // Confirm and finalize match end
+  const confirmMatchEnd = async () => {
+    if (!pendingMatchEnd) return;
+
     // Try to save to server (don't block navigation on error)
     try {
       if (user?.token && matchData?._id && !matchData._id.startsWith('guest_')) {
-        await matchService.endMatch(matchData._id, matchEndData, user.token);
+        await matchService.endMatch(matchData._id, pendingMatchEnd, user.token);
       }
     } catch (error) {
       console.warn('Could not save match to server:', error);
       // Continue to scorecard anyway - match data is passed locally
     }
 
-    navigation.replace('FullScorecard', { matchData: { ...matchData, ...matchEndData } });
+    setShowMatchEndModal(false);
+    navigation.replace('FullScorecard', { matchData: { ...matchData, ...pendingMatchEnd } });
+  };
+
+  // Save current match progress (for leaving mid-match)
+  const saveMatchProgress = async () => {
+    console.log('=== SAVING MATCH PROGRESS ===');
+    console.log('User token exists:', !!user?.token);
+    console.log('Match ID:', matchData?._id);
+
+    // Build current innings data
+    const currentInningsData = {
+      battingTeam: getBattingTeam(),
+      bowlingTeam: getBowlingTeam(),
+      runs: match.runs,
+      wickets: match.wickets,
+      overs: getCurrentOver(),
+      batting: allBatsmen.map(b => ({ ...b })),
+      bowling: allBowlers.map(b => ({ ...b })),
+      extras: { ...extras },
+      fallOfWickets: fallOfWickets.map(f => ({ ...f })),
+    };
+
+    let innings1, innings2;
+    if (match.innings === 1) {
+      innings1 = currentInningsData;
+      innings2 = null;
+    } else {
+      innings1 = firstInningsData || currentInningsData;
+      innings2 = currentInningsData;
+    }
+
+    const matchProgressData = {
+      status: 'in_progress',
+      innings: match.innings,
+      target: match.target,
+      innings1,
+      innings2,
+      // Include all settings to preserve them
+      totalOvers: settings.overs,
+      ballsPerOver: settings.ballsPerOver,
+      playersPerTeam: settings.playersPerTeam,
+      currentState: {
+        runs: match.runs,
+        wickets: match.wickets,
+        balls: match.balls,
+        overs: getCurrentOver(),
+        striker: { ...currentBatsmen.striker },
+        nonStriker: { ...currentBatsmen.nonStriker },
+        currentBowler: { ...currentBowler },
+        currentOverBalls: [...currentOverBalls],
+      },
+      date: new Date().toISOString(),
+    };
+
+    console.log('Match progress data:', JSON.stringify({
+      innings: matchProgressData.innings,
+      runs: matchProgressData.currentState.runs,
+      balls: matchProgressData.currentState.balls,
+      batsmenCount: matchProgressData.innings1?.batting?.length,
+    }));
+
+    // Try to save to server
+    try {
+      if (user?.token && matchData?._id && !matchData._id.startsWith('guest_')) {
+        console.log('Calling updateMatch API...');
+        const result = await matchService.updateMatch(matchData._id, matchProgressData, user.token);
+        console.log('Save result:', result);
+        return true;
+      } else {
+        console.log('Save skipped - no token or guest match');
+        return true;
+      }
+    } catch (error) {
+      console.warn('Could not save match progress:', JSON.stringify(error));
+      if (error.validationErrors) {
+        console.warn('Validation errors:', error.validationErrors);
+      }
+    }
+    return false;
+  };
+
+  // Handle leaving match - confirm, save, and leave
+  const handleLeaveMatch = () => {
+    Alert.alert(
+      'Leave Match',
+      'Are you sure you want to leave? Your progress will be saved.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          onPress: async () => {
+            const saved = await saveMatchProgress();
+            console.log('Match save result:', saved);
+            navigation.goBack();
+          }
+        },
+      ]
+    );
   };
 
   // Save current state to history before any action
@@ -1823,22 +2086,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <View style={{flex: 1}}>
+      <View style={{flex: 1}}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => {
-            Alert.alert(
-              'Leave Match',
-              'Are you sure you want to leave? Match progress may be lost.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Leave', style: 'destructive', onPress: () => navigation.goBack() },
-              ]
-            );
-          }}
+          onPress={handleLeaveMatch}
         >
           <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
@@ -1923,7 +2176,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
           contentContainerStyle={styles.scorecardScrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           onScrollBeginDrag={() => Keyboard.dismiss()}
+          nestedScrollEnabled={true}
         >
           {/* Match Header */}
           <View style={styles.scorecardHeader}>
@@ -1973,171 +2228,345 @@ const ScoreCardScreen = ({ navigation, route }) => {
             )}
           </View>
 
-          {/* First Innings Summary (if in second innings) */}
+          {/* Innings Toggle Tabs (only in 2nd innings) */}
           {match.innings === 2 && firstInningsData && (
-            <View style={styles.scorecardSection}>
-              <View style={styles.scorecardSectionHeader}>
-                <Text style={styles.scorecardSectionTitle}>1st Innings - {firstInningsData.battingTeam}</Text>
-                <Text style={styles.scorecardSectionScore}>
-                  {firstInningsData.runs}/{firstInningsData.wickets} ({firstInningsData.overs})
+            <View style={styles.inningsToggleContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.inningsToggleTab,
+                  scorecardInningsView === 1 && styles.inningsToggleTabActive
+                ]}
+                onPress={() => setScorecardInningsView(1)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.inningsToggleText,
+                  scorecardInningsView === 1 && styles.inningsToggleTextActive
+                ]}>
+                  1st Innings
                 </Text>
-              </View>
+                <Text style={[
+                  styles.inningsToggleScore,
+                  scorecardInningsView === 1 && styles.inningsToggleScoreActive
+                ]}>
+                  {firstInningsData.runs}/{firstInningsData.wickets}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.inningsToggleTab,
+                  scorecardInningsView === 2 && styles.inningsToggleTabActive
+                ]}
+                onPress={() => setScorecardInningsView(2)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.inningsToggleText,
+                  scorecardInningsView === 2 && styles.inningsToggleTextActive
+                ]}>
+                  2nd Innings
+                </Text>
+                <Text style={[
+                  styles.inningsToggleScore,
+                  scorecardInningsView === 2 && styles.inningsToggleScoreActive
+                ]}>
+                  {match.runs}/{match.wickets}
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {/* Current Innings - Batting */}
-          <View style={styles.scorecardSection}>
-            <View style={styles.scorecardSectionHeader}>
-              <Text style={styles.scorecardSectionTitle}>Batting - {getBattingTeam()}</Text>
-            </View>
-            <View style={styles.scorecardTable}>
-              <View style={styles.scorecardTableHeader}>
-                <Text style={[styles.scorecardTableHeaderText, styles.scorecardNameCol]}>Batsman</Text>
-                <Text style={styles.scorecardTableHeaderText}>R</Text>
-                <Text style={styles.scorecardTableHeaderText}>B</Text>
-                <Text style={styles.scorecardTableHeaderText}>4s</Text>
-                <Text style={styles.scorecardTableHeaderText}>6s</Text>
-                <Text style={styles.scorecardTableHeaderText}>SR</Text>
-              </View>
-              {allBatsmen.filter(b => b.balls > 0 || b.runs > 0 || b.isOut).map((batsman, index) => (
-                <View key={batsman.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
-                  <View style={styles.scorecardNameCol}>
-                    <TextInput
-                      style={styles.scorecardPlayerNameInput}
-                      value={batsman.name}
-                      onChangeText={(text) => handleUpdateBatsmanName(batsman.id, text)}
-                      selectTextOnFocus={true}
-                      returnKeyType="done"
-                    />
-                    <Text style={[
-                      styles.scorecardPlayerStatus,
-                      batsman.isOut && styles.scorecardPlayerStatusOut
-                    ]}>
-                      {batsman.isOut ? batsman.outType || 'Out' :
-                       batsman.id === striker.id ? 'Batting *' :
-                       batsman.id === nonStriker.id ? 'Batting' :
-                       batsman.isRetired ? 'Retired' : 'Not Out'}
+          {/* Render First Innings Data (when in 2nd innings and viewing 1st innings) */}
+          {match.innings === 2 && firstInningsData && scorecardInningsView === 1 ? (
+            <>
+              {/* First Innings - Batting */}
+              <View style={styles.scorecardSection}>
+                <View style={styles.scorecardSectionHeader}>
+                  <Text style={styles.scorecardSectionTitle}>Batting - {firstInningsData.battingTeam}</Text>
+                  <Text style={styles.scorecardSectionScore}>
+                    {firstInningsData.runs}/{firstInningsData.wickets} ({firstInningsData.overs})
+                  </Text>
+                </View>
+                <View style={styles.scorecardTable}>
+                  <View style={styles.scorecardTableHeader}>
+                    <Text style={[styles.scorecardTableHeaderText, styles.scorecardNameCol]}>Batsman</Text>
+                    <Text style={styles.scorecardTableHeaderText}>R</Text>
+                    <Text style={styles.scorecardTableHeaderText}>B</Text>
+                    <Text style={styles.scorecardTableHeaderText}>4s</Text>
+                    <Text style={styles.scorecardTableHeaderText}>6s</Text>
+                    <Text style={styles.scorecardTableHeaderText}>SR</Text>
+                  </View>
+                  {firstInningsData.batting?.filter(b => b.balls > 0 || b.runs > 0 || b.isOut).map((batsman, index) => (
+                    <View key={batsman.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
+                      <View style={styles.scorecardNameCol}>
+                        <Text style={styles.scorecardPlayerNameText}>{batsman.name}</Text>
+                        <Text style={[
+                          styles.scorecardPlayerStatus,
+                          batsman.isOut && styles.scorecardPlayerStatusOut
+                        ]}>
+                          {batsman.isOut ? batsman.outType || 'Out' :
+                           batsman.isRetired ? 'Retired' : 'Not Out'}
+                        </Text>
+                      </View>
+                      <Text style={[styles.scorecardStatText, styles.scorecardRunsText]}>{batsman.runs}</Text>
+                      <Text style={styles.scorecardStatText}>{batsman.balls}</Text>
+                      <Text style={styles.scorecardStatText}>{batsman.fours}</Text>
+                      <Text style={styles.scorecardStatText}>{batsman.sixes}</Text>
+                      <Text style={styles.scorecardStatText}>
+                        {batsman.balls > 0 ? ((batsman.runs / batsman.balls) * 100).toFixed(1) : '0.0'}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                {/* Extras */}
+                {firstInningsData.extras && (
+                  <View style={styles.scorecardExtras}>
+                    <Text style={styles.scorecardExtrasLabel}>Extras: {firstInningsData.extras.total}</Text>
+                    <Text style={styles.scorecardExtrasDetail}>
+                      (WD: {firstInningsData.extras.wides}, NB: {firstInningsData.extras.noBalls}, B: {firstInningsData.extras.byes}, LB: {firstInningsData.extras.legByes})
                     </Text>
                   </View>
-                  <Text style={[styles.scorecardStatText, styles.scorecardRunsText]}>{batsman.runs}</Text>
-                  <Text style={styles.scorecardStatText}>{batsman.balls}</Text>
-                  <Text style={styles.scorecardStatText}>{batsman.fours}</Text>
-                  <Text style={styles.scorecardStatText}>{batsman.sixes}</Text>
-                  <Text style={styles.scorecardStatText}>
-                    {batsman.balls > 0 ? ((batsman.runs / batsman.balls) * 100).toFixed(1) : '0.0'}
-                  </Text>
+                )}
+              </View>
+
+              {/* First Innings - Bowling */}
+              <View style={styles.scorecardSection}>
+                <View style={styles.scorecardSectionHeader}>
+                  <Text style={styles.scorecardSectionTitle}>Bowling - {firstInningsData.bowlingTeam}</Text>
                 </View>
-              ))}
-              {/* Yet to bat */}
-              {allBatsmen.filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker.id && b.id !== nonStriker.id && !b.isRetired).length > 0 && (
-                <View style={styles.scorecardYetToBat}>
-                  <Text style={styles.scorecardYetToBatLabel}>Yet to bat: </Text>
-                  <Text style={styles.scorecardYetToBatNames}>
-                    {allBatsmen
-                      .filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker.id && b.id !== nonStriker.id && !b.isRetired)
-                      .map(b => b.name)
-                      .join(', ')}
-                  </Text>
+                <View style={styles.scorecardTable}>
+                  <View style={[styles.scorecardTableHeader, styles.scorecardBowlingHeader]}>
+                    <Text style={[styles.scorecardTableHeaderText, styles.scorecardNameCol]}>Bowler</Text>
+                    <Text style={styles.scorecardTableHeaderText}>O</Text>
+                    <Text style={styles.scorecardTableHeaderText}>M</Text>
+                    <Text style={styles.scorecardTableHeaderText}>R</Text>
+                    <Text style={styles.scorecardTableHeaderText}>W</Text>
+                    <Text style={styles.scorecardTableHeaderText}>ER</Text>
+                  </View>
+                  {firstInningsData.bowling?.filter(b => {
+                    const [overs, balls] = b.overs.split('.').map(Number);
+                    return overs > 0 || balls > 0;
+                  }).map((bowler, index) => {
+                    const [overs, balls] = bowler.overs.split('.').map(Number);
+                    const totalBalls = overs * 6 + balls;
+                    const economyRate = totalBalls > 0 ? ((bowler.runs / totalBalls) * 6).toFixed(2) : '0.00';
+                    return (
+                      <View key={bowler.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
+                        <View style={styles.scorecardNameCol}>
+                          <Text style={styles.scorecardPlayerNameText}>{bowler.name}</Text>
+                        </View>
+                        <Text style={styles.scorecardStatText}>{bowler.overs}</Text>
+                        <Text style={styles.scorecardStatText}>{bowler.maidens}</Text>
+                        <Text style={styles.scorecardStatText}>{bowler.runs}</Text>
+                        <Text style={[styles.scorecardStatText, styles.scorecardWicketsText]}>{bowler.wickets}</Text>
+                        <Text style={styles.scorecardStatText}>{economyRate}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* First Innings - Fall of Wickets */}
+              {firstInningsData.fallOfWickets?.length > 0 && (
+                <View style={styles.scorecardSection}>
+                  <View style={styles.scorecardSectionHeader}>
+                    <Text style={styles.scorecardSectionTitle}>Fall of Wickets</Text>
+                  </View>
+                  <View style={styles.scorecardFowContainer}>
+                    {firstInningsData.fallOfWickets.map((fow, index) => (
+                      <View key={index} style={styles.scorecardFowItem}>
+                        <View style={styles.scorecardFowBadge}>
+                          <Text style={styles.scorecardFowWicket}>{fow.wicket}</Text>
+                        </View>
+                        <View style={styles.scorecardFowDetails}>
+                          <Text style={styles.scorecardFowScore}>{fow.score}</Text>
+                          <Text style={styles.scorecardFowInfo}>{fow.batsman_name} ({fow.over} ov)</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
                 </View>
               )}
-            </View>
-            {/* Extras */}
-            <View style={styles.scorecardExtras}>
-              <Text style={styles.scorecardExtrasLabel}>Extras: {extras.total}</Text>
-              <Text style={styles.scorecardExtrasDetail}>
-                (WD: {extras.wides}, NB: {extras.noBalls}, B: {extras.byes}, LB: {extras.legByes})
-              </Text>
-            </View>
-          </View>
 
-          {/* Current Innings - Bowling */}
-          <View style={styles.scorecardSection}>
-            <View style={styles.scorecardSectionHeader}>
-              <Text style={styles.scorecardSectionTitle}>Bowling - {getBowlingTeam()}</Text>
-            </View>
-            <View style={styles.scorecardTable}>
-              <View style={[styles.scorecardTableHeader, styles.scorecardBowlingHeader]}>
-                <Text style={[styles.scorecardTableHeaderText, styles.scorecardNameCol]}>Bowler</Text>
-                <Text style={styles.scorecardTableHeaderText}>O</Text>
-                <Text style={styles.scorecardTableHeaderText}>M</Text>
-                <Text style={styles.scorecardTableHeaderText}>R</Text>
-                <Text style={styles.scorecardTableHeaderText}>W</Text>
-                <Text style={styles.scorecardTableHeaderText}>ER</Text>
-              </View>
-              {allBowlers.filter(b => {
-                const [overs, balls] = b.overs.split('.').map(Number);
-                return overs > 0 || balls > 0;
-              }).map((bowler, index) => {
-                const [overs, balls] = bowler.overs.split('.').map(Number);
-                const totalBalls = overs * 6 + balls;
-                const economyRate = totalBalls > 0 ? ((bowler.runs / totalBalls) * 6).toFixed(2) : '0.00';
-                return (
-                  <View key={bowler.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
-                    <View style={styles.scorecardNameCol}>
-                      <TextInput
-                        style={styles.scorecardPlayerNameInput}
-                        value={bowler.name}
-                        onChangeText={(text) => handleUpdateBowlerName(bowler.id, text)}
-                        selectTextOnFocus={true}
-                        returnKeyType="done"
-                      />
-                      {bowler.id === currentBowler.id && (
-                        <Text style={styles.scorecardCurrentBowler}>Bowling</Text>
-                      )}
-                    </View>
-                    <Text style={styles.scorecardStatText}>{bowler.overs}</Text>
-                    <Text style={styles.scorecardStatText}>{bowler.maidens}</Text>
-                    <Text style={styles.scorecardStatText}>{bowler.runs}</Text>
-                    <Text style={[styles.scorecardStatText, styles.scorecardWicketsText]}>{bowler.wickets}</Text>
-                    <Text style={styles.scorecardStatText}>{economyRate}</Text>
+              {/* First Innings - Over History */}
+              {firstInningsData.overHistory?.length > 0 && (
+                <View style={styles.scorecardSection}>
+                  <View style={styles.scorecardSectionHeader}>
+                    <Text style={styles.scorecardSectionTitle}>Over by Over</Text>
                   </View>
-                );
-              })}
-            </View>
-          </View>
+                  <View style={styles.scorecardOverHistory}>
+                    {firstInningsData.overHistory.slice(-6).map((over, index) => (
+                      <View key={index} style={styles.scorecardOverItem}>
+                        <Text style={styles.scorecardOverNumber}>Over {firstInningsData.overHistory.length - 5 + index}</Text>
+                        <View style={styles.scorecardOverBalls}>
+                          {over.balls?.map((ball, ballIndex) => (
+                            <Text key={ballIndex} style={styles.scorecardOverBall}>{ball}</Text>
+                          ))}
+                        </View>
+                        <Text style={styles.scorecardOverRuns}>{over.runs} runs</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Current Innings - Batting */}
+              <View style={styles.scorecardSection}>
+                <View style={styles.scorecardSectionHeader}>
+                  <Text style={styles.scorecardSectionTitle}>Batting - {getBattingTeam()}</Text>
+                </View>
+                <View style={styles.scorecardTable}>
+                  <View style={styles.scorecardTableHeader}>
+                    <Text style={[styles.scorecardTableHeaderText, styles.scorecardNameCol]}>Batsman</Text>
+                    <Text style={styles.scorecardTableHeaderText}>R</Text>
+                    <Text style={styles.scorecardTableHeaderText}>B</Text>
+                    <Text style={styles.scorecardTableHeaderText}>4s</Text>
+                    <Text style={styles.scorecardTableHeaderText}>6s</Text>
+                    <Text style={styles.scorecardTableHeaderText}>SR</Text>
+                  </View>
+                  {allBatsmen.filter(b => b.balls > 0 || b.runs > 0 || b.isOut).map((batsman, index) => (
+                    <View key={batsman.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
+                      <View style={styles.scorecardNameCol}>
+                        <TextInput
+                          style={styles.scorecardPlayerNameInput}
+                          value={batsman.name}
+                          onChangeText={(text) => handleUpdateBatsmanName(batsman.id, text)}
+                          selectTextOnFocus={true}
+                          returnKeyType="done"
+                        />
+                        <Text style={[
+                          styles.scorecardPlayerStatus,
+                          batsman.isOut && styles.scorecardPlayerStatusOut
+                        ]}>
+                          {batsman.isOut ? batsman.outType || 'Out' :
+                           batsman.id === striker.id ? 'Batting *' :
+                           batsman.id === nonStriker.id ? 'Batting' :
+                           batsman.isRetired ? 'Retired' : 'Not Out'}
+                        </Text>
+                      </View>
+                      <Text style={[styles.scorecardStatText, styles.scorecardRunsText]}>{batsman.runs}</Text>
+                      <Text style={styles.scorecardStatText}>{batsman.balls}</Text>
+                      <Text style={styles.scorecardStatText}>{batsman.fours}</Text>
+                      <Text style={styles.scorecardStatText}>{batsman.sixes}</Text>
+                      <Text style={styles.scorecardStatText}>
+                        {batsman.balls > 0 ? ((batsman.runs / batsman.balls) * 100).toFixed(1) : '0.0'}
+                      </Text>
+                    </View>
+                  ))}
+                  {/* Yet to bat */}
+                  {allBatsmen.filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker.id && b.id !== nonStriker.id && !b.isRetired).length > 0 && (
+                    <View style={styles.scorecardYetToBat}>
+                      <Text style={styles.scorecardYetToBatLabel}>Yet to bat: </Text>
+                      <Text style={styles.scorecardYetToBatNames}>
+                        {allBatsmen
+                          .filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker.id && b.id !== nonStriker.id && !b.isRetired)
+                          .map(b => b.name)
+                          .join(', ')}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                {/* Extras */}
+                <View style={styles.scorecardExtras}>
+                  <Text style={styles.scorecardExtrasLabel}>Extras: {extras.total}</Text>
+                  <Text style={styles.scorecardExtrasDetail}>
+                    (WD: {extras.wides}, NB: {extras.noBalls}, B: {extras.byes}, LB: {extras.legByes})
+                  </Text>
+                </View>
+              </View>
 
-          {/* Fall of Wickets */}
-          {fallOfWickets.length > 0 && (
-            <View style={styles.scorecardSection}>
-              <View style={styles.scorecardSectionHeader}>
-                <Text style={styles.scorecardSectionTitle}>Fall of Wickets</Text>
-              </View>
-              <View style={styles.scorecardFowContainer}>
-                {fallOfWickets.map((fow, index) => (
-                  <View key={index} style={styles.scorecardFowItem}>
-                    <View style={styles.scorecardFowBadge}>
-                      <Text style={styles.scorecardFowWicket}>{fow.wicket}</Text>
-                    </View>
-                    <View style={styles.scorecardFowDetails}>
-                      <Text style={styles.scorecardFowScore}>{fow.score}</Text>
-                      <Text style={styles.scorecardFowInfo}>{fow.batsman_name} ({fow.over} ov)</Text>
-                    </View>
+              {/* Current Innings - Bowling */}
+              <View style={styles.scorecardSection}>
+                <View style={styles.scorecardSectionHeader}>
+                  <Text style={styles.scorecardSectionTitle}>Bowling - {getBowlingTeam()}</Text>
+                </View>
+                <View style={styles.scorecardTable}>
+                  <View style={[styles.scorecardTableHeader, styles.scorecardBowlingHeader]}>
+                    <Text style={[styles.scorecardTableHeaderText, styles.scorecardNameCol]}>Bowler</Text>
+                    <Text style={styles.scorecardTableHeaderText}>O</Text>
+                    <Text style={styles.scorecardTableHeaderText}>M</Text>
+                    <Text style={styles.scorecardTableHeaderText}>R</Text>
+                    <Text style={styles.scorecardTableHeaderText}>W</Text>
+                    <Text style={styles.scorecardTableHeaderText}>ER</Text>
                   </View>
-                ))}
+                  {allBowlers.filter(b => {
+                    const [overs, balls] = b.overs.split('.').map(Number);
+                    return overs > 0 || balls > 0;
+                  }).map((bowler, index) => {
+                    const [overs, balls] = bowler.overs.split('.').map(Number);
+                    const totalBalls = overs * 6 + balls;
+                    const economyRate = totalBalls > 0 ? ((bowler.runs / totalBalls) * 6).toFixed(2) : '0.00';
+                    return (
+                      <View key={bowler.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
+                        <View style={styles.scorecardNameCol}>
+                          <TextInput
+                            style={styles.scorecardPlayerNameInput}
+                            value={bowler.name}
+                            onChangeText={(text) => handleUpdateBowlerName(bowler.id, text)}
+                            selectTextOnFocus={true}
+                            returnKeyType="done"
+                          />
+                          {bowler.id === currentBowler.id && (
+                            <Text style={styles.scorecardCurrentBowler}>Bowling</Text>
+                          )}
+                        </View>
+                        <Text style={styles.scorecardStatText}>{bowler.overs}</Text>
+                        <Text style={styles.scorecardStatText}>{bowler.maidens}</Text>
+                        <Text style={styles.scorecardStatText}>{bowler.runs}</Text>
+                        <Text style={[styles.scorecardStatText, styles.scorecardWicketsText]}>{bowler.wickets}</Text>
+                        <Text style={styles.scorecardStatText}>{economyRate}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
               </View>
-            </View>
-          )}
 
-          {/* Over History */}
-          {overHistory.length > 0 && (
-            <View style={styles.scorecardSection}>
-              <View style={styles.scorecardSectionHeader}>
-                <Text style={styles.scorecardSectionTitle}>Over by Over</Text>
-              </View>
-              <View style={styles.scorecardOverHistory}>
-                {overHistory.slice(-6).map((over, index) => (
-                  <View key={index} style={styles.scorecardOverItem}>
-                    <Text style={styles.scorecardOverNumber}>Over {overHistory.length - 5 + index}</Text>
-                    <View style={styles.scorecardOverBalls}>
-                      {over.balls.map((ball, ballIndex) => (
-                        <Text key={ballIndex} style={styles.scorecardOverBall}>{ball}</Text>
-                      ))}
-                    </View>
-                    <Text style={styles.scorecardOverRuns}>{over.runs} runs</Text>
+              {/* Fall of Wickets */}
+              {fallOfWickets.length > 0 && (
+                <View style={styles.scorecardSection}>
+                  <View style={styles.scorecardSectionHeader}>
+                    <Text style={styles.scorecardSectionTitle}>Fall of Wickets</Text>
                   </View>
-                ))}
-              </View>
-            </View>
+                  <View style={styles.scorecardFowContainer}>
+                    {fallOfWickets.map((fow, index) => (
+                      <View key={index} style={styles.scorecardFowItem}>
+                        <View style={styles.scorecardFowBadge}>
+                          <Text style={styles.scorecardFowWicket}>{fow.wicket}</Text>
+                        </View>
+                        <View style={styles.scorecardFowDetails}>
+                          <Text style={styles.scorecardFowScore}>{fow.score}</Text>
+                          <Text style={styles.scorecardFowInfo}>{fow.batsman_name} ({fow.over} ov)</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Over History */}
+              {overHistory.length > 0 && (
+                <View style={styles.scorecardSection}>
+                  <View style={styles.scorecardSectionHeader}>
+                    <Text style={styles.scorecardSectionTitle}>Over by Over</Text>
+                  </View>
+                  <View style={styles.scorecardOverHistory}>
+                    {overHistory.slice(-6).map((over, index) => (
+                      <View key={index} style={styles.scorecardOverItem}>
+                        <Text style={styles.scorecardOverNumber}>Over {overHistory.length - 5 + index}</Text>
+                        <View style={styles.scorecardOverBalls}>
+                          {over.balls.map((ball, ballIndex) => (
+                            <Text key={ballIndex} style={styles.scorecardOverBall}>{ball}</Text>
+                          ))}
+                        </View>
+                        <Text style={styles.scorecardOverRuns}>{over.runs} runs</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </>
           )}
 
           {/* Back to Live Button */}
@@ -2156,7 +2585,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         onScrollBeginDrag={() => Keyboard.dismiss()}
+        nestedScrollEnabled={true}
       >
         {/* Top Section - Score & Batsmen */}
         <View style={styles.topSection}>
@@ -2242,10 +2673,13 @@ const ScoreCardScreen = ({ navigation, route }) => {
                 <Text style={styles.strikerLabelText}>STRIKER</Text>
               </View>
             </View>
-            <TextInput
-              style={styles.playerName}
+            <AutocompleteInput
               value={striker.name}
               onChangeText={(text) => handleUpdatePlayerName(striker.id, text, true)}
+              type="player"
+              placeholder="Striker"
+              inputStyle={styles.playerName}
+              style={styles.playerNameWrapper}
               selectTextOnFocus
             />
             <View style={styles.batsmanStats}>
@@ -2255,10 +2689,13 @@ const ScoreCardScreen = ({ navigation, route }) => {
           </View>
 
           <View style={styles.batsmanCard}>
-            <TextInput
-              style={styles.playerName}
+            <AutocompleteInput
               value={nonStriker.name}
               onChangeText={(text) => handleUpdatePlayerName(nonStriker.id, text, false)}
+              type="player"
+              placeholder="Non-Striker"
+              inputStyle={styles.playerName}
+              style={styles.playerNameWrapper}
               selectTextOnFocus
             />
             <View style={styles.batsmanStats}>
@@ -2274,10 +2711,13 @@ const ScoreCardScreen = ({ navigation, route }) => {
           {/* Bowler Row */}
           <View style={styles.bowlerRow}>
             <View style={styles.bowlerNameContainer}>
-              <TextInput
-                style={styles.bowlerName}
+              <AutocompleteInput
                 value={currentBowler.name}
                 onChangeText={(text) => handleUpdatePlayerName(currentBowler.id, text, false, true)}
+                type="player"
+                placeholder="Bowler"
+                inputStyle={styles.bowlerName}
+                style={styles.bowlerNameWrapper}
                 selectTextOnFocus
               />
             </View>
@@ -2755,7 +3195,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                 Previous over's bowler cannot bowl consecutive overs
               </Text>
             )}
-            <ScrollView style={styles.bowlerList}>
+            <ScrollView style={styles.bowlerList} nestedScrollEnabled={true}>
               {allBowlers.map((bowler) => {
                 const isPreviousBowler = bowler.id === previousBowlerId;
                 const isCurrentBowler = currentBowler.id === bowler.id;
@@ -2806,7 +3246,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Over History</Text>
-            <ScrollView style={styles.historyList}>
+            <ScrollView style={styles.historyList} nestedScrollEnabled={true}>
               {overHistory.length === 0 ? (
                 <Text style={styles.noHistoryText}>No completed overs yet</Text>
               ) : (
@@ -2847,22 +3287,104 @@ const ScoreCardScreen = ({ navigation, route }) => {
       <Modal visible={showEndInningsModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>End Innings?</Text>
+            <Text style={styles.modalTitle}>
+              {match.balls >= settings.overs * settings.ballsPerOver
+                ? 'Innings Complete!'
+                : match.wickets >= settings.playersPerTeam - 1
+                  ? 'All Out!'
+                  : 'End Innings?'}
+            </Text>
             <Text style={styles.modalMessage}>
               {getBattingTeam()} scored {match.runs}/{match.wickets} in {getCurrentOver()} overs
             </Text>
-            <View style={styles.modalActions}>
+
+            {/* Undo Last Ball button */}
+            {undoHistory.length > 0 && (
               <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setShowEndInningsModal(false)}
+                style={{
+                  backgroundColor: '#f59e0b',
+                  paddingVertical: 12,
+                  paddingHorizontal: 20,
+                  borderRadius: 8,
+                  marginBottom: 12,
+                  alignItems: 'center',
+                }}
+                onPress={() => {
+                  setShowEndInningsModal(false);
+                  handleUndo();
+                }}
               >
-                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+                <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>Undo Last Ball</Text>
               </TouchableOpacity>
+            )}
+
+            <View style={styles.modalActions}>
+              {/* Only show Continue Playing if innings is NOT genuinely over */}
+              {match.balls < settings.overs * settings.ballsPerOver &&
+               match.wickets < settings.playersPerTeam - 1 && (
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => {
+                    setShowEndInningsModal(false);
+                    setEndInningsPromptDismissed(true);
+                  }}
+                >
+                  <Text style={styles.modalCancelButtonText}>Continue Playing</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={styles.modalConfirmButton}
                 onPress={confirmEndInnings}
               >
-                <Text style={styles.modalConfirmButtonText}>End Innings</Text>
+                <Text style={styles.modalConfirmButtonText}>
+                  {match.innings === 1 ? 'Start 2nd Innings' : 'End Match'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Match End Confirmation Modal (2nd Innings) */}
+      <Modal visible={showMatchEndModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>🏆 Match Complete!</Text>
+            <Text style={styles.modalMessage}>
+              {pendingMatchEnd?.result || 'Match has ended'}
+            </Text>
+            <Text style={[styles.modalMessage, { marginTop: 8, fontSize: 14 }]}>
+              {getBattingTeam()}: {match.runs}/{match.wickets} ({getCurrentOver()} ov)
+            </Text>
+
+            {/* Undo Last Ball button */}
+            {undoHistory.length > 0 && (
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#f59e0b',
+                  paddingVertical: 12,
+                  paddingHorizontal: 20,
+                  borderRadius: 8,
+                  marginTop: 16,
+                  marginBottom: 12,
+                  alignItems: 'center',
+                }}
+                onPress={() => {
+                  setShowMatchEndModal(false);
+                  setPendingMatchEnd(null);
+                  handleUndo();
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>Undo Last Ball</Text>
+              </TouchableOpacity>
+            )}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalConfirmButton}
+                onPress={confirmMatchEnd}
+              >
+                <Text style={styles.modalConfirmButtonText}>View Scorecard</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -3777,6 +4299,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
               style={styles.settingsScrollView}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled={true}
             >
               {/* Extra Ball Settings */}
               <View style={styles.settingsSection}>
@@ -3842,12 +4365,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   <Text style={styles.settingsSectionSubtitle}>(Batting Order: 1→{settings.playersPerTeam})</Text>
                 </View>
                 {teams.teamA.playerNames.map((playerName, index) => (
-                  <View key={`teamA-${index}`} style={styles.playerNameRow}>
+                  <View key={`teamA-${index}`} style={[styles.playerNameRow, { zIndex: 1000 - index }]}>
                     <View style={styles.playerNumberBadge}>
                       <Text style={styles.playerNumberText}>{index + 1}</Text>
                     </View>
-                    <TextInput
-                      style={styles.playerNameInput}
+                    <AutocompleteInput
                       value={playerName}
                       onChangeText={(text) => {
                         setTeams(prev => ({
@@ -3860,7 +4382,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           }
                         }));
                       }}
+                      type="player"
                       placeholder={`Player ${index + 1}`}
+                      inputStyle={styles.playerNameInput}
+                      style={styles.playerNameInputWrapper}
                       selectTextOnFocus={true}
                       returnKeyType="done"
                     />
@@ -3875,12 +4400,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   <Text style={styles.settingsSectionSubtitle}>(Bowling Order: {settings.playersPerTeam}→1)</Text>
                 </View>
                 {teams.teamB.playerNames.map((playerName, index) => (
-                  <View key={`teamB-${index}`} style={styles.playerNameRow}>
+                  <View key={`teamB-${index}`} style={[styles.playerNameRow, { zIndex: 1000 - index }]}>
                     <View style={styles.playerNumberBadge}>
                       <Text style={styles.playerNumberText}>{index + 1}</Text>
                     </View>
-                    <TextInput
-                      style={styles.playerNameInput}
+                    <AutocompleteInput
                       value={playerName}
                       onChangeText={(text) => {
                         setTeams(prev => ({
@@ -3893,7 +4417,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           }
                         }));
                       }}
+                      type="player"
                       placeholder={`Player ${index + 1}`}
+                      inputStyle={styles.playerNameInput}
+                      style={styles.playerNameInputWrapper}
                       selectTextOnFocus={true}
                       returnKeyType="done"
                     />
@@ -3956,8 +4483,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
           </View>
         </View>
       </Modal>
-        </View>
-      </TouchableWithoutFeedback>
+      </View>
     </SafeAreaView>
   );
 };
@@ -4216,6 +4742,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: responsiveSpacing.xs,
     paddingVertical: responsiveSpacing.xs,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderRadius: 0,
+  },
+  playerNameWrapper: {
+    zIndex: 1000,
   },
   batsmanStats: {
     flexDirection: 'row',
@@ -4253,6 +4785,13 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.semibold,
     color: colors.textPrimary,
     paddingVertical: responsiveSpacing.sm,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderRadius: 0,
+  },
+  bowlerNameWrapper: {
+    flex: 1,
+    zIndex: 1000,
   },
   bowlerSpellContainer: {
     flex: 1,
@@ -5868,6 +6407,44 @@ const styles = StyleSheet.create({
     color: colors.error,
   },
 
+  // Innings Toggle Tabs
+  inningsToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.md,
+    padding: 4,
+    ...shadows.sm,
+  },
+  inningsToggleTab: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  inningsToggleTabActive: {
+    backgroundColor: colors.primary,
+  },
+  inningsToggleText: {
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.semibold,
+    color: colors.textSecondary,
+  },
+  inningsToggleTextActive: {
+    color: colors.surface,
+  },
+  inningsToggleScore: {
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.bold,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  inningsToggleScoreActive: {
+    color: colors.surface,
+  },
+
   // Scorecard Section
   scorecardSection: {
     backgroundColor: colors.surface,
@@ -5946,6 +6523,13 @@ const styles = StyleSheet.create({
     margin: 0,
     backgroundColor: 'transparent',
     minHeight: 20,
+  },
+  scorecardPlayerNameText: {
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.semibold,
+    color: colors.textPrimary,
+    minHeight: 20,
+    lineHeight: 20,
   },
   scorecardPlayerStatus: {
     fontSize: fontSizes.xs,
@@ -6247,6 +6831,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     fontSize: fontSizes.sm,
     color: colors.textPrimary,
+  },
+  playerNameInputWrapper: {
+    flex: 1,
   },
   settingsApplyButton: {
     backgroundColor: colors.primary,

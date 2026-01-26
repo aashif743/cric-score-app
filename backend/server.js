@@ -9,6 +9,7 @@ const { Server } = require("socket.io");
 // Import your route files
 const matchRoutes = require("./routes/matchRoutes");
 const userRoutes = require("./routes/userRoutes");
+const suggestionRoutes = require("./routes/suggestionRoutes");
 
 dotenv.config();
 
@@ -57,6 +58,7 @@ app.use(express.json());
 // API Routes
 app.use("/api/matches", matchRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/suggestions", suggestionRoutes);
 
 // MongoDB Connection
 mongoose

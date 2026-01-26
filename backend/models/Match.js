@@ -1,6 +1,9 @@
 const mongoose = require("mongoose");
 
 const BatsmanSchema = new mongoose.Schema({
+  id: {
+    type: Number,
+  },
   name: {
     type: String,
     required: [true, "Batsman name is required"],
@@ -30,9 +33,13 @@ const BatsmanSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  isRetired: {
+    type: Boolean,
+    default: false
+  },
   outType: {
     type: String,
-    enum: ["Bowled", "Caught", "LBW", "Run Out", "Stumped", "Retired", "Hit Wicket", "Retired Out", "Not Out", "Did Not Bat"],
+    enum: ["Bowled", "Caught", "LBW", "Run Out", "Stumped", "Retired", "Hit Wicket", "Retired Out", "Not Out", "Did Not Bat", ""],
     default: "Not Out"
   },
   strikeRate: {
@@ -42,6 +49,9 @@ const BatsmanSchema = new mongoose.Schema({
 }, { _id: false });
 
 const BowlerSchema = new mongoose.Schema({
+  id: {
+    type: Number,
+  },
   name: {
     type: String,
     required: [true, "Bowler name is required"],
@@ -258,6 +268,18 @@ const MatchSchema = new mongoose.Schema({
   },
   liveState: {
     type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  currentState: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  innings: {
+    type: Number,
+    default: 1
+  },
+  target: {
+    type: Number,
     default: null
   },
   innings1: {

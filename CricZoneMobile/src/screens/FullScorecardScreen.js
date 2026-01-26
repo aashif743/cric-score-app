@@ -8,10 +8,21 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
+  Alert,
+  Platform,
+  Modal,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
+import ViewShot, { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
+
+// Import logo
+const criczoneLogo = require('../../assets/logo/criczone_icon.png');
 
 const { width } = Dimensions.get('window');
 
@@ -187,6 +198,90 @@ const ErrorIcon = ({ size = 60, color = colors.error }) => (
   </View>
 );
 
+const DownloadIcon = ({ size = 24, color = colors.surface }) => (
+  <View style={[styles.iconContainer, { width: size, height: size }]}>
+    <View style={{
+      width: size * 0.5,
+      height: size * 0.4,
+      borderBottomWidth: 2.5,
+      borderLeftWidth: 2.5,
+      borderRightWidth: 2.5,
+      borderColor: color,
+      borderBottomLeftRadius: 4,
+      borderBottomRightRadius: 4,
+      position: 'absolute',
+      bottom: size * 0.1,
+    }} />
+    <View style={{
+      width: 2.5,
+      height: size * 0.4,
+      backgroundColor: color,
+      position: 'absolute',
+      top: size * 0.1,
+    }} />
+    <View style={{
+      width: 0,
+      height: 0,
+      borderLeftWidth: size * 0.15,
+      borderRightWidth: size * 0.15,
+      borderTopWidth: size * 0.15,
+      borderLeftColor: 'transparent',
+      borderRightColor: 'transparent',
+      borderTopColor: color,
+      position: 'absolute',
+      top: size * 0.4,
+    }} />
+  </View>
+);
+
+const ShareIcon = ({ size = 24, color = colors.surface }) => (
+  <View style={[styles.iconContainer, { width: size, height: size }]}>
+    <View style={{
+      width: size * 0.25,
+      height: size * 0.25,
+      borderRadius: size * 0.125,
+      backgroundColor: color,
+      position: 'absolute',
+      top: size * 0.1,
+      right: size * 0.15,
+    }} />
+    <View style={{
+      width: size * 0.25,
+      height: size * 0.25,
+      borderRadius: size * 0.125,
+      backgroundColor: color,
+      position: 'absolute',
+      bottom: size * 0.1,
+      left: size * 0.15,
+    }} />
+    <View style={{
+      width: size * 0.25,
+      height: size * 0.25,
+      borderRadius: size * 0.125,
+      backgroundColor: color,
+      position: 'absolute',
+      top: size * 0.1,
+      left: size * 0.15,
+    }} />
+    <View style={{
+      width: size * 0.35,
+      height: 2,
+      backgroundColor: color,
+      position: 'absolute',
+      top: size * 0.35,
+      transform: [{ rotate: '30deg' }],
+    }} />
+    <View style={{
+      width: size * 0.35,
+      height: 2,
+      backgroundColor: color,
+      position: 'absolute',
+      top: size * 0.55,
+      transform: [{ rotate: '-30deg' }],
+    }} />
+  </View>
+);
+
 // Animated Table Row Component
 const AnimatedTableRow = ({ children, delay, style }) => {
   const animatedValue = useRef(new Animated.Value(0)).current;
@@ -242,6 +337,13 @@ const FullScorecardScreen = ({ navigation, route }) => {
   const [loading, setLoading] = useState(!initialMatchData && matchId);
   const [error, setError] = useState(null);
   const [activeInnings, setActiveInnings] = useState(1);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+
+  // Refs
+  const shareableRef = useRef(null);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -324,6 +426,247 @@ const FullScorecardScreen = ({ navigation, route }) => {
     const totalBalls = (whole || 0) * 6 + (part || 0);
     if (totalBalls === 0) return '0.00';
     return ((runs / totalBalls) * 6).toFixed(2);
+  };
+
+  /**
+   * Convert cricket overs format to decimal
+   * Cricket format: X.Y where Y is balls (0-5), NOT a decimal
+   * Example: 10.3 overs = 10 overs + 3 balls = 10 + (3/6) = 10.5 decimal
+   *
+   * @param {string|number} overs - Overs in cricket format (e.g., "10.3")
+   * @returns {number} - Overs in decimal format (e.g., 10.5)
+   */
+  const oversToDecimal = (overs) => {
+    if (!overs && overs !== 0) return 0;
+    const oversStr = overs.toString();
+    const parts = oversStr.split('.');
+    const wholeOvers = parseInt(parts[0]) || 0;
+    const balls = parseInt(parts[1]) || 0;
+    // Balls range from 0-5, divide by 6 to convert to decimal
+    return wholeOvers + (balls / 6);
+  };
+
+  /**
+   * Calculate Net Run Rate (NRR) following ICC Cricket Rules
+   *
+   * ICC NRR RULES:
+   * 1. NRR = (Runs Scored / Overs Faced) - (Runs Conceded / Overs Bowled)
+   *
+   * 2. ALL-OUT RULE (Critical):
+   *    If a team is ALL OUT before completing their allotted overs,
+   *    they are deemed to have faced the FULL QUOTA of scheduled overs.
+   *    This prevents teams from manipulating NRR by getting out quickly.
+   *
+   * 3. Overs Bowled = Opponent's Overs Faced (using adjusted figures)
+   *
+   * EXAMPLE:
+   * Match: 20 overs, Team A: 120/10 in 18.4 ov (all out), Team B: 121/2 in 15 ov
+   * - Team A overs faced = 20 (all-out rule applied)
+   * - Team B overs faced = 15 (actual, since they won)
+   * - Team A overs bowled = 15 (Team B's overs)
+   * - Team B overs bowled = 20 (Team A's adjusted overs)
+   * - Team A NRR = (120/20) - (121/15) = 6.00 - 8.07 = -2.07
+   * - Team B NRR = (121/15) - (120/20) = 8.07 - 6.00 = +2.07
+   */
+  const calculateNetRunRates = () => {
+    // Need both innings to calculate NRR
+    if (!matchData?.innings1 || !matchData?.innings2) return null;
+
+    // Match configuration
+    const scheduledOvers = matchData.totalOvers || 20;
+    const playersPerTeam = matchData.playersPerTeam || 11;
+    const allOutWickets = playersPerTeam - 1; // e.g., 10 wickets for 11 players
+
+    const innings1 = matchData.innings1;
+    const innings2 = matchData.innings2;
+
+    // ========== TEAM A (Batted First - Innings 1) ==========
+    const teamARuns = innings1.runs || 0;
+    const teamAActualOvers = oversToDecimal(innings1.overs);
+    const teamAWickets = innings1.wickets || 0;
+    const teamAAllOut = teamAWickets >= allOutWickets;
+
+    // ========== TEAM B (Batted Second - Innings 2, Chasing) ==========
+    const teamBRuns = innings2.runs || 0;
+    const teamBActualOvers = oversToDecimal(innings2.overs);
+    const teamBWickets = innings2.wickets || 0;
+    const teamBAllOut = teamBWickets >= allOutWickets;
+
+    // ========== APPLY ICC ALL-OUT RULE ==========
+    // If a team is all out, they are deemed to have faced full scheduled overs
+    const teamAOversFaced = teamAAllOut ? scheduledOvers : teamAActualOvers;
+    const teamBOversFaced = teamBAllOut ? scheduledOvers : teamBActualOvers;
+
+    // ========== CALCULATE OVERS BOWLED ==========
+    // Overs bowled by a team = Overs faced by the opponent (using adjusted figures)
+    const teamAOversBowled = teamBOversFaced; // Team A bowled to Team B
+    const teamBOversBowled = teamAOversFaced; // Team B bowled to Team A
+
+    // Prevent division by zero
+    if (teamAOversFaced === 0 || teamBOversFaced === 0) return null;
+
+    // ========== CALCULATE RUN RATES ==========
+    const teamARunRate = teamARuns / teamAOversFaced;
+    const teamBRunRate = teamBRuns / teamBOversFaced;
+
+    // ========== CALCULATE NET RUN RATES ==========
+    // NRR = (Runs Scored / Overs Faced) - (Runs Conceded / Overs Bowled)
+    const teamANRR = teamARunRate - (teamBRuns / teamAOversBowled);
+    const teamBNRR = teamBRunRate - (teamARuns / teamBOversBowled);
+
+    return {
+      teamA: {
+        name: matchData.teamA?.name || 'Team A',
+        runs: teamARuns,
+        wickets: teamAWickets,
+        actualOvers: teamAActualOvers,
+        oversForNRR: teamAOversFaced,
+        isAllOut: teamAAllOut,
+        runRate: teamARunRate.toFixed(2),
+        nrr: teamANRR.toFixed(3),
+      },
+      teamB: {
+        name: matchData.teamB?.name || 'Team B',
+        runs: teamBRuns,
+        wickets: teamBWickets,
+        actualOvers: teamBActualOvers,
+        oversForNRR: teamBOversFaced,
+        isAllOut: teamBAllOut,
+        runRate: teamBRunRate.toFixed(2),
+        nrr: teamBNRR.toFixed(3),
+      },
+      scheduledOvers,
+    };
+  };
+
+  const nrrData = calculateNetRunRates();
+
+  // Capture scorecard as image
+  const captureScorecard = async () => {
+    try {
+      if (!shareableRef.current) {
+        console.log('No ref available, waiting...');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (!shareableRef.current) {
+          console.log('Still no ref after waiting');
+          return null;
+        }
+      }
+
+      console.log('Capturing scorecard...');
+
+      // Try using the capture method first
+      if (typeof shareableRef.current.capture === 'function') {
+        const uri = await shareableRef.current.capture();
+        console.log('Captured with capture() URI:', uri);
+        return uri;
+      }
+
+      // Fallback to captureRef
+      console.log('Using captureRef fallback...');
+      const uri = await captureRef(shareableRef.current, {
+        format: 'png',
+        quality: 1,
+      });
+      console.log('Captured with captureRef URI:', uri);
+      return uri;
+    } catch (error) {
+      console.error('Error capturing scorecard:', error.message || error);
+      Alert.alert('Debug', `Capture error: ${error.message || error}`);
+      return null;
+    }
+  };
+
+  // Save image to gallery
+  const handleDownload = async () => {
+    try {
+      setIsSaving(true);
+      setShowShareModal(true);
+
+      // Request permissions
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant permission to save images to your gallery.');
+        setIsSaving(false);
+        setShowShareModal(false);
+        return;
+      }
+
+      // Wait for the modal and view to render fully
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Capture the image
+      const uri = await captureScorecard();
+      if (!uri) {
+        Alert.alert('Error', 'Failed to capture scorecard. Please try again.');
+        setIsSaving(false);
+        setShowShareModal(false);
+        return;
+      }
+
+      // Save to gallery
+      const asset = await MediaLibrary.createAssetAsync(uri);
+      await MediaLibrary.createAlbumAsync('CricZone', asset, false);
+
+      setShowShareModal(false);
+      Alert.alert('Success', 'Scorecard saved to your gallery!');
+    } catch (error) {
+      console.error('Error saving scorecard:', error);
+      Alert.alert('Error', 'Failed to save scorecard. Please try again.');
+      setShowShareModal(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Share image
+  const handleShare = async () => {
+    try {
+      setIsSharing(true);
+      setShowShareModal(true);
+
+      // Check if sharing is available
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert('Error', 'Sharing is not available on this device');
+        setIsSharing(false);
+        setShowShareModal(false);
+        return;
+      }
+
+      // Wait for the modal and view to render fully
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Capture the image
+      const uri = await captureScorecard();
+      if (!uri) {
+        Alert.alert('Error', 'Failed to capture scorecard. Please try again.');
+        setIsSharing(false);
+        setShowShareModal(false);
+        return;
+      }
+
+      // Close modal before sharing
+      setShowShareModal(false);
+
+      // Small delay before sharing
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Share the image
+      await Sharing.shareAsync(uri, {
+        mimeType: 'image/png',
+        dialogTitle: 'Share Scorecard',
+        UTI: 'public.png',
+      });
+    } catch (error) {
+      console.error('Error sharing scorecard:', error);
+      if (error.message && !error.message.includes('User did not share') && !error.message.includes('cancelled')) {
+        Alert.alert('Error', 'Failed to share scorecard. Please try again.');
+      }
+    } finally {
+      setIsSharing(false);
+      setShowShareModal(false);
+    }
   };
 
   const handleButtonPressIn = () => {
@@ -626,18 +969,30 @@ const FullScorecardScreen = ({ navigation, route }) => {
           <BackIcon size={22} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Full Scorecard</Text>
-        <TouchableOpacity
-          style={styles.newMatchButton}
-          onPress={() => navigation.navigate('MatchSetup')}
-          activeOpacity={0.8}
-        >
-          <PlusIcon size={20} color={colors.surface} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerActionButton}
+            onPress={handleDownload}
+            activeOpacity={0.8}
+          >
+            <DownloadIcon size={18} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerActionButton}
+            onPress={handleShare}
+            activeOpacity={0.8}
+          >
+            <ShareIcon size={18} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
       </Animated.View>
 
       <ScrollView
+        style={{flex: 1}}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        nestedScrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Match Header Card */}
         <Animated.View
@@ -733,6 +1088,97 @@ const FullScorecardScreen = ({ navigation, route }) => {
           </Animated.View>
         )}
 
+        {/* Net Run Rate Section */}
+        {nrrData && (
+          <Animated.View
+            style={[
+              styles.nrrContainer,
+              {
+                opacity: resultAnim,
+                transform: [{
+                  translateY: resultAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0],
+                  }),
+                }],
+              },
+            ]}
+          >
+            <View style={styles.nrrHeader}>
+              <View style={styles.nrrIconContainer}>
+                <Text style={styles.nrrIcon}>📊</Text>
+              </View>
+              <Text style={styles.nrrTitle}>Net Run Rate</Text>
+            </View>
+
+            <View style={styles.nrrTeamsContainer}>
+              {/* Team A NRR */}
+              <View style={styles.nrrTeamCard}>
+                <View style={[styles.nrrTeamBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.nrrTeamBadgeText}>
+                    {nrrData.teamA.name.charAt(0)}
+                  </Text>
+                </View>
+                <Text style={styles.nrrTeamName} numberOfLines={1}>
+                  {nrrData.teamA.name}
+                </Text>
+                {nrrData.teamA.isAllOut && (
+                  <View style={styles.allOutBadge}>
+                    <Text style={styles.allOutBadgeText}>All Out</Text>
+                  </View>
+                )}
+                <View style={[styles.nrrValueContainer, parseFloat(nrrData.teamA.nrr) >= 0 ? styles.nrrValuePositive : styles.nrrValueNegative]}>
+                  <Text style={styles.nrrLabel}>NRR</Text>
+                  <Text style={[
+                    styles.nrrValueText,
+                    parseFloat(nrrData.teamA.nrr) >= 0 ? styles.nrrPositive : styles.nrrNegative
+                  ]}>
+                    {parseFloat(nrrData.teamA.nrr) >= 0 ? '+' : ''}{nrrData.teamA.nrr}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Divider */}
+              <View style={styles.nrrDivider} />
+
+              {/* Team B NRR */}
+              <View style={styles.nrrTeamCard}>
+                <View style={[styles.nrrTeamBadge, { backgroundColor: colors.secondary }]}>
+                  <Text style={styles.nrrTeamBadgeText}>
+                    {nrrData.teamB.name.charAt(0)}
+                  </Text>
+                </View>
+                <Text style={styles.nrrTeamName} numberOfLines={1}>
+                  {nrrData.teamB.name}
+                </Text>
+                {nrrData.teamB.isAllOut && (
+                  <View style={styles.allOutBadge}>
+                    <Text style={styles.allOutBadgeText}>All Out</Text>
+                  </View>
+                )}
+                <View style={[styles.nrrValueContainer, parseFloat(nrrData.teamB.nrr) >= 0 ? styles.nrrValuePositive : styles.nrrValueNegative]}>
+                  <Text style={styles.nrrLabel}>NRR</Text>
+                  <Text style={[
+                    styles.nrrValueText,
+                    parseFloat(nrrData.teamB.nrr) >= 0 ? styles.nrrPositive : styles.nrrNegative
+                  ]}>
+                    {parseFloat(nrrData.teamB.nrr) >= 0 ? '+' : ''}{nrrData.teamB.nrr}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* ICC Rule Note */}
+            {(nrrData.teamA.isAllOut || nrrData.teamB.isAllOut) && (
+              <View style={styles.nrrNoteContainer}>
+                <Text style={styles.nrrNoteText}>
+                  * All-out teams use full {nrrData.scheduledOvers} overs for NRR (ICC Rule)
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+        )}
+
         {/* Innings Tabs */}
         <View style={styles.inningsTabs}>
           <Animated.View
@@ -813,6 +1259,283 @@ const FullScorecardScreen = ({ navigation, route }) => {
           </Animated.View>
         </View>
       </ScrollView>
+
+      {/* Shareable Scorecard Modal */}
+      <Modal visible={showShareModal} transparent animationType="fade">
+        <View style={styles.shareModalOverlay}>
+          {/* Close Button */}
+          <TouchableOpacity
+            style={styles.shareCloseButton}
+            onPress={() => {
+              setShowShareModal(false);
+              setIsSaving(false);
+              setIsSharing(false);
+            }}
+          >
+            <Text style={styles.shareCloseButtonText}>✕</Text>
+          </TouchableOpacity>
+
+          {/* Loading Indicator */}
+          {(isSaving || isSharing) && (
+            <View style={styles.shareLoadingOverlay}>
+              <ActivityIndicator size="large" color={colors.surface} />
+              <Text style={styles.shareLoadingText}>
+                {isSaving ? 'Saving scorecard...' : 'Preparing to share...'}
+              </Text>
+            </View>
+          )}
+
+          {/* Shareable View - Rendered but scrollable */}
+          <ScrollView
+            style={styles.shareableScrollView}
+            contentContainerStyle={styles.shareableScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <ViewShot
+              ref={shareableRef}
+              style={styles.shareableContainer}
+              options={{ format: 'png', quality: 1 }}
+            >
+            <View style={styles.shareableCard}>
+              {/* Header with Logo */}
+              <View style={styles.shareableHeader}>
+                <Image
+                  source={criczoneLogo}
+                  style={styles.shareableLogo}
+                  resizeMode="contain"
+                />
+                <View style={styles.shareableHeaderText}>
+                  <Text style={styles.shareableAppName}>CricZone</Text>
+                  <Text style={styles.shareableTagline}>Cricket Scoring App</Text>
+                </View>
+              </View>
+
+              {/* Match Title */}
+              <View style={styles.shareableMatchTitle}>
+                <Text style={styles.shareableMatchTitleText}>
+                  {matchData?.teamA?.name || 'Team A'} vs {matchData?.teamB?.name || 'Team B'}
+                </Text>
+                <Text style={styles.shareableMatchInfo}>
+                  {matchData?.totalOvers || 20} Overs Match • {formatDate(matchData?.date)}
+                </Text>
+              </View>
+
+              {/* Result Banner */}
+              {matchData?.result && (
+                <View style={styles.shareableResult}>
+                  <Text style={styles.shareableResultText}>{matchData.result}</Text>
+                </View>
+              )}
+
+              {/* Scores Summary */}
+              <View style={styles.shareableScores}>
+                {/* Team A Score */}
+                <View style={styles.shareableTeamScore}>
+                  <View style={[styles.shareableTeamBadge, { backgroundColor: colors.primary }]}>
+                    <Text style={styles.shareableTeamBadgeText}>
+                      {(matchData?.teamA?.name || 'A').charAt(0)}
+                    </Text>
+                  </View>
+                  <View style={styles.shareableTeamInfo}>
+                    <Text style={styles.shareableTeamName}>{matchData?.teamA?.name || 'Team A'}</Text>
+                    <Text style={styles.shareableTeamScoreText}>
+                      {matchData?.innings1?.runs || 0}/{matchData?.innings1?.wickets || 0}
+                      <Text style={styles.shareableOvers}> ({matchData?.innings1?.overs || '0.0'} ov)</Text>
+                    </Text>
+                  </View>
+                </View>
+
+                {/* VS Divider */}
+                <View style={styles.shareableVsDivider}>
+                  <Text style={styles.shareableVsText}>VS</Text>
+                </View>
+
+                {/* Team B Score */}
+                <View style={styles.shareableTeamScore}>
+                  <View style={[styles.shareableTeamBadge, { backgroundColor: colors.secondary }]}>
+                    <Text style={styles.shareableTeamBadgeText}>
+                      {(matchData?.teamB?.name || 'B').charAt(0)}
+                    </Text>
+                  </View>
+                  <View style={styles.shareableTeamInfo}>
+                    <Text style={styles.shareableTeamName}>{matchData?.teamB?.name || 'Team B'}</Text>
+                    <Text style={styles.shareableTeamScoreText}>
+                      {matchData?.innings2?.runs || 0}/{matchData?.innings2?.wickets || 0}
+                      <Text style={styles.shareableOvers}> ({matchData?.innings2?.overs || '0.0'} ov)</Text>
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* NRR Section */}
+              {nrrData && (
+                <View style={styles.shareableNRR}>
+                  <Text style={styles.shareableNRRTitle}>Net Run Rate</Text>
+                  <View style={styles.shareableNRRRow}>
+                    <View style={styles.shareableNRRItem}>
+                      <Text style={styles.shareableNRRTeam}>{nrrData.teamA.name}</Text>
+                      <Text style={[
+                        styles.shareableNRRValue,
+                        parseFloat(nrrData.teamA.nrr) >= 0 ? styles.shareableNRRPositive : styles.shareableNRRNegative
+                      ]}>
+                        {parseFloat(nrrData.teamA.nrr) >= 0 ? '+' : ''}{nrrData.teamA.nrr}
+                      </Text>
+                    </View>
+                    <View style={styles.shareableNRRDivider} />
+                    <View style={styles.shareableNRRItem}>
+                      <Text style={styles.shareableNRRTeam}>{nrrData.teamB.name}</Text>
+                      <Text style={[
+                        styles.shareableNRRValue,
+                        parseFloat(nrrData.teamB.nrr) >= 0 ? styles.shareableNRRPositive : styles.shareableNRRNegative
+                      ]}>
+                        {parseFloat(nrrData.teamB.nrr) >= 0 ? '+' : ''}{nrrData.teamB.nrr}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* First Innings */}
+              {matchData?.innings1 && (
+                <View style={styles.shareableInnings}>
+                  <View style={styles.shareableInningsHeader}>
+                    <Text style={styles.shareableInningsTitle}>
+                      1st Innings - {matchData.innings1.battingTeam || matchData?.teamA?.name}
+                    </Text>
+                    <Text style={styles.shareableInningsScore}>
+                      {matchData.innings1.runs}/{matchData.innings1.wickets} ({matchData.innings1.overs} ov)
+                    </Text>
+                  </View>
+
+                  {/* Batting */}
+                  <View style={styles.shareableTable}>
+                    <View style={styles.shareableTableHeader}>
+                      <Text style={[styles.shareableTableHeaderText, styles.shareableNameCol]}>Batsman</Text>
+                      <Text style={styles.shareableTableHeaderText}>R</Text>
+                      <Text style={styles.shareableTableHeaderText}>B</Text>
+                      <Text style={styles.shareableTableHeaderText}>4s</Text>
+                      <Text style={styles.shareableTableHeaderText}>6s</Text>
+                      <Text style={styles.shareableTableHeaderText}>SR</Text>
+                    </View>
+                    {(matchData.innings1.batting || [])
+                      .filter(b => (b.balls || 0) > 0 || (b.runs || 0) > 0 || b.isOut)
+                      .map((batsman, idx) => (
+                        <View key={idx} style={styles.shareableTableRow}>
+                          <Text style={[styles.shareableTableCell, styles.shareableNameCol]} numberOfLines={1}>
+                            {batsman.name}
+                          </Text>
+                          <Text style={[styles.shareableTableCell, styles.shareableRunsCell]}>{batsman.runs || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{batsman.balls || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{batsman.fours || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{batsman.sixes || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{calculateStrikeRate(batsman.runs, batsman.balls)}</Text>
+                        </View>
+                      ))}
+                  </View>
+
+                  {/* Bowling */}
+                  <View style={[styles.shareableTable, { marginTop: 8 }]}>
+                    <View style={[styles.shareableTableHeader, styles.shareableBowlingHeader]}>
+                      <Text style={[styles.shareableTableHeaderText, styles.shareableNameCol]}>Bowler</Text>
+                      <Text style={styles.shareableTableHeaderText}>O</Text>
+                      <Text style={styles.shareableTableHeaderText}>M</Text>
+                      <Text style={styles.shareableTableHeaderText}>R</Text>
+                      <Text style={styles.shareableTableHeaderText}>W</Text>
+                      <Text style={styles.shareableTableHeaderText}>ER</Text>
+                    </View>
+                    {(matchData.innings1.bowling || [])
+                      .filter(b => b.overs && b.overs !== '0.0')
+                      .map((bowler, idx) => (
+                        <View key={idx} style={styles.shareableTableRow}>
+                          <Text style={[styles.shareableTableCell, styles.shareableNameCol]} numberOfLines={1}>
+                            {bowler.name}
+                          </Text>
+                          <Text style={styles.shareableTableCell}>{bowler.overs || '0.0'}</Text>
+                          <Text style={styles.shareableTableCell}>{bowler.maidens || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{bowler.runs || 0}</Text>
+                          <Text style={[styles.shareableTableCell, styles.shareableWicketsCell]}>{bowler.wickets || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{calculateEconomyRate(bowler.overs, bowler.runs)}</Text>
+                        </View>
+                      ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Second Innings */}
+              {matchData?.innings2 && (
+                <View style={styles.shareableInnings}>
+                  <View style={styles.shareableInningsHeader}>
+                    <Text style={styles.shareableInningsTitle}>
+                      2nd Innings - {matchData.innings2.battingTeam || matchData?.teamB?.name}
+                    </Text>
+                    <Text style={styles.shareableInningsScore}>
+                      {matchData.innings2.runs}/{matchData.innings2.wickets} ({matchData.innings2.overs} ov)
+                    </Text>
+                  </View>
+
+                  {/* Batting */}
+                  <View style={styles.shareableTable}>
+                    <View style={styles.shareableTableHeader}>
+                      <Text style={[styles.shareableTableHeaderText, styles.shareableNameCol]}>Batsman</Text>
+                      <Text style={styles.shareableTableHeaderText}>R</Text>
+                      <Text style={styles.shareableTableHeaderText}>B</Text>
+                      <Text style={styles.shareableTableHeaderText}>4s</Text>
+                      <Text style={styles.shareableTableHeaderText}>6s</Text>
+                      <Text style={styles.shareableTableHeaderText}>SR</Text>
+                    </View>
+                    {(matchData.innings2.batting || [])
+                      .filter(b => (b.balls || 0) > 0 || (b.runs || 0) > 0 || b.isOut)
+                      .map((batsman, idx) => (
+                        <View key={idx} style={styles.shareableTableRow}>
+                          <Text style={[styles.shareableTableCell, styles.shareableNameCol]} numberOfLines={1}>
+                            {batsman.name}
+                          </Text>
+                          <Text style={[styles.shareableTableCell, styles.shareableRunsCell]}>{batsman.runs || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{batsman.balls || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{batsman.fours || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{batsman.sixes || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{calculateStrikeRate(batsman.runs, batsman.balls)}</Text>
+                        </View>
+                      ))}
+                  </View>
+
+                  {/* Bowling */}
+                  <View style={[styles.shareableTable, { marginTop: 8 }]}>
+                    <View style={[styles.shareableTableHeader, styles.shareableBowlingHeader]}>
+                      <Text style={[styles.shareableTableHeaderText, styles.shareableNameCol]}>Bowler</Text>
+                      <Text style={styles.shareableTableHeaderText}>O</Text>
+                      <Text style={styles.shareableTableHeaderText}>M</Text>
+                      <Text style={styles.shareableTableHeaderText}>R</Text>
+                      <Text style={styles.shareableTableHeaderText}>W</Text>
+                      <Text style={styles.shareableTableHeaderText}>ER</Text>
+                    </View>
+                    {(matchData.innings2.bowling || [])
+                      .filter(b => b.overs && b.overs !== '0.0')
+                      .map((bowler, idx) => (
+                        <View key={idx} style={styles.shareableTableRow}>
+                          <Text style={[styles.shareableTableCell, styles.shareableNameCol]} numberOfLines={1}>
+                            {bowler.name}
+                          </Text>
+                          <Text style={styles.shareableTableCell}>{bowler.overs || '0.0'}</Text>
+                          <Text style={styles.shareableTableCell}>{bowler.maidens || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{bowler.runs || 0}</Text>
+                          <Text style={[styles.shareableTableCell, styles.shareableWicketsCell]}>{bowler.wickets || 0}</Text>
+                          <Text style={styles.shareableTableCell}>{calculateEconomyRate(bowler.overs, bowler.runs)}</Text>
+                        </View>
+                      ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Footer */}
+              <View style={styles.shareableFooter}>
+                <Text style={styles.shareableFooterText}>Generated by CricZone App</Text>
+              </View>
+            </View>
+            </ViewShot>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -861,6 +1584,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerActionButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceGray,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   scrollContent: {
     padding: 20,
@@ -1067,6 +1805,140 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.surface,
     lineHeight: 24,
+  },
+  // Net Run Rate Styles
+  nrrContainer: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  nrrHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  nrrIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  nrrIcon: {
+    fontSize: 18,
+  },
+  nrrTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  nrrTeamsContainer: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  nrrTeamCard: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  nrrTeamBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  nrrTeamBadgeText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.surface,
+  },
+  nrrTeamName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: 12,
+    maxWidth: '90%',
+  },
+  nrrValueContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    minWidth: 90,
+    alignItems: 'center',
+  },
+  nrrLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: 2,
+    letterSpacing: 0.5,
+  },
+  nrrValuePositive: {
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+  },
+  nrrValueNegative: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  nrrValueText: {
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  nrrPositive: {
+    color: colors.success,
+  },
+  nrrNegative: {
+    color: colors.error,
+  },
+  nrrDivider: {
+    width: 1,
+    backgroundColor: colors.border,
+    marginHorizontal: 12,
+    marginVertical: 8,
+  },
+  allOutBadge: {
+    backgroundColor: colors.error,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  allOutBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.surface,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  nrrNoteContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  nrrNoteText: {
+    fontSize: 11,
+    color: colors.textMuted,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   inningsTabs: {
     flexDirection: 'row',
@@ -1413,6 +2285,298 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: colors.surface,
+  },
+  // Share Modal Styles
+  shareModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+  },
+  shareCloseButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  shareCloseButtonText: {
+    fontSize: 20,
+    color: colors.surface,
+    fontWeight: '600',
+  },
+  shareLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  shareLoadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.surface,
+  },
+  shareableScrollView: {
+    flex: 1,
+  },
+  shareableScrollContent: {
+    padding: 20,
+    paddingTop: 60,
+    alignItems: 'center',
+  },
+  // Shareable Scorecard Styles
+  shareableContainer: {
+    width: width - 40,
+    maxWidth: 400,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  shareableCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 0,
+    overflow: 'hidden',
+  },
+  shareableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    padding: 16,
+  },
+  shareableLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    marginRight: 12,
+  },
+  shareableHeaderText: {
+    flex: 1,
+  },
+  shareableAppName: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.surface,
+  },
+  shareableTagline: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginTop: 2,
+  },
+  shareableMatchTitle: {
+    padding: 16,
+    backgroundColor: colors.surfaceGray,
+    alignItems: 'center',
+  },
+  shareableMatchTitleText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  shareableMatchInfo: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 4,
+  },
+  shareableResult: {
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+  },
+  shareableResultText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.surface,
+    textAlign: 'center',
+  },
+  shareableScores: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: colors.surface,
+  },
+  shareableTeamScore: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  shareableTeamBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  shareableTeamBadgeText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.surface,
+  },
+  shareableTeamInfo: {
+    flex: 1,
+  },
+  shareableTeamName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  shareableTeamScoreText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  shareableOvers: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  shareableVsDivider: {
+    paddingHorizontal: 12,
+  },
+  shareableVsText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  shareableNRR: {
+    backgroundColor: colors.surfaceGray,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    padding: 12,
+  },
+  shareableNRRTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  shareableNRRRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  shareableNRRItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  shareableNRRTeam: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginBottom: 2,
+  },
+  shareableNRRValue: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  shareableNRRPositive: {
+    color: colors.success,
+  },
+  shareableNRRNegative: {
+    color: colors.error,
+  },
+  shareableNRRDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: colors.border,
+    marginHorizontal: 8,
+  },
+  shareableInnings: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: colors.surfaceGray,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  shareableInningsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  shareableInningsTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.surface,
+  },
+  shareableInningsScore: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.surface,
+  },
+  shareableTable: {
+    backgroundColor: colors.surface,
+  },
+  shareableTableHeader: {
+    flexDirection: 'row',
+    backgroundColor: colors.primary,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  shareableBowlingHeader: {
+    backgroundColor: colors.secondary,
+  },
+  shareableTableHeaderText: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.surface,
+    textAlign: 'center',
+  },
+  shareableNameCol: {
+    flex: 2.5,
+    textAlign: 'left',
+  },
+  shareableTableRow: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+    alignItems: 'center',
+  },
+  shareableTableCell: {
+    flex: 1,
+    fontSize: 11,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  shareableRunsCell: {
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  shareableWicketsCell: {
+    fontWeight: '700',
+    color: colors.success,
+  },
+  shareableFooter: {
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  shareableFooterText: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '500',
   },
 });
 

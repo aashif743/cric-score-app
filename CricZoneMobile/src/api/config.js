@@ -1,15 +1,22 @@
 import axios from 'axios';
+import { Platform } from 'react-native';
 
-// API Base URL - Use 10.0.2.2 for Android emulator, local IP for physical devices
+// API Base URL configuration
 const PRODUCTION_API_URL = 'https://cric-score-app.onrender.com';
 
-// Your local IP address - update this if your IP changes
+// Your local IP address - update this if your IP changes (for physical device testing)
 const LOCAL_IP = '192.168.1.45';
 
 const getBaseUrl = () => {
   if (__DEV__) {
-    // Use local IP for physical devices, localhost for iOS simulator, 10.0.2.2 for Android emulator
-    // For physical device testing, always use LOCAL_IP
+    // iOS simulator can use localhost directly
+    // Android emulator needs 10.0.2.2
+    // Physical devices need your local IP
+    if (Platform.OS === 'ios') {
+      return 'http://localhost:5002';
+    } else if (Platform.OS === 'android') {
+      return 'http://10.0.2.2:5002';
+    }
     return `http://${LOCAL_IP}:5002`;
   }
   // Production build - use your deployed server URL

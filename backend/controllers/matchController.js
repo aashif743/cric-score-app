@@ -54,9 +54,13 @@ exports.createMatch = async (req, res) => {
       toss,
       firstBatting,
       overs,
+      totalOvers, // Frontend sends this
       ballsPerOver,
       playersPerTeam,
     } = req.body;
+
+    // Use totalOvers if overs not provided (frontend compatibility)
+    const matchOvers = overs || totalOvers;
 
     if (!teamA?.name || !teamB?.name) {
       return res.status(400).json({
@@ -109,7 +113,7 @@ exports.createMatch = async (req, res) => {
         winner: tossWinner,
         decision: tossDecision,
       },
-      totalOvers: overs || 20,
+      totalOvers: matchOvers || 20,
       ballsPerOver: ballsPerOver || 6,
       playersPerTeam: playersPerTeam || 11,
       status: "scheduled",
@@ -152,17 +156,16 @@ exports.createMatch = async (req, res) => {
   }
 };
 
-// Get all matches - (No changes, seems fine)
+// Get all matches - Returns full data for in_progress matches to allow resuming
 exports.getMyMatches = async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ success: false, error: "User not authenticated." });
     }
 
-    // Find all matches for the user and select specific fields to send back.
-    // Crucially, we now include 'result'.
+    // Find all matches for the user - include full data for resuming in_progress matches
     const matches = await Match.find({ user: req.user.id })
-      .select('teamA teamB status result createdAt updatedAt') // Select the fields you need for the list
+      .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam toss innings1 innings2 currentState liveState innings target')
       .sort({ updatedAt: -1 }); // Sort by most recently updated
 
     res.json({
@@ -211,67 +214,114 @@ exports.getMatchById = async (req, res) => {
   }
 };
 
-// Update match - Placeholder for robust live updates
-// A full live update here would need to carefully merge player stats into innings.batting/bowling arrays.
+// Update match - Saves match progress for resuming later
 exports.updateMatch = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
+    console.log('=== UPDATE MATCH REQUEST ===');
+    console.log('Match ID:', id);
+
     // Basic validation
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: "Invalid match ID" });
     }
 
-    const match = await Match.findById(id);
-    if (!match) {
+    // First check authorization
+    const existingMatch = await Match.findById(id).select('user').lean();
+    if (!existingMatch) {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
-    if (match.user.toString() !== req.user.id) {
+    if (existingMatch.user.toString() !== req.user.id) {
       return res.status(403).json({ success: false, error: "Not authorized" });
     }
 
-    // Process live state data
-    const processLiveState = (state) => {
-      if (!state) return null;
-      
-      return {
-        ...state,
-        // Ensure required fields exist in live state
-        match: {
-          ...state.match,
-          battingTeam: state.match?.battingTeam || match.innings1?.battingTeam,
-          bowlingTeam: state.match?.bowlingTeam || match.innings1?.bowlingTeam
-        },
-        players: {
-          ...state.players,
-          striker: {
-            ...state.players?.striker,
-            outType: state.players?.striker?.outType || 'Not Out'
-          },
-          nonStriker: {
-            ...state.players?.nonStriker,
-            outType: state.players?.nonStriker?.outType || 'Not Out'
-          }
-        }
-      };
+    const { innings1, innings2, currentState, innings, target, totalOvers, ballsPerOver, playersPerTeam } = req.body;
+
+    // Build update object
+    const updateData = {
+      status: "in_progress",
+      updatedAt: new Date()
     };
 
-    match.liveState = processLiveState(req.body);
-    match.status = "in_progress";
-    
-    await match.save();
+    // Preserve match settings if provided
+    if (totalOvers !== undefined) {
+      updateData.totalOvers = totalOvers;
+    }
+    if (ballsPerOver !== undefined) {
+      updateData.ballsPerOver = ballsPerOver;
+    }
+    if (playersPerTeam !== undefined) {
+      updateData.playersPerTeam = playersPerTeam;
+    }
+
+    // Add innings1 if provided
+    if (innings1) {
+      updateData.innings1 = {
+        battingTeam: innings1.battingTeam,
+        bowlingTeam: innings1.bowlingTeam,
+        runs: innings1.runs ?? 0,
+        wickets: innings1.wickets ?? 0,
+        overs: innings1.overs || "0.0",
+        batting: innings1.batting || [],
+        bowling: innings1.bowling || [],
+        extras: innings1.extras || { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
+        fallOfWickets: innings1.fallOfWickets || [],
+      };
+    }
+
+    // Add innings2 if provided
+    if (innings2) {
+      updateData.innings2 = {
+        battingTeam: innings2.battingTeam,
+        bowlingTeam: innings2.bowlingTeam,
+        runs: innings2.runs ?? 0,
+        wickets: innings2.wickets ?? 0,
+        overs: innings2.overs || "0.0",
+        batting: innings2.batting || [],
+        bowling: innings2.bowling || [],
+        extras: innings2.extras || { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
+        fallOfWickets: innings2.fallOfWickets || [],
+        target: target || innings2.target,
+      };
+    }
+
+    // Add currentState if provided
+    if (currentState) {
+      updateData.currentState = currentState;
+    }
+
+    // Add innings number and target
+    if (innings !== undefined) {
+      updateData.innings = innings;
+    }
+    if (target !== undefined) {
+      updateData.target = target;
+    }
+
+    console.log('Updating with data keys:', Object.keys(updateData));
+
+    // Use findByIdAndUpdate with runValidators disabled for flexibility
+    const updatedMatch = await Match.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: false }
+    );
+
+    console.log('=== MATCH SAVED SUCCESSFULLY ===');
+    console.log('Has currentState:', !!updatedMatch.currentState);
 
     res.status(200).json({
       success: true,
-      message: "Live state updated successfully"
+      message: "Match progress saved successfully"
     });
 
   } catch (error) {
-    console.error("Update match error:", error);
+    console.error("Update match error:", error.message);
+    console.error("Full error:", error);
     res.status(500).json({
       success: false,
-      error: "Server error during match update",
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: error.message || "Server error during match update"
     });
   }
 };

@@ -12,6 +12,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
 
@@ -272,10 +273,9 @@ const PastMatchesScreen = ({ navigation }) => {
       duration: 500,
       useNativeDriver: true,
     }).start();
-    fetchMatches();
-  }, [user]);
+  }, []);
 
-  const fetchMatches = async () => {
+  const fetchMatches = useCallback(async () => {
     if (!user?.token) {
       setError('You must be logged in to view past matches.');
       setLoading(false);
@@ -291,17 +291,28 @@ const PastMatchesScreen = ({ navigation }) => {
       );
       setMatches(sortedMatches);
     } catch (err) {
+      console.warn('Fetch matches error:', err);
       setError('Failed to fetch matches. Please try again later.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.token]);
+
+  // Refetch matches every time the screen gains focus
+  // This ensures we have the latest data after saving/continuing a match
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.token) {
+        fetchMatches();
+      }
+    }, [user?.token, fetchMatches])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchMatches();
     setRefreshing(false);
-  }, [user]);
+  }, [fetchMatches]);
 
   const handleDeleteMatch = async () => {
     if (!matchToDelete || !user?.token) return;

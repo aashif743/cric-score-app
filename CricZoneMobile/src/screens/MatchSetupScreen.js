@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
@@ -12,10 +13,13 @@ import {
   Animated,
   Dimensions,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
+import suggestionService from '../utils/suggestionService';
+import AutocompleteInput from '../components/AutocompleteInput';
 import { colors, spacing, borderRadius, fontSizes, fontWeights, shadows } from '../utils/theme';
 
 const { width } = Dimensions.get('window');
@@ -154,8 +158,8 @@ const MatchSetupScreen = ({ navigation }) => {
   // Match settings
   const [battingTeam, setBattingTeam] = useState('Team A');
   const [bowlingTeam, setBowlingTeam] = useState('Team B');
-  const [overs, setOvers] = useState('6');
-  const [playersPerTeam, setPlayersPerTeam] = useState('6');
+  const [overs, setOvers] = useState('4');
+  const [playersPerTeam, setPlayersPerTeam] = useState('11');
   const [ballsPerOver, setBallsPerOver] = useState('6');
   const [isEditingBatting, setIsEditingBatting] = useState(false);
   const [isEditingBowling, setIsEditingBowling] = useState(false);
@@ -269,6 +273,8 @@ const MatchSetupScreen = ({ navigation }) => {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        onScrollBeginDrag={() => Keyboard.dismiss()}
       >
         <Animated.View
           style={{
@@ -277,6 +283,7 @@ const MatchSetupScreen = ({ navigation }) => {
           }}
         >
           {/* Team Setup Section */}
+          <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Team Setup</Text>
             <View style={styles.teamCard}>
@@ -298,16 +305,19 @@ const MatchSetupScreen = ({ navigation }) => {
                   </View>
 
                   {isEditingBatting ? (
-                    <TextInput
-                      ref={teamAInputRef}
-                      style={styles.teamInput}
-                      value={battingTeam}
-                      onChangeText={setBattingTeam}
-                      onBlur={() => setIsEditingBatting(false)}
-                      selectTextOnFocus={true}
-                      maxLength={20}
-                      autoFocus
-                    />
+                    <View style={styles.autocompleteWrapper}>
+                      <AutocompleteInput
+                        value={battingTeam}
+                        onChangeText={setBattingTeam}
+                        type="team"
+                        placeholder="Team A"
+                        inputStyle={styles.teamInput}
+                        onBlur={() => setIsEditingBatting(false)}
+                        maxLength={20}
+                        autoFocus
+                        selectTextOnFocus={true}
+                      />
+                    </View>
                   ) : (
                     <TouchableOpacity
                       style={styles.teamNameButton}
@@ -332,16 +342,19 @@ const MatchSetupScreen = ({ navigation }) => {
                   </View>
 
                   {isEditingBowling ? (
-                    <TextInput
-                      ref={teamBInputRef}
-                      style={styles.teamInput}
-                      value={bowlingTeam}
-                      onChangeText={setBowlingTeam}
-                      onBlur={() => setIsEditingBowling(false)}
-                      selectTextOnFocus={true}
-                      maxLength={20}
-                      autoFocus
-                    />
+                    <View style={styles.autocompleteWrapper}>
+                      <AutocompleteInput
+                        value={bowlingTeam}
+                        onChangeText={setBowlingTeam}
+                        type="team"
+                        placeholder="Team B"
+                        inputStyle={styles.teamInput}
+                        onBlur={() => setIsEditingBowling(false)}
+                        maxLength={20}
+                        autoFocus
+                        selectTextOnFocus={true}
+                      />
+                    </View>
                   ) : (
                     <TouchableOpacity
                       style={styles.teamNameButton}
@@ -360,6 +373,7 @@ const MatchSetupScreen = ({ navigation }) => {
               </View>
             </View>
           </View>
+          </TouchableWithoutFeedback>
 
           {/* Match Options Section */}
           <View style={styles.section}>
@@ -577,6 +591,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     width: '100%',
     letterSpacing: -0.3,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderRadius: 0,
+  },
+  autocompleteWrapper: {
+    width: '100%',
+    zIndex: 1000,
   },
   editHint: {
     marginTop: 6,

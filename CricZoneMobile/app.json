@@ -4,28 +4,29 @@
     "slug": "CricZoneMobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo/criczone_icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/logo/criczone_logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0d3b66"
+      "backgroundColor": "#ffffff"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "1",
+      "buildNumber": "3",
       "infoPlist": {
         "NSCameraUsageDescription": "CricZone needs camera access for profile photos.",
         "NSPhotoLibraryUsageDescription": "CricZone needs photo library access to select profile pictures.",
-        "CFBundleDisplayName": "CricZone"
+        "CFBundleDisplayName": "CricZone",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0d3b66"
+        "foregroundImage": "./assets/logo/criczone_icon.png",
+        "backgroundColor": "#ffffff"
       },
       "package": "com.criczone.mobile",
       "edgeToEdgeEnabled": true,
@@ -34,17 +35,14 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "your-project-id"
-      }
-    },
-    "owner": "your-expo-username",
     "runtimeVersion": {
       "policy": "appVersion"
     },
-    "updates": {
-      "url": "https://u.expo.dev/your-project-id"
-    }
+    "extra": {
+      "eas": {
+        "projectId": "cac88344-c992-4c6a-bcc7-392995ef99f0"
+      }
+    },
+    "owner": "aashif"
   }
 }
