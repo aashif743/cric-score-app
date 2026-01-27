@@ -806,12 +806,16 @@ const ScoreCardScreen = ({ navigation, route }) => {
       // Rotate strike at end of over
       rotateStrike();
 
-      // Auto-select next bowler (not the one who just bowled)
-      const availableBowlers = allBowlers.filter(b => b.id !== currentBowlerId);
-      if (availableBowlers.length > 0) {
-        // Select the first available bowler (or could be the one with least overs)
-        const nextBowler = availableBowlers[0];
-        setCurrentBowler(nextBowler);
+      // Show change bowler modal for user to select next bowler
+      // Only show if match/innings is not ending
+      const newBalls = match.balls + 1;
+      const maxBalls = settings.overs * settings.ballsPerOver;
+      const isOversComplete = newBalls >= maxBalls;
+      const isAllOut = match.wickets >= settings.playersPerTeam - 1;
+
+      if (!isOversComplete && !isAllOut) {
+        // Innings continues - show bowler selection modal
+        setShowChangeBowlerModal(true);
       }
     } catch (error) {
       console.error('Error in handleEndOfOver:', error);
@@ -882,17 +886,8 @@ const ScoreCardScreen = ({ navigation, route }) => {
       }
     }
 
-    // Check for innings end (all out - no batsmen available including retired)
-    const availableBatsmen = allBatsmen.filter(b =>
-      (!b.isOut || b.id === outBatsman.id) && b.id !== striker.id && b.id !== nonStriker.id
-    ).length;
-    const retiredAvailable = allBatsmen.filter(b =>
-      b.isRetired && !b.isOut && b.id !== striker.id && b.id !== nonStriker.id
-    ).length;
-
-    if (match.wickets + 1 >= settings.playersPerTeam - 1 && retiredAvailable === 0) {
-      handleEndInnings();
-    }
+    // Note: All-out check is handled by checkMatchEndConditions below
+    // which passes the correct snapshot with pending wicket count
 
     // Check for end of over (wicket counts as a ball)
     // Use setTimeout to ensure this runs after all state updates are processed
@@ -1617,9 +1612,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const handleEndInnings = (matchSnapshot = null) => {
     if (match.innings === 1) {
       // Calculate if innings is truly over (overs complete)
+      // Use matchSnapshot.balls if available (correct count), fallback to match.balls
       const maxBalls = settings.overs * settings.ballsPerOver;
-      const isOversComplete = match.balls >= maxBalls;
-      const isAllOut = match.wickets >= settings.playersPerTeam - 1;
+      const currentBalls = matchSnapshot?.balls ?? match.balls;
+      const currentWickets = matchSnapshot?.wickets ?? match.wickets;
+      const isOversComplete = currentBalls >= maxBalls;
+      const isAllOut = currentWickets >= settings.playersPerTeam - 1;
 
       // If overs are complete or all out, always show (ignore dismissed flag)
       // If just a mid-innings trigger, respect the dismissed flag
