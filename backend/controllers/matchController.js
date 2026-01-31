@@ -1,4 +1,5 @@
 const Match = require("../models/Match");
+const Tournament = require("../models/Tournament");
 const mongoose = require("mongoose");
 
 // Helper function to process innings data
@@ -33,7 +34,12 @@ const processInnings = (inningsData) => {
     extras: inningsData.extras || {
       total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0
     },
-    fallOfWickets: inningsData.fallOfWickets || [],
+    fallOfWickets: (inningsData.fallOfWickets || []).map(f => ({
+      batsman: f.batsman || f.batsman_name || 'Unknown',
+      score: f.score || 0,
+      wicket: f.wicket || 0,
+      over: f.over || '0.0'
+    })),
     target: inningsData.target || null
   };
 };
@@ -57,6 +63,7 @@ exports.createMatch = async (req, res) => {
       totalOvers, // Frontend sends this
       ballsPerOver,
       playersPerTeam,
+      tournament,
     } = req.body;
 
     // Use totalOvers if overs not provided (frontend compatibility)
@@ -99,6 +106,7 @@ exports.createMatch = async (req, res) => {
 
     const matchData = {
       user: req.user.id,
+      tournament: tournament || null,
       teamA: {
         name: teamA.name,
         shortName: teamA.shortName || teamA.name.substring(0, 3).toUpperCase(),
@@ -139,6 +147,11 @@ exports.createMatch = async (req, res) => {
 
     const newMatch = new Match(matchData);
     const savedMatch = await newMatch.save();
+
+    // Increment tournament match count if linked
+    if (tournament) {
+      await Tournament.findByIdAndUpdate(tournament, { $inc: { matchCount: 1 } });
+    }
 
     res.status(201).json({ success: true, data: savedMatch });
   } catch (error) {
@@ -266,7 +279,12 @@ exports.updateMatch = async (req, res) => {
         batting: innings1.batting || [],
         bowling: innings1.bowling || [],
         extras: innings1.extras || { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
-        fallOfWickets: innings1.fallOfWickets || [],
+        fallOfWickets: (innings1.fallOfWickets || []).map(f => ({
+          batsman: f.batsman || f.batsman_name || 'Unknown',
+          score: f.score || 0,
+          wicket: f.wicket || 0,
+          over: f.over || '0.0'
+        })),
       };
     }
 
@@ -281,7 +299,12 @@ exports.updateMatch = async (req, res) => {
         batting: innings2.batting || [],
         bowling: innings2.bowling || [],
         extras: innings2.extras || { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
-        fallOfWickets: innings2.fallOfWickets || [],
+        fallOfWickets: (innings2.fallOfWickets || []).map(f => ({
+          batsman: f.batsman || f.batsman_name || 'Unknown',
+          score: f.score || 0,
+          wicket: f.wicket || 0,
+          over: f.over || '0.0'
+        })),
         target: target || innings2.target,
       };
     }
@@ -345,7 +368,12 @@ exports.deleteMatch = async (req, res) => {
         return res.status(401).json({ success: false, error: "Not authorized to delete this match" });
     }
 
-    const deletedMatch = await Match.findByIdAndDelete(id);
+    // Decrement tournament match count if linked
+    if (match.tournament) {
+      await Tournament.findByIdAndUpdate(match.tournament, { $inc: { matchCount: -1 } });
+    }
+
+    await Match.findByIdAndDelete(id);
     res.json({ success: true, message: "Match deleted successfully" });
   } catch (error) {
     console.error("Delete match error:", error);
@@ -379,7 +407,12 @@ exports.endInnings = async (req, res) => {
     match.innings1.overs = innings1Data.overs || match.innings1.overs;
     match.innings1.runRate = parseFloat(innings1Data.runRate) || match.innings1.runRate;
     match.innings1.extras = innings1Data.extras || match.innings1.extras;
-    match.innings1.fallOfWickets = innings1Data.fallOfWickets || match.innings1.fallOfWickets;
+    match.innings1.fallOfWickets = (innings1Data.fallOfWickets || match.innings1.fallOfWickets || []).map(f => ({
+      batsman: f.batsman || f.batsman_name || 'Unknown',
+      score: f.score || 0,
+      wicket: f.wicket || 0,
+      over: f.over || '0.0'
+    }));
     match.innings1.batting = (innings1Data.batting || []).map(b => ({ // Map to ensure schema adherence
         name: b.name,
         runs: b.runs || 0,
@@ -492,7 +525,12 @@ exports.endMatch = async (req, res) => {
         extras: inningsData.extras || {
           total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0
         },
-        fallOfWickets: inningsData.fallOfWickets || [],
+        fallOfWickets: (inningsData.fallOfWickets || []).map(f => ({
+          batsman: f.batsman || f.batsman_name || 'Unknown',
+          score: f.score || 0,
+          wicket: f.wicket || 0,
+          over: f.over || '0.0'
+        })),
         target: inningsData.target || null
       };
     };

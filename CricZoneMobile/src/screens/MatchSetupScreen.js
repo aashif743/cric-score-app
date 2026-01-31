@@ -145,9 +145,13 @@ const BallsIcon = () => (
   </View>
 );
 
-const MatchSetupScreen = ({ navigation }) => {
+const MatchSetupScreen = ({ navigation, route }) => {
   const { user } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
+
+  // Tournament params
+  const tournamentId = route.params?.tournamentId || null;
+  const tournamentDefaults = route.params?.tournamentDefaults || null;
 
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -155,14 +159,33 @@ const MatchSetupScreen = ({ navigation }) => {
   const teamAInputRef = useRef(null);
   const teamBInputRef = useRef(null);
 
-  // Match settings
-  const [battingTeam, setBattingTeam] = useState('Team A');
-  const [bowlingTeam, setBowlingTeam] = useState('Team B');
-  const [overs, setOvers] = useState('4');
-  const [playersPerTeam, setPlayersPerTeam] = useState('11');
-  const [ballsPerOver, setBallsPerOver] = useState('6');
+  // Match settings (use tournament defaults if available)
+  const initialTeamNames = tournamentDefaults?.teamNames?.filter(Boolean) || [];
+  const [battingTeam, setBattingTeam] = useState(
+    initialTeamNames.length >= 2 ? initialTeamNames[0] : 'Team A'
+  );
+  const [bowlingTeam, setBowlingTeam] = useState(
+    initialTeamNames.length >= 2 ? initialTeamNames[1] : 'Team B'
+  );
+  const [overs, setOvers] = useState(
+    tournamentDefaults?.totalOvers?.toString() || '4'
+  );
+  const [playersPerTeam, setPlayersPerTeam] = useState(
+    tournamentDefaults?.playersPerTeam?.toString() || '11'
+  );
+  const [ballsPerOver, setBallsPerOver] = useState(
+    tournamentDefaults?.ballsPerOver?.toString() || '6'
+  );
   const [isEditingBatting, setIsEditingBatting] = useState(false);
   const [isEditingBowling, setIsEditingBowling] = useState(false);
+
+  // Tournament team selection
+  const tournamentTeamNames = tournamentDefaults?.teamNames?.filter(Boolean) || [];
+  const hasTournamentTeams = tournamentTeamNames.length >= 2;
+  const [showBattingDropdown, setShowBattingDropdown] = useState(false);
+  const [showBowlingDropdown, setShowBowlingDropdown] = useState(false);
+  const battingDropdownAnim = useRef(new Animated.Value(0)).current;
+  const bowlingDropdownAnim = useRef(new Animated.Value(0)).current;
 
   // Dropdown options
   const playerOptions = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
@@ -219,11 +242,12 @@ const MatchSetupScreen = ({ navigation }) => {
       playersPerTeam: parseInt(playersPerTeam),
       ballsPerOver: parseInt(ballsPerOver),
       matchType: 'T20',
-      venue: 'Not specified',
+      venue: tournamentDefaults?.venue || 'Not specified',
       toss: {
         winner: teamA,
         decision: 'bat',
       },
+      ...(tournamentId ? { tournament: tournamentId } : {}),
     };
 
     try {
@@ -265,7 +289,7 @@ const MatchSetupScreen = ({ navigation }) => {
             <View style={styles.backArrow} />
           </View>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>New Match</Text>
+        <Text style={styles.headerTitle}>{tournamentId ? 'Tournament Match' : 'New Match'}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -282,96 +306,314 @@ const MatchSetupScreen = ({ navigation }) => {
             transform: [{ translateY: slideAnim }],
           }}
         >
+          {/* Tournament Info Banner */}
+          {tournamentId && tournamentDefaults?.tournamentName && (
+            <View style={styles.tournamentBanner}>
+              <View style={styles.tournamentBannerIcon}>
+                <View style={styles.trophyMini} />
+                <View style={styles.trophyBaseMini} />
+              </View>
+              <View style={styles.tournamentBannerText}>
+                <Text style={styles.tournamentBannerLabel}>Tournament</Text>
+                <Text style={styles.tournamentBannerName} numberOfLines={1}>
+                  {tournamentDefaults.tournamentName}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* Team Setup Section */}
           <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Team Setup</Text>
-            <View style={styles.teamCard}>
-              {/* VS Circle */}
-              <View style={styles.vsCircle}>
-                <Text style={styles.vsText}>VS</Text>
-              </View>
 
-              {/* Team Container */}
-              <View style={styles.teamsContainer}>
-                {/* Batting Team - Left */}
-                <View style={styles.teamBox}>
-                  <View style={styles.teamLabelContainer}>
-                    <View style={styles.batIconSmall}>
-                      <View style={styles.batHandle} />
-                      <View style={styles.batBlade} />
+            {/* Tournament Team Dropdowns */}
+            {hasTournamentTeams ? (
+              <View style={styles.tournamentTeamCard}>
+                {/* Batting Team Dropdown */}
+                <View style={styles.tournamentDropdownSection}>
+                  <View style={styles.tournamentDropdownHeader}>
+                    <View style={styles.teamLabelContainer}>
+                      <View style={styles.batIconSmall}>
+                        <View style={styles.batHandle} />
+                        <View style={styles.batBlade} />
+                      </View>
+                      <Text style={styles.teamLabel}>Batting First</Text>
                     </View>
-                    <Text style={styles.teamLabel}>Batting</Text>
-                  </View>
-
-                  {isEditingBatting ? (
-                    <View style={styles.autocompleteWrapper}>
-                      <AutocompleteInput
-                        value={battingTeam}
-                        onChangeText={setBattingTeam}
-                        type="team"
-                        placeholder="Team A"
-                        inputStyle={styles.teamInput}
-                        onBlur={() => setIsEditingBatting(false)}
-                        maxLength={20}
-                        autoFocus
-                        selectTextOnFocus={true}
-                      />
-                    </View>
-                  ) : (
                     <TouchableOpacity
-                      style={styles.teamNameButton}
-                      onPress={() => handleTeamNamePress('batting')}
+                      style={[
+                        styles.tournamentDropdownTrigger,
+                        showBattingDropdown && styles.tournamentDropdownTriggerOpen,
+                      ]}
+                      onPress={() => {
+                        const opening = !showBattingDropdown;
+                        setShowBattingDropdown(opening);
+                        setShowBowlingDropdown(false);
+                        Animated.spring(battingDropdownAnim, {
+                          toValue: opening ? 1 : 0,
+                          friction: 8,
+                          tension: 100,
+                          useNativeDriver: false,
+                        }).start();
+                        Animated.spring(bowlingDropdownAnim, {
+                          toValue: 0,
+                          friction: 8,
+                          tension: 100,
+                          useNativeDriver: false,
+                        }).start();
+                      }}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.teamName} numberOfLines={1}>
-                        {battingTeam || 'Team A'}
+                      <Text style={styles.tournamentDropdownText} numberOfLines={1}>
+                        {battingTeam}
                       </Text>
-                      <View style={styles.editHint}>
-                        <Text style={styles.editHintText}>Tap to edit</Text>
-                      </View>
+                      <View style={[
+                        styles.tournamentChevron,
+                        showBattingDropdown && styles.tournamentChevronOpen,
+                      ]} />
                     </TouchableOpacity>
-                  )}
+                  </View>
+                  <Animated.View style={{
+                    maxHeight: battingDropdownAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, Math.ceil(tournamentTeamNames.length / 2) * 52 + 16],
+                    }),
+                    overflow: 'hidden',
+                  }}>
+                    <View style={styles.tournamentDropdownList}>
+                      {tournamentTeamNames.map((tn) => (
+                        <TouchableOpacity
+                          key={tn}
+                          style={[
+                            styles.tournamentDropdownItem,
+                            battingTeam === tn && styles.tournamentDropdownItemSelected,
+                            bowlingTeam === tn && styles.tournamentDropdownItemDisabled,
+                          ]}
+                          onPress={() => {
+                            if (bowlingTeam === tn) return;
+                            setBattingTeam(tn);
+                            setShowBattingDropdown(false);
+                            Animated.spring(battingDropdownAnim, {
+                              toValue: 0,
+                              friction: 8,
+                              tension: 100,
+                              useNativeDriver: false,
+                            }).start();
+                          }}
+                          disabled={bowlingTeam === tn}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[
+                            styles.tournamentDropdownItemText,
+                            battingTeam === tn && styles.tournamentDropdownItemTextSelected,
+                            bowlingTeam === tn && styles.tournamentDropdownItemTextDisabled,
+                          ]}>
+                            {tn}
+                          </Text>
+                          {battingTeam === tn && (
+                            <View style={styles.checkMark}>
+                              <View style={styles.checkLine1} />
+                              <View style={styles.checkLine2} />
+                            </View>
+                          )}
+                          {bowlingTeam === tn && (
+                            <Text style={styles.alreadySelectedTag}>BOWLING</Text>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </Animated.View>
                 </View>
 
-                {/* Bowling Team - Right */}
-                <View style={styles.teamBox}>
-                  <View style={styles.teamLabelContainer}>
-                    <View style={styles.ballIconSmall} />
-                    <Text style={styles.teamLabel}>Bowling</Text>
+                <View style={styles.tournamentVsDivider}>
+                  <View style={styles.tournamentVsLine} />
+                  <View style={styles.tournamentVsCircle}>
+                    <Text style={styles.tournamentVsText}>VS</Text>
                   </View>
+                  <View style={styles.tournamentVsLine} />
+                </View>
 
-                  {isEditingBowling ? (
-                    <View style={styles.autocompleteWrapper}>
-                      <AutocompleteInput
-                        value={bowlingTeam}
-                        onChangeText={setBowlingTeam}
-                        type="team"
-                        placeholder="Team B"
-                        inputStyle={styles.teamInput}
-                        onBlur={() => setIsEditingBowling(false)}
-                        maxLength={20}
-                        autoFocus
-                        selectTextOnFocus={true}
-                      />
+                {/* Bowling Team Dropdown */}
+                <View style={styles.tournamentDropdownSection}>
+                  <View style={styles.tournamentDropdownHeader}>
+                    <View style={styles.teamLabelContainer}>
+                      <View style={styles.ballIconSmall} />
+                      <Text style={styles.teamLabel}>Bowling First</Text>
                     </View>
-                  ) : (
                     <TouchableOpacity
-                      style={styles.teamNameButton}
-                      onPress={() => handleTeamNamePress('bowling')}
+                      style={[
+                        styles.tournamentDropdownTrigger,
+                        showBowlingDropdown && styles.tournamentDropdownTriggerOpen,
+                      ]}
+                      onPress={() => {
+                        const opening = !showBowlingDropdown;
+                        setShowBowlingDropdown(opening);
+                        setShowBattingDropdown(false);
+                        Animated.spring(bowlingDropdownAnim, {
+                          toValue: opening ? 1 : 0,
+                          friction: 8,
+                          tension: 100,
+                          useNativeDriver: false,
+                        }).start();
+                        Animated.spring(battingDropdownAnim, {
+                          toValue: 0,
+                          friction: 8,
+                          tension: 100,
+                          useNativeDriver: false,
+                        }).start();
+                      }}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.teamName} numberOfLines={1}>
-                        {bowlingTeam || 'Team B'}
+                      <Text style={styles.tournamentDropdownText} numberOfLines={1}>
+                        {bowlingTeam}
                       </Text>
-                      <View style={styles.editHint}>
-                        <Text style={styles.editHintText}>Tap to edit</Text>
-                      </View>
+                      <View style={[
+                        styles.tournamentChevron,
+                        showBowlingDropdown && styles.tournamentChevronOpen,
+                      ]} />
                     </TouchableOpacity>
-                  )}
+                  </View>
+                  <Animated.View style={{
+                    maxHeight: bowlingDropdownAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, Math.ceil(tournamentTeamNames.length / 2) * 52 + 16],
+                    }),
+                    overflow: 'hidden',
+                  }}>
+                    <View style={styles.tournamentDropdownList}>
+                      {tournamentTeamNames.map((tn) => (
+                        <TouchableOpacity
+                          key={tn}
+                          style={[
+                            styles.tournamentDropdownItem,
+                            bowlingTeam === tn && styles.tournamentDropdownItemSelected,
+                            battingTeam === tn && styles.tournamentDropdownItemDisabled,
+                          ]}
+                          onPress={() => {
+                            if (battingTeam === tn) return;
+                            setBowlingTeam(tn);
+                            setShowBowlingDropdown(false);
+                            Animated.spring(bowlingDropdownAnim, {
+                              toValue: 0,
+                              friction: 8,
+                              tension: 100,
+                              useNativeDriver: false,
+                            }).start();
+                          }}
+                          disabled={battingTeam === tn}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[
+                            styles.tournamentDropdownItemText,
+                            bowlingTeam === tn && styles.tournamentDropdownItemTextSelected,
+                            battingTeam === tn && styles.tournamentDropdownItemTextDisabled,
+                          ]}>
+                            {tn}
+                          </Text>
+                          {bowlingTeam === tn && (
+                            <View style={styles.checkMark}>
+                              <View style={styles.checkLine1} />
+                              <View style={styles.checkLine2} />
+                            </View>
+                          )}
+                          {battingTeam === tn && (
+                            <Text style={styles.alreadySelectedTag}>BATTING</Text>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </Animated.View>
                 </View>
               </View>
-            </View>
+            ) : (
+              /* Original team card for non-tournament matches */
+              <View style={styles.teamCard}>
+                {/* VS Circle */}
+                <View style={styles.vsCircle}>
+                  <Text style={styles.vsText}>VS</Text>
+                </View>
+
+                {/* Team Container */}
+                <View style={styles.teamsContainer}>
+                  {/* Batting Team - Left */}
+                  <View style={styles.teamBox}>
+                    <View style={styles.teamLabelContainer}>
+                      <View style={styles.batIconSmall}>
+                        <View style={styles.batHandle} />
+                        <View style={styles.batBlade} />
+                      </View>
+                      <Text style={styles.teamLabel}>Batting</Text>
+                    </View>
+
+                    {isEditingBatting ? (
+                      <View style={styles.autocompleteWrapper}>
+                        <AutocompleteInput
+                          value={battingTeam}
+                          onChangeText={setBattingTeam}
+                          type="team"
+                          placeholder="Team A"
+                          inputStyle={styles.teamInput}
+                          onBlur={() => setIsEditingBatting(false)}
+                          maxLength={20}
+                          autoFocus
+                          selectTextOnFocus={true}
+                        />
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.teamNameButton}
+                        onPress={() => handleTeamNamePress('batting')}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.teamName} numberOfLines={1}>
+                          {battingTeam || 'Team A'}
+                        </Text>
+                        <View style={styles.editHint}>
+                          <Text style={styles.editHintText}>Tap to edit</Text>
+                        </View>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Bowling Team - Right */}
+                  <View style={styles.teamBox}>
+                    <View style={styles.teamLabelContainer}>
+                      <View style={styles.ballIconSmall} />
+                      <Text style={styles.teamLabel}>Bowling</Text>
+                    </View>
+
+                    {isEditingBowling ? (
+                      <View style={styles.autocompleteWrapper}>
+                        <AutocompleteInput
+                          value={bowlingTeam}
+                          onChangeText={setBowlingTeam}
+                          type="team"
+                          placeholder="Team B"
+                          inputStyle={styles.teamInput}
+                          onBlur={() => setIsEditingBowling(false)}
+                          maxLength={20}
+                          autoFocus
+                          selectTextOnFocus={true}
+                        />
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.teamNameButton}
+                        onPress={() => handleTeamNamePress('bowling')}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.teamName} numberOfLines={1}>
+                          {bowlingTeam || 'Team B'}
+                        </Text>
+                        <View style={styles.editHint}>
+                          <Text style={styles.editHintText}>Tap to edit</Text>
+                        </View>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              </View>
+            )}
           </View>
           </TouchableWithoutFeedback>
 
@@ -867,6 +1109,200 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.bold,
     color: '#fff',
     letterSpacing: 0.3,
+  },
+  // Tournament Banner
+  tournamentBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef3c7',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: spacing.xl,
+    gap: 12,
+  },
+  tournamentBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#fde68a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trophyMini: {
+    width: 14,
+    height: 10,
+    borderWidth: 2.5,
+    borderBottomWidth: 0,
+    borderColor: '#d97706',
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
+    borderBottomLeftRadius: 7,
+    borderBottomRightRadius: 7,
+  },
+  trophyBaseMini: {
+    width: 8,
+    height: 3,
+    backgroundColor: '#d97706',
+    borderRadius: 1,
+    marginTop: -1,
+  },
+  tournamentBannerText: {
+    flex: 1,
+  },
+  tournamentBannerLabel: {
+    fontSize: 10,
+    fontWeight: fontWeights.bold,
+    color: '#92400e',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  tournamentBannerName: {
+    fontSize: 15,
+    fontWeight: fontWeights.bold,
+    color: '#78350f',
+    marginTop: 1,
+  },
+  // Tournament Team Dropdown
+  tournamentTeamCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: spacing.lg,
+    ...shadows.md,
+    shadowColor: '#0f172a',
+  },
+  tournamentDropdownSection: {
+    marginBottom: 4,
+  },
+  tournamentDropdownHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  tournamentDropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    minWidth: 130,
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+  },
+  tournamentDropdownTriggerOpen: {
+    borderColor: '#d97706',
+    backgroundColor: '#fef3c7',
+  },
+  tournamentDropdownText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: fontWeights.bold,
+    color: '#0f172a',
+    marginRight: 8,
+  },
+  tournamentChevron: {
+    width: 8,
+    height: 8,
+    borderRightWidth: 2,
+    borderBottomWidth: 2,
+    borderColor: '#64748b',
+    transform: [{ rotate: '45deg' }],
+  },
+  tournamentChevronOpen: {
+    transform: [{ rotate: '-135deg' }],
+    borderColor: '#d97706',
+  },
+  tournamentDropdownList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  tournamentDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    gap: 6,
+  },
+  tournamentDropdownItemSelected: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#d97706',
+  },
+  tournamentDropdownItemDisabled: {
+    opacity: 0.5,
+  },
+  tournamentDropdownItemText: {
+    fontSize: 14,
+    fontWeight: fontWeights.semibold,
+    color: '#334155',
+  },
+  tournamentDropdownItemTextSelected: {
+    color: '#92400e',
+    fontWeight: fontWeights.bold,
+  },
+  tournamentDropdownItemTextDisabled: {
+    color: '#94a3b8',
+  },
+  checkMark: {
+    width: 14,
+    height: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkLine1: {
+    position: 'absolute',
+    width: 6,
+    height: 2,
+    backgroundColor: '#d97706',
+    borderRadius: 1,
+    transform: [{ rotate: '45deg' }, { translateX: -2 }, { translateY: 2 }],
+  },
+  checkLine2: {
+    position: 'absolute',
+    width: 10,
+    height: 2,
+    backgroundColor: '#d97706',
+    borderRadius: 1,
+    transform: [{ rotate: '-45deg' }, { translateX: 2 }, { translateY: 0 }],
+  },
+  alreadySelectedTag: {
+    fontSize: 9,
+    fontWeight: fontWeights.bold,
+    color: '#94a3b8',
+    letterSpacing: 0.5,
+  },
+  tournamentVsDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  tournamentVsLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e2e8f0',
+  },
+  tournamentVsCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 12,
+    ...shadows.sm,
+    shadowColor: colors.primary,
+  },
+  tournamentVsText: {
+    fontSize: 11,
+    fontWeight: fontWeights.bold,
+    color: '#fff',
+    letterSpacing: 0.5,
   },
   // Footer Note
   footerNote: {

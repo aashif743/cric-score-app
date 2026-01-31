@@ -15,6 +15,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
+import tournamentService from '../utils/tournamentService';
+import SegmentedControl from '../components/SegmentedControl';
+import TournamentCard from '../components/TournamentCard';
 
 const { width } = Dimensions.get('window');
 
@@ -263,6 +266,9 @@ const PastMatchesScreen = ({ navigation }) => {
   const [error, setError] = useState('');
   const [matchToDelete, setMatchToDelete] = useState(null);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [selectedTab, setSelectedTab] = useState(0);
+  const [tournaments, setTournaments] = useState([]);
+  const [tournamentsLoading, setTournamentsLoading] = useState(false);
 
   // Header animation
   const headerAnim = useRef(new Animated.Value(0)).current;
@@ -298,14 +304,28 @@ const PastMatchesScreen = ({ navigation }) => {
     }
   }, [user?.token]);
 
+  const fetchTournaments = useCallback(async () => {
+    if (!user?.token) return;
+    try {
+      setTournamentsLoading(true);
+      const data = await tournamentService.getMyTournaments(user.token);
+      setTournaments(data || []);
+    } catch (err) {
+      console.warn('Fetch tournaments error:', err);
+    } finally {
+      setTournamentsLoading(false);
+    }
+  }, [user?.token]);
+
   // Refetch matches every time the screen gains focus
   // This ensures we have the latest data after saving/continuing a match
   useFocusEffect(
     useCallback(() => {
       if (user?.token) {
         fetchMatches();
+        fetchTournaments();
       }
-    }, [user?.token, fetchMatches])
+    }, [user?.token, fetchMatches, fetchTournaments])
   );
 
   const onRefresh = useCallback(async () => {
@@ -436,46 +456,103 @@ const PastMatchesScreen = ({ navigation }) => {
         )}
       </Animated.View>
 
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.secondary} />
-          <Text style={styles.loadingText}>Loading matches...</Text>
-        </View>
-      ) : error ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchMatches}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <FlatList
-          data={matches}
-          renderItem={({ item, index }) => (
-            <MatchCard
-              match={item}
-              index={index}
-              onView={handleViewMatch}
-              onDelete={setMatchToDelete}
-              navigation={navigation}
-            />
-          )}
-          keyExtractor={(item) => item._id}
-          contentContainerStyle={[
-            styles.listContent,
-            matches.length === 0 && styles.emptyListContent,
-          ]}
-          ListEmptyComponent={renderEmptyState}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={[colors.secondary]}
-              tintColor={colors.secondary}
-            />
-          }
-          showsVerticalScrollIndicator={false}
+      {/* Segmented Control */}
+      <View style={styles.segmentContainer}>
+        <SegmentedControl
+          options={['All Matches', 'Tournaments']}
+          selectedIndex={selectedTab}
+          onSelect={setSelectedTab}
         />
+      </View>
+
+      {selectedTab === 0 ? (
+        /* All Matches Tab */
+        loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.secondary} />
+            <Text style={styles.loadingText}>Loading matches...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={fetchMatches}>
+              <Text style={styles.retryButtonText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <FlatList
+            data={matches}
+            renderItem={({ item, index }) => (
+              <MatchCard
+                match={item}
+                index={index}
+                onView={handleViewMatch}
+                onDelete={setMatchToDelete}
+                navigation={navigation}
+              />
+            )}
+            keyExtractor={(item) => item._id}
+            contentContainerStyle={[
+              styles.listContent,
+              matches.length === 0 && styles.emptyListContent,
+            ]}
+            ListEmptyComponent={renderEmptyState}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[colors.secondary]}
+                tintColor={colors.secondary}
+              />
+            }
+            showsVerticalScrollIndicator={false}
+          />
+        )
+      ) : (
+        /* Tournaments Tab */
+        tournamentsLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#d97706" />
+            <Text style={styles.loadingText}>Loading tournaments...</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={tournaments}
+            renderItem={({ item, index }) => (
+              <TournamentCard
+                tournament={item}
+                index={index}
+                onPress={(t) => navigation.navigate('TournamentDetail', { tournamentId: t._id })}
+              />
+            )}
+            keyExtractor={(item) => item._id}
+            contentContainerStyle={[
+              styles.listContent,
+              tournaments.length === 0 && styles.emptyListContent,
+            ]}
+            ListEmptyComponent={() => (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>No Tournaments</Text>
+                <Text style={styles.emptyText}>
+                  Create a tournament from the{'\n'}Dashboard to get started
+                </Text>
+              </View>
+            )}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={async () => {
+                  setRefreshing(true);
+                  await fetchTournaments();
+                  setRefreshing(false);
+                }}
+                colors={['#d97706']}
+                tintColor="#d97706"
+              />
+            }
+            showsVerticalScrollIndicator={false}
+          />
+        )
       )}
 
       {/* Delete Single Match Modal */}
@@ -664,6 +741,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.error,
+  },
+  segmentContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: colors.white,
   },
   // List
   listContent: {

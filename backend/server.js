@@ -10,6 +10,7 @@ const { Server } = require("socket.io");
 const matchRoutes = require("./routes/matchRoutes");
 const userRoutes = require("./routes/userRoutes");
 const suggestionRoutes = require("./routes/suggestionRoutes");
+const tournamentRoutes = require("./routes/tournamentRoutes");
 
 dotenv.config();
 
@@ -59,6 +60,7 @@ app.use(express.json());
 app.use("/api/matches", matchRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/suggestions", suggestionRoutes);
+app.use("/api/tournaments", tournamentRoutes);
 
 // MongoDB Connection
 mongoose

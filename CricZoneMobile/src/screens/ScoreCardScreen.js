@@ -587,7 +587,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Check for end of over
     if (ballCounted && (match.balls + 1) % settings.ballsPerOver === 0) {
-      handleEndOfOver();
+      handleEndOfOver({ display: ballDisplay, runs: totalRuns, isWicket: false });
     }
 
     // Compute pending bowler update for accurate snapshot
@@ -771,20 +771,26 @@ const ScoreCardScreen = ({ navigation, route }) => {
   };
 
   // Handle end of over
-  const handleEndOfOver = () => {
+  // lastBall: { display, runs, isWicket } - the ball that completed the over (not yet in state)
+  const handleEndOfOver = (lastBall = null) => {
     try {
+      // Include the last ball that triggered end-of-over (state updates are async)
+      const allBalls = lastBall ? [...currentOverBalls, lastBall.display] : [...currentOverBalls];
+      const allRuns = lastBall ? currentOverRuns + lastBall.runs : currentOverRuns;
+      const allWickets = lastBall ? currentOverWickets + (lastBall.isWicket ? 1 : 0) : currentOverWickets;
+
       // Save over history
       const overData = {
         overNumber: Math.floor((match.balls + 1) / settings.ballsPerOver),
         bowlerName: currentBowler.name,
-        balls: [...currentOverBalls],
-        runs: currentOverRuns,
-        wickets: currentOverWickets,
+        balls: allBalls,
+        runs: allRuns,
+        wickets: allWickets,
       };
       setOverHistory(prev => [...prev, overData]);
 
-      // Check for maiden - use functional updates to avoid stale state
-      const isMaiden = currentOverRuns === 0 && currentOverBalls.every(b => !b.includes('WD') && !b.includes('NB'));
+      // Check for maiden
+      const isMaiden = allRuns === 0 && allBalls.every(b => !b.includes('WD') && !b.includes('NB'));
       const currentBowlerId = currentBowler.id;
 
       if (isMaiden) {
@@ -806,16 +812,19 @@ const ScoreCardScreen = ({ navigation, route }) => {
       // Rotate strike at end of over
       rotateStrike();
 
-      // Show change bowler modal for user to select next bowler
-      // Only show if match/innings is not ending
+      // Auto-select next bowler (user can manually change via bowler change button)
       const newBalls = match.balls + 1;
       const maxBalls = settings.overs * settings.ballsPerOver;
       const isOversComplete = newBalls >= maxBalls;
       const isAllOut = match.wickets >= settings.playersPerTeam - 1;
 
       if (!isOversComplete && !isAllOut) {
-        // Innings continues - show bowler selection modal
-        setShowChangeBowlerModal(true);
+        // Find next eligible bowler (not the one who just bowled)
+        const nextBowler = allBowlers.find(b => b.id !== currentBowlerId);
+        if (nextBowler) {
+          const bowlerWithStats = allBowlers.find(b => b.id === nextBowler.id) || nextBowler;
+          setCurrentBowler({ ...bowlerWithStats });
+        }
       }
     } catch (error) {
       console.error('Error in handleEndOfOver:', error);
@@ -890,11 +899,8 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // which passes the correct snapshot with pending wicket count
 
     // Check for end of over (wicket counts as a ball)
-    // Use setTimeout to ensure this runs after all state updates are processed
     if ((match.balls + 1) % settings.ballsPerOver === 0) {
-      setTimeout(() => {
-        handleEndOfOver();
-      }, 100);
+      handleEndOfOver({ display: 'W', runs: selectedRuns, isWicket: true });
     }
 
     // Compute pending bowler update
@@ -1231,7 +1237,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Check for end of over
     if ((match.balls + 1) % settings.ballsPerOver === 0) {
-      handleEndOfOver();
+      handleEndOfOver({ display: ballDisplay, runs: runs, isWicket: false });
     }
 
     // Reset and close modal
@@ -1390,7 +1396,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Check for end of over
     if ((match.balls + 1) % settings.ballsPerOver === 0) {
-      handleEndOfOver();
+      handleEndOfOver({ display: runs.toString(), runs: runs, isWicket: false });
     }
 
     // Reset and close modal

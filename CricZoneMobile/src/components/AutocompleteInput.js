@@ -27,6 +27,7 @@ const AutocompleteInput = ({
   returnKeyType = 'done',
   autoFocus = false,
   editable = true,
+  saveSuggestion = true, // Whether to save new names as suggestions on blur
 }) => {
   const [suggestions, setSuggestions] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -80,11 +81,11 @@ const AutocompleteInput = ({
     requestId.current += 1;
     const currentRequestId = requestId.current;
 
-    if (text.trim().length >= 2) {
+    if (text.trim().length >= 1) {
       // Set new timer for debounced search
       debounceTimer.current = setTimeout(() => {
         fetchSuggestions(text.trim(), currentRequestId);
-      }, 300);
+      }, 150);
     } else {
       setSuggestions([]);
       setShowDropdown(false);
@@ -125,7 +126,7 @@ const AutocompleteInput = ({
     requestId.current += 1;
     const currentRequestId = requestId.current;
 
-    if (value && value.trim().length >= 2) {
+    if (value && value.trim().length >= 1) {
       fetchSuggestions(value.trim(), currentRequestId);
     }
 
@@ -149,8 +150,8 @@ const AutocompleteInput = ({
       setSuggestions([]);
     }, 250);
 
-    // Save the name if it's new and user didn't select from suggestions
-    if (value && value.trim() && !hasSelectedSuggestion.current) {
+    // Save the name if enabled, it's new, and user didn't select from suggestions
+    if (saveSuggestion && value && value.trim() && !hasSelectedSuggestion.current) {
       suggestionService.addSuggestion(value.trim(), type);
     }
 

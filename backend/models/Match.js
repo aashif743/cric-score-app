@@ -216,6 +216,11 @@ const MatchSchema = new mongoose.Schema({
     required: true,
     ref: 'User'
   },
+  tournament: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tournament',
+    default: null
+  },
   teamA: {
     type: TeamSchema,
     required: true
