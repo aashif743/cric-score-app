@@ -55,6 +55,12 @@ const TournamentSchema = new mongoose.Schema({
   matchCount: {
     type: Number,
     default: 0
+  },
+  shareId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    default: null
   }
 }, {
   timestamps: true,

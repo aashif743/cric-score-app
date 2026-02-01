@@ -1,192 +1,54 @@
 const Tournament = require("../models/Tournament");
 const Match = require("../models/Match");
 const mongoose = require("mongoose");
-const { nanoid } = require("nanoid");
 
-// Create tournament
-exports.createTournament = async (req, res) => {
+// Get public tournament by shareId
+exports.getPublicTournament = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, error: "User not authenticated." });
-    }
+    const { shareId } = req.params;
 
-    const { name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver, venue, description } = req.body;
-
-    if (!name || !name.trim()) {
-      return res.status(400).json({ success: false, error: "Tournament name is required." });
-    }
-    if (!numberOfTeams || numberOfTeams < 2) {
-      return res.status(400).json({ success: false, error: "At least 2 teams are required." });
-    }
-
-    const tournament = await Tournament.create({
-      user: req.user.id,
-      name: name.trim(),
-      numberOfTeams,
-      teamNames: teamNames || [],
-      playersPerTeam: playersPerTeam || 11,
-      totalOvers: totalOvers || 20,
-      ballsPerOver: ballsPerOver || 6,
-      venue: venue || "",
-      description: description || "",
-    });
-
-    res.status(201).json({ success: true, data: tournament });
-  } catch (error) {
-    console.error("Create tournament error:", error);
-    res.status(500).json({ success: false, error: "Failed to create tournament." });
-  }
-};
-
-// Get all tournaments for user
-exports.getMyTournaments = async (req, res) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, error: "User not authenticated." });
-    }
-
-    const tournaments = await Tournament.find({ user: req.user.id })
-      .sort({ updatedAt: -1 });
-
-    res.json({ success: true, data: tournaments });
-  } catch (error) {
-    console.error("Get tournaments error:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch tournaments." });
-  }
-};
-
-// Get tournament by ID with matches
-exports.getTournamentById = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
-    }
-
-    const tournament = await Tournament.findById(id).lean();
+    const tournament = await Tournament.findOne({ shareId }).lean();
 
     if (!tournament) {
       return res.status(404).json({ success: false, error: "Tournament not found" });
     }
 
-    if (tournament.user.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, error: "Not authorized" });
-    }
-
-    // Fetch lightweight match list for display, and full data only for in-progress matches
+    // Fetch lightweight match list
     const [completedMatches, inProgressMatches] = await Promise.all([
-      Match.find({ tournament: id, status: { $in: ["completed", "abandoned"] } })
+      Match.find({ tournament: tournament._id, status: { $in: ["completed", "abandoned"] } })
         .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam')
         .sort({ updatedAt: -1 })
         .lean(),
-      Match.find({ tournament: id, status: { $in: ["scheduled", "in_progress", "innings_break"] } })
-        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1 innings2 currentState innings target toss')
+      Match.find({ tournament: tournament._id, status: { $in: ["scheduled", "in_progress", "innings_break"] } })
+        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam')
         .sort({ updatedAt: -1 })
         .lean(),
     ]);
     const matches = [...inProgressMatches, ...completedMatches];
 
-    res.json({ success: true, data: { ...tournament, matches } });
+    // Remove sensitive fields
+    const { user, shareId: _, ...publicTournament } = tournament;
+
+    res.json({ success: true, data: { ...publicTournament, matches } });
   } catch (error) {
-    console.error("Get tournament error:", error);
+    console.error("Get public tournament error:", error);
     res.status(500).json({ success: false, error: "Failed to fetch tournament." });
   }
 };
 
-// Update tournament
-exports.updateTournament = async (req, res) => {
+// Get public tournament stats by shareId
+exports.getPublicTournamentStats = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { shareId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
-    }
-
-    const tournament = await Tournament.findById(id);
+    const tournament = await Tournament.findOne({ shareId }).lean();
 
     if (!tournament) {
       return res.status(404).json({ success: false, error: "Tournament not found" });
     }
 
-    if (tournament.user.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, error: "Not authorized" });
-    }
+    const tournamentObjectId = tournament._id;
 
-    const { name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver, venue, description, status } = req.body;
-
-    if (name !== undefined) tournament.name = name.trim();
-    if (numberOfTeams !== undefined) tournament.numberOfTeams = numberOfTeams;
-    if (teamNames !== undefined) tournament.teamNames = teamNames;
-    if (playersPerTeam !== undefined) tournament.playersPerTeam = playersPerTeam;
-    if (totalOvers !== undefined) tournament.totalOvers = totalOvers;
-    if (ballsPerOver !== undefined) tournament.ballsPerOver = ballsPerOver;
-    if (venue !== undefined) tournament.venue = venue;
-    if (description !== undefined) tournament.description = description;
-    if (status !== undefined) tournament.status = status;
-
-    const updated = await tournament.save();
-
-    res.json({ success: true, data: updated });
-  } catch (error) {
-    console.error("Update tournament error:", error);
-    res.status(500).json({ success: false, error: "Failed to update tournament." });
-  }
-};
-
-// Delete tournament and linked matches
-exports.deleteTournament = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
-    }
-
-    const tournament = await Tournament.findById(id);
-
-    if (!tournament) {
-      return res.status(404).json({ success: false, error: "Tournament not found" });
-    }
-
-    if (tournament.user.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, error: "Not authorized" });
-    }
-
-    // Delete all linked matches
-    await Match.deleteMany({ tournament: id });
-
-    await Tournament.findByIdAndDelete(id);
-
-    res.json({ success: true, message: "Tournament and linked matches deleted successfully." });
-  } catch (error) {
-    console.error("Delete tournament error:", error);
-    res.status(500).json({ success: false, error: "Failed to delete tournament." });
-  }
-};
-
-// Get tournament stats
-exports.getTournamentStats = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
-    }
-
-    const tournament = await Tournament.findById(id).lean();
-
-    if (!tournament) {
-      return res.status(404).json({ success: false, error: "Tournament not found" });
-    }
-
-    if (tournament.user.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, error: "Not authorized" });
-    }
-
-    const tournamentObjectId = new mongoose.Types.ObjectId(id);
-
-    // Run all queries in parallel
     const [topRunScorers, topWicketTakers, totalMatches, completedMatches, mostRunsInMatch, bestBowling] = await Promise.all([
       // Top 5 run scorers
       Match.aggregate([
@@ -390,45 +252,65 @@ exports.getTournamentStats = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Get tournament stats error:", error);
+    console.error("Get public tournament stats error:", error);
     res.status(500).json({ success: false, error: "Failed to fetch tournament stats." });
   }
 };
 
-// Generate share link for tournament
-exports.generateShareId = async (req, res) => {
+// Get public tournament matches by shareId
+exports.getPublicTournamentMatches = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { shareId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
-    }
-
-    const tournament = await Tournament.findById(id);
+    const tournament = await Tournament.findOne({ shareId }).lean();
 
     if (!tournament) {
       return res.status(404).json({ success: false, error: "Tournament not found" });
     }
 
-    if (tournament.user.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, error: "Not authorized" });
-    }
+    const matches = await Match.find({ tournament: tournament._id })
+      .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam')
+      .sort({ updatedAt: -1 })
+      .lean();
 
-    // If already has a shareId, return it
-    if (!tournament.shareId) {
-      tournament.shareId = nanoid(12);
-      await tournament.save();
-    }
-
-    res.json({
-      success: true,
-      data: {
-        shareId: tournament.shareId,
-        shareUrl: `https://cric-zone.com/tournament/${tournament.shareId}`
-      }
-    });
+    res.json({ success: true, data: matches });
   } catch (error) {
-    console.error("Generate share ID error:", error);
-    res.status(500).json({ success: false, error: "Failed to generate share link." });
+    console.error("Get public tournament matches error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch matches." });
+  }
+};
+
+// Get public match scorecard — verify match belongs to a shared tournament
+exports.getPublicMatch = async (req, res) => {
+  try {
+    const { matchId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(matchId)) {
+      return res.status(400).json({ success: false, error: "Invalid match ID" });
+    }
+
+    const match = await Match.findById(matchId).lean();
+
+    if (!match) {
+      return res.status(404).json({ success: false, error: "Match not found" });
+    }
+
+    // Verify match belongs to a shared tournament
+    if (match.tournament) {
+      const tournament = await Tournament.findById(match.tournament).lean();
+      if (!tournament || !tournament.shareId) {
+        return res.status(403).json({ success: false, error: "This match is not publicly shared" });
+      }
+    } else {
+      return res.status(403).json({ success: false, error: "This match is not publicly shared" });
+    }
+
+    // Remove user field
+    const { user, ...publicMatch } = match;
+
+    res.json({ success: true, data: publicMatch });
+  } catch (error) {
+    console.error("Get public match error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch match." });
   }
 };

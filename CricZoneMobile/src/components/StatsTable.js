@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   valueCell: {
-    width: 55,
+    width: 48,
     textAlign: 'right',
   },
   valueText: {

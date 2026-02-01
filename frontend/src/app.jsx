@@ -20,6 +20,8 @@ import BottomNav from './components/BottomNav'; // New Component
 import PastMatches from './pages/PastMatches';
 import ProfilePage from './pages/ProfilePage'; 
 import PointsSystem from './pages/PointsSystem';
+import PublicTournament from './pages/PublicTournament';
+import PublicMatchScorecard from './pages/PublicMatchScorecard';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
 
 // --- Placeholder Components for Future Features ---
@@ -190,7 +192,7 @@ const handleResumeMatch = (matchToResume) => {
 
 
   // --- Conditional Rendering Logic for Navigation ---
-  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/'];
+  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament'];
   const isNavHidden = pathsWithoutNav.some(path => location.pathname.startsWith(path) && path !== '/');
   
   // Corrected code
@@ -208,6 +210,8 @@ const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will
           <Route path="/auth" element={!user ? <AuthPage /> : <Navigate to="/dashboard" />} />
           <Route path="/match-setup" element={<MatchSetup onStartMatch={handleStartMatch} />} />
           <Route path="/full-scorecard/:matchIdParam" element={<FullScorecardPage />} />
+          <Route path="/tournament/:shareId" element={<PublicTournament />} />
+          <Route path="/tournament/:shareId/match/:matchId" element={<PublicMatchScorecard />} />
 
           {/* --- Protected Routes (Require Login) --- */}
           <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/auth" />} />

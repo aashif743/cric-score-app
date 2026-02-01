@@ -13,5 +13,6 @@ router.route("/:id")
   .delete(protect, tournamentController.deleteTournament);
 
 router.get("/:id/stats", protect, tournamentController.getTournamentStats);
+router.post("/:id/share", protect, tournamentController.generateShareId);
 
 module.exports = router;

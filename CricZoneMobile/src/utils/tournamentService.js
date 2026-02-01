@@ -60,6 +60,16 @@ const tournamentService = {
       throw error;
     }
   },
+
+  generateShareLink: async (id, token) => {
+    try {
+      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const response = await API.post(`/tournaments/${id}/share`, {}, config);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
 };
 
 export default tournamentService;

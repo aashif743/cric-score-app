@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "infoPlist": {
         "NSCameraUsageDescription": "CricZone needs camera access for profile photos.",
         "NSPhotoLibraryUsageDescription": "CricZone needs photo library access to select profile pictures.",

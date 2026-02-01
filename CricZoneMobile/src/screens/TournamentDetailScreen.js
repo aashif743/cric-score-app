@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Animated,
+  Share,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -299,6 +301,25 @@ const TournamentDetailScreen = ({ navigation, route }) => {
     });
   };
 
+  const [sharing, setSharing] = useState(false);
+
+  const handleShare = useCallback(async () => {
+    if (!user?.token || !tournament) return;
+    try {
+      setSharing(true);
+      const res = await tournamentService.generateShareLink(tournament._id, user.token);
+      if (res.success && res.data?.shareUrl) {
+        await Share.share({
+          message: `Check out ${tournament.name} on CricZone!\n${res.data.shareUrl}`,
+        });
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Failed to generate share link.');
+    } finally {
+      setSharing(false);
+    }
+  }, [tournament, user?.token]);
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -444,6 +465,7 @@ const TournamentDetailScreen = ({ navigation, route }) => {
                 data={stats.topWicketTakers}
                 columns={[
                   { key: 'totalWickets', label: 'Wkts' },
+                  { key: 'totalRuns', label: 'Runs' },
                   { key: 'innings', label: 'Inn' },
                 ]}
               />
@@ -484,16 +506,33 @@ const TournamentDetailScreen = ({ navigation, route }) => {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>{tournament.name}</Text>
         </View>
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={handleEdit}
-          activeOpacity={0.7}
-        >
-          <View style={styles.pencilIcon}>
-            <View style={styles.pencilBody} />
-            <View style={styles.pencilTip} />
-          </View>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity
+            style={styles.shareButton}
+            onPress={handleShare}
+            activeOpacity={0.7}
+            disabled={sharing}
+          >
+            {sharing ? (
+              <ActivityIndicator size="small" color="#2563eb" />
+            ) : (
+              <View style={styles.shareIcon}>
+                <View style={styles.shareArrow} />
+                <View style={styles.shareBase} />
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={handleEdit}
+            activeOpacity={0.7}
+          >
+            <View style={styles.pencilIcon}>
+              <View style={styles.pencilBody} />
+              <View style={styles.pencilTip} />
+            </View>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -572,6 +611,37 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: '#0f172a',
+  },
+  shareButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#dbeafe',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  shareIcon: {
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  shareArrow: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderBottomWidth: 8,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#2563eb',
+    marginBottom: 1,
+  },
+  shareBase: {
+    width: 2,
+    height: 8,
+    backgroundColor: '#2563eb',
+    borderRadius: 1,
   },
   editButton: {
     width: 44,
