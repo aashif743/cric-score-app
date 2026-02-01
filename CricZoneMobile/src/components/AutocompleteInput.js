@@ -4,14 +4,18 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   StyleSheet,
-  Animated,
   Keyboard,
   Platform,
-  ScrollView,
+  FlatList,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import suggestionService from '../utils/suggestionService';
 import { colors, spacing, borderRadius, fontWeights } from '../utils/theme';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const AutocompleteInput = ({
   value,
@@ -27,19 +31,31 @@ const AutocompleteInput = ({
   returnKeyType = 'done',
   autoFocus = false,
   editable = true,
-  saveSuggestion = true, // Whether to save new names as suggestions on blur
+  saveSuggestion = true,
 }) => {
   const [suggestions, setSuggestions] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [selection, setSelection] = useState(undefined);
+  const [inputLayout, setInputLayout] = useState(null);
 
   const debounceTimer = useRef(null);
   const inputRef = useRef(null);
-  const dropdownHeight = useRef(new Animated.Value(0)).current;
+  const containerRef = useRef(null);
   const hasSelectedSuggestion = useRef(false);
-  const requestId = useRef(0); // Track request to prevent race conditions
-  const isFocusedRef = useRef(false); // Use ref to avoid stale closure
+  const requestId = useRef(0);
+  const isFocusedRef = useRef(false);
+
+  // Measure input position on screen for dropdown placement
+  const measureInput = useCallback(() => {
+    if (containerRef.current) {
+      containerRef.current.measureInWindow((x, y, w, h) => {
+        if (x !== undefined && y !== undefined) {
+          setInputLayout({ x, y, width: w, height: h });
+        }
+      });
+    }
+  }, []);
 
   // Fetch suggestions
   const fetchSuggestions = useCallback(async (query, currentRequestId) => {
@@ -48,41 +64,37 @@ const AutocompleteInput = ({
         ? await suggestionService.getPlayerSuggestions(query)
         : await suggestionService.getTeamSuggestions(query);
 
-      // Only update if this is still the latest request and input is focused
       if (currentRequestId === requestId.current && isFocusedRef.current) {
         setSuggestions(results);
         if (results.length > 0) {
+          measureInput();
           setShowDropdown(true);
         } else {
           setShowDropdown(false);
         }
       }
     } catch (error) {
-      // Silently fail - suggestions are not critical
       if (currentRequestId === requestId.current) {
         setSuggestions([]);
         setShowDropdown(false);
       }
     }
-  }, [type]);
+  }, [type, measureInput]);
 
   // Debounced search
   const handleTextChange = useCallback((text) => {
     hasSelectedSuggestion.current = false;
-    setSelection(undefined); // Clear selection when typing
+    setSelection(undefined);
     onChangeText(text);
 
-    // Clear previous timer
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
 
-    // Increment request ID to invalidate any pending requests
     requestId.current += 1;
     const currentRequestId = requestId.current;
 
     if (text.trim().length >= 1) {
-      // Set new timer for debounced search
       debounceTimer.current = setTimeout(() => {
         fetchSuggestions(text.trim(), currentRequestId);
       }, 150);
@@ -96,33 +108,33 @@ const AutocompleteInput = ({
   const handleSelectSuggestion = useCallback((suggestion) => {
     hasSelectedSuggestion.current = true;
 
-    // Clear any pending requests
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
     requestId.current += 1;
 
     onChangeText(suggestion.name);
-    setSuggestions([]);
     setShowDropdown(false);
-    Keyboard.dismiss();
-  }, [onChangeText]);
+    setSuggestions([]);
+
+    // Save selected suggestion to bump its usage count
+    if (saveSuggestion) {
+      suggestionService.addSuggestion(suggestion.name, type);
+    }
+  }, [onChangeText, saveSuggestion, type]);
 
   // Handle input focus
   const handleFocus = useCallback(() => {
     setIsFocused(true);
     isFocusedRef.current = true;
 
-    // Select all text on focus
     if (selectTextOnFocus && value) {
       setSelection({ start: 0, end: value.length });
-      // Clear selection after a short delay so user can type normally
       setTimeout(() => {
         setSelection(undefined);
       }, 100);
     }
 
-    // Increment request ID and fetch if there's existing text
     requestId.current += 1;
     const currentRequestId = requestId.current;
 
@@ -138,38 +150,28 @@ const AutocompleteInput = ({
     setIsFocused(false);
     isFocusedRef.current = false;
 
-    // Cancel any pending requests
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
     requestId.current += 1;
 
-    // Delay hiding dropdown to allow tap on suggestion
+    // Don't close dropdown immediately — Modal may have caused blur on Android.
+    // Only close if dropdown is not showing (no suggestions) or after a longer delay
+    // to allow the user to tap a suggestion in the Modal.
     setTimeout(() => {
-      setShowDropdown(false);
-      setSuggestions([]);
-    }, 250);
+      // If suggestions are still showing in Modal, don't auto-close them.
+      // User will dismiss by tapping a suggestion or tapping outside.
+      if (!showDropdown) {
+        setSuggestions([]);
+      }
+    }, 300);
 
-    // Save the name if enabled, it's new, and user didn't select from suggestions
     if (saveSuggestion && value && value.trim() && !hasSelectedSuggestion.current) {
       suggestionService.addSuggestion(value.trim(), type);
     }
 
     onBlur && onBlur();
-  }, [value, type, onBlur]);
-
-  // Animate dropdown
-  useEffect(() => {
-    const toHeight = showDropdown && suggestions.length > 0
-      ? Math.min(suggestions.length * 48, 192)
-      : 0;
-
-    Animated.timing(dropdownHeight, {
-      toValue: toHeight,
-      duration: 150,
-      useNativeDriver: false,
-    }).start();
-  }, [showDropdown, suggestions.length, dropdownHeight]);
+  }, [value, type, onBlur, saveSuggestion, showDropdown]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -182,8 +184,62 @@ const AutocompleteInput = ({
 
   const isPopular = (suggestion) => suggestion.usageCount >= 50;
 
+  const dropdownMaxHeight = Math.min(suggestions.length * 44, 220);
+
+  // Calculate dropdown position for Modal — always wide enough, anchored near input
+  const getModalDropdownStyle = () => {
+    if (!inputLayout) return { top: 100, left: 16, width: SCREEN_WIDTH - 32 };
+
+    const minWidth = 220;
+    let width = Math.max(inputLayout.width, minWidth);
+    let left = inputLayout.x;
+
+    // If wider than parent, try to center on input
+    if (width > inputLayout.width) {
+      left = inputLayout.x + inputLayout.width / 2 - width / 2;
+    }
+
+    // Clamp to screen edges
+    if (left < 8) left = 8;
+    if (left + width > SCREEN_WIDTH - 8) {
+      width = SCREEN_WIDTH - left - 8;
+    }
+    if (width < minWidth) {
+      left = 8;
+      width = SCREEN_WIDTH - 16;
+    }
+
+    return {
+      top: inputLayout.y + inputLayout.height + 4,
+      left,
+      width,
+    };
+  };
+
+  const renderSuggestionItem = useCallback(({ item: suggestion, index }) => (
+    <TouchableOpacity
+      style={[
+        styles.suggestionItem,
+        index === suggestions.length - 1 && styles.suggestionItemLast,
+      ]}
+      onPress={() => handleSelectSuggestion(suggestion)}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.suggestionText} numberOfLines={1}>
+        {suggestion.name}
+      </Text>
+      {isPopular(suggestion) && (
+        <View style={styles.popularBadge}>
+          <Text style={styles.popularBadgeText}>Popular</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  ), [suggestions.length, handleSelectSuggestion]);
+
+  const isDropdownVisible = showDropdown && suggestions.length > 0 && inputLayout !== null;
+
   return (
-    <View style={[styles.container, style]}>
+    <View style={[styles.container, style]} ref={containerRef}>
       <TextInput
         ref={inputRef}
         style={[
@@ -208,37 +264,42 @@ const AutocompleteInput = ({
         onSubmitEditing={() => Keyboard.dismiss()}
       />
 
-      {/* Suggestions Dropdown */}
-      {showDropdown && suggestions.length > 0 && (
-        <Animated.View style={[styles.dropdown, { maxHeight: dropdownHeight }]}>
-          <ScrollView
-            keyboardShouldPersistTaps="always"
-            nestedScrollEnabled={true}
-            showsVerticalScrollIndicator={false}
-          >
-            {suggestions.map((suggestion, index) => (
-              <TouchableOpacity
-                key={suggestion._id || `${suggestion.name}-${index}`}
-                style={[
-                  styles.suggestionItem,
-                  index === suggestions.length - 1 && styles.suggestionItemLast,
-                ]}
-                onPress={() => handleSelectSuggestion(suggestion)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.suggestionText}>
-                  {suggestion.name}
-                </Text>
-                {isPopular(suggestion) && (
-                  <View style={styles.popularBadge}>
-                    <Text style={styles.popularBadgeText}>Popular</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </Animated.View>
-      )}
+      {/* Suggestions Dropdown via Modal — renders above everything, never clipped */}
+      <Modal
+        visible={isDropdownVisible}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={() => {
+          setShowDropdown(false);
+          setSuggestions([]);
+        }}
+      >
+        <TouchableWithoutFeedback
+          onPress={() => {
+            setShowDropdown(false);
+            setSuggestions([]);
+            Keyboard.dismiss();
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.dropdown, getModalDropdownStyle(), { maxHeight: dropdownMaxHeight }]}>
+                <FlatList
+                  data={suggestions}
+                  renderItem={renderSuggestionItem}
+                  keyExtractor={(item, idx) => item._id || `${item.name}-${idx}`}
+                  keyboardShouldPersistTaps="always"
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={suggestions.length > 5}
+                  bounces={false}
+                  scrollEnabled={suggestions.length > 5}
+                />
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 };
@@ -246,7 +307,6 @@ const AutocompleteInput = ({
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
-    zIndex: 1000,
   },
   input: {
     fontSize: 16,
@@ -263,34 +323,33 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: '#fff',
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   dropdown: {
     position: 'absolute',
-    top: '100%',
-    left: 0,
-    minWidth: 200,
     backgroundColor: '#fff',
     borderRadius: borderRadius.md,
-    marginTop: 4,
-    overflow: 'visible',
     borderWidth: 1,
     borderColor: '#e2e8f0',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
+        shadowOpacity: 0.2,
         shadowRadius: 12,
       },
       android: {
-        elevation: 8,
+        elevation: 10,
       },
     }),
   },
   suggestionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingVertical: 12,
+    justifyContent: 'space-between',
+    height: 44,
     paddingHorizontal: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: '#f1f5f9',
@@ -303,7 +362,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#334155',
     fontWeight: fontWeights.medium,
-    flexShrink: 0,
+    flex: 1,
   },
   popularBadge: {
     backgroundColor: '#fef3c7',

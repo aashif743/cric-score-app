@@ -92,18 +92,19 @@ const MatchCard = ({ match, index, onView, onDelete, navigation }) => {
   const slideAnim = useRef(new Animated.Value(50)).current;
 
   useEffect(() => {
+    const delay = Math.min(index * 60, 300); // Cap delay to avoid long stagger
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 400,
-        delay: index * 100,
+        duration: 300,
+        delay,
         useNativeDriver: true,
       }),
       Animated.spring(slideAnim, {
         toValue: 0,
         friction: 8,
         tension: 40,
-        delay: index * 100,
+        delay,
         useNativeDriver: true,
       }),
     ]).start();
@@ -129,6 +130,19 @@ const MatchCard = ({ match, index, onView, onDelete, navigation }) => {
   const isCompleted = match.status === 'completed';
   const teamAName = match.teamA?.name || 'Team A';
   const teamBName = match.teamB?.name || 'Team B';
+
+  // Derive scores from innings data
+  const getTeamScore = (teamName) => {
+    if (match.innings1?.battingTeam === teamName) {
+      return { runs: match.innings1.runs, wickets: match.innings1.wickets, overs: match.innings1.overs };
+    }
+    if (match.innings2?.battingTeam === teamName) {
+      return { runs: match.innings2.runs, wickets: match.innings2.wickets, overs: match.innings2.overs };
+    }
+    return null;
+  };
+  const teamAScore = getTeamScore(teamAName);
+  const teamBScore = getTeamScore(teamBName);
 
   const parseResult = () => {
     if (!match.result) return 'Match in progress';
@@ -197,9 +211,10 @@ const MatchCard = ({ match, index, onView, onDelete, navigation }) => {
                 <Text style={styles.teamInitial}>{teamAName.charAt(0)}</Text>
               </View>
               <Text style={styles.teamName} numberOfLines={1}>{teamAName}</Text>
-              {match.teamA?.runs !== undefined && (
+              {teamAScore && (
                 <Text style={styles.teamScore}>
-                  {match.teamA.runs}/{match.teamA.wickets || 0}
+                  {teamAScore.runs}/{teamAScore.wickets || 0}
+                  <Text style={styles.oversText}> ({teamAScore.overs})</Text>
                 </Text>
               )}
             </View>
@@ -215,9 +230,10 @@ const MatchCard = ({ match, index, onView, onDelete, navigation }) => {
                 <Text style={styles.teamInitial}>{teamBName.charAt(0)}</Text>
               </View>
               <Text style={styles.teamName} numberOfLines={1}>{teamBName}</Text>
-              {match.teamB?.runs !== undefined && (
+              {teamBScore && (
                 <Text style={styles.teamScore}>
-                  {match.teamB.runs}/{match.teamB.wickets || 0}
+                  {teamBScore.runs}/{teamBScore.wickets || 0}
+                  <Text style={styles.oversText}> ({teamBScore.overs})</Text>
                 </Text>
               )}
             </View>
@@ -269,6 +285,7 @@ const PastMatchesScreen = ({ navigation }) => {
   const [selectedTab, setSelectedTab] = useState(0);
   const [tournaments, setTournaments] = useState([]);
   const [tournamentsLoading, setTournamentsLoading] = useState(false);
+  const hasFetchedOnce = useRef(false);
 
   // Header animation
   const headerAnim = useRef(new Animated.Value(0)).current;
@@ -281,7 +298,7 @@ const PastMatchesScreen = ({ navigation }) => {
     }).start();
   }, []);
 
-  const fetchMatches = useCallback(async () => {
+  const fetchMatches = useCallback(async (showLoader = true) => {
     if (!user?.token) {
       setError('You must be logged in to view past matches.');
       setLoading(false);
@@ -289,25 +306,22 @@ const PastMatchesScreen = ({ navigation }) => {
     }
 
     try {
-      setLoading(true);
+      if (showLoader) setLoading(true);
       setError('');
       const userMatches = await matchService.getMyMatches(user.token);
-      const sortedMatches = (userMatches || []).sort(
-        (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
-      );
-      setMatches(sortedMatches);
+      setMatches(userMatches || []);
     } catch (err) {
       console.warn('Fetch matches error:', err);
-      setError('Failed to fetch matches. Please try again later.');
+      if (showLoader) setError('Failed to fetch matches. Please try again later.');
     } finally {
       setLoading(false);
     }
   }, [user?.token]);
 
-  const fetchTournaments = useCallback(async () => {
+  const fetchTournaments = useCallback(async (showLoader = true) => {
     if (!user?.token) return;
     try {
-      setTournamentsLoading(true);
+      if (showLoader) setTournamentsLoading(true);
       const data = await tournamentService.getMyTournaments(user.token);
       setTournaments(data || []);
     } catch (err) {
@@ -317,13 +331,14 @@ const PastMatchesScreen = ({ navigation }) => {
     }
   }, [user?.token]);
 
-  // Refetch matches every time the screen gains focus
-  // This ensures we have the latest data after saving/continuing a match
+  // Refetch on focus — show spinner only on first load, background refresh after
   useFocusEffect(
     useCallback(() => {
       if (user?.token) {
-        fetchMatches();
-        fetchTournaments();
+        const showLoader = !hasFetchedOnce.current;
+        fetchMatches(showLoader);
+        fetchTournaments(showLoader);
+        hasFetchedOnce.current = true;
       }
     }, [user?.token, fetchMatches, fetchTournaments])
   );
@@ -851,6 +866,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: colors.primary,
+  },
+  oversText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.textMuted,
   },
   vsDivider: {
     flexDirection: 'row',

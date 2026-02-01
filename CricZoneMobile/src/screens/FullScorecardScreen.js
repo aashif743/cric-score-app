@@ -834,6 +834,49 @@ const FullScorecardScreen = ({ navigation, route }) => {
     );
   };
 
+  const getBallColor = (ball) => {
+    if (ball === 'W') return colors.error;
+    if (ball === '4' || ball === '6') return colors.success;
+    if (ball.includes('WD') || ball.includes('NB')) return colors.warning;
+    if (ball.includes('BYE') || ball.includes('LB')) return '#f97316';
+    return colors.primaryLight;
+  };
+
+  const renderOverHistory = (overHistory) => {
+    if (!overHistory || overHistory.length === 0) return null;
+
+    return (
+      <Animated.View style={[styles.overHistoryContainer, { opacity: fadeAnim }]}>
+        <Text style={styles.overHistoryTitle}>Over by Over</Text>
+        <View style={styles.overHistoryList}>
+          {overHistory.map((over, index) => (
+            <View key={index} style={styles.overHistoryItem}>
+              <View style={styles.overHistoryHeader}>
+                <Text style={styles.overHistoryNumber}>Over {over.overNumber || index + 1}</Text>
+                {over.bowlerName ? (
+                  <Text style={styles.overHistoryBowler}>{over.bowlerName}</Text>
+                ) : null}
+                <Text style={styles.overHistoryStats}>
+                  {over.runs}R{over.wickets > 0 ? `, ${over.wickets}W` : ''}
+                </Text>
+              </View>
+              <View style={styles.overHistoryBalls}>
+                {(over.balls || []).map((ball, ballIndex) => (
+                  <View
+                    key={ballIndex}
+                    style={[styles.overHistoryBall, { backgroundColor: getBallColor(ball) }]}
+                  >
+                    <Text style={styles.overHistoryBallText}>{ball}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ))}
+        </View>
+      </Animated.View>
+    );
+  };
+
   const renderInningsSection = (innings, teamName, label) => {
     if (!innings) {
       return (
@@ -899,6 +942,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
 
         {renderExtras(innings.extras)}
         {renderFallOfWickets(innings.fallOfWickets)}
+        {renderOverHistory(innings.overHistory)}
       </Animated.View>
     );
   };
@@ -1232,32 +1276,43 @@ const FullScorecardScreen = ({ navigation, route }) => {
           )}
 
         {/* Action Buttons */}
-        <View style={styles.actionButtons}>
-          <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
-            <TouchableOpacity
-              style={styles.dashboardButton}
-              onPress={handleGoToDashboard}
-              onPressIn={handleButtonPressIn}
-              onPressOut={handleButtonPressOut}
-              activeOpacity={0.9}
-            >
-              <HomeIcon size={20} color={colors.primary} />
-              <Text style={styles.dashboardButtonText}>Dashboard</Text>
-            </TouchableOpacity>
-          </Animated.View>
-          <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
-            <TouchableOpacity
-              style={styles.newMatchButtonLarge}
-              onPress={() => navigation.navigate('MatchSetup')}
-              onPressIn={handleButtonPressIn}
-              onPressOut={handleButtonPressOut}
-              activeOpacity={0.9}
-            >
-              <PlusIcon size={20} color={colors.surface} />
-              <Text style={styles.newMatchButtonLargeText}>New Match</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
+        {(() => {
+          const tid = matchData?.tournament || initialMatchData?.tournament;
+          return (
+            <View style={styles.actionButtons}>
+              <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
+                <TouchableOpacity
+                  style={styles.dashboardButton}
+                  onPress={tid
+                    ? () => navigation.navigate('TournamentDetail', { tournamentId: tid })
+                    : handleGoToDashboard
+                  }
+                  onPressIn={handleButtonPressIn}
+                  onPressOut={handleButtonPressOut}
+                  activeOpacity={0.9}
+                >
+                  {tid ? <BackIcon size={20} color={colors.primary} /> : <HomeIcon size={20} color={colors.primary} />}
+                  <Text style={styles.dashboardButtonText}>{tid ? 'Tournament' : 'Dashboard'}</Text>
+                </TouchableOpacity>
+              </Animated.View>
+              <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
+                <TouchableOpacity
+                  style={styles.newMatchButtonLarge}
+                  onPress={() => tid
+                    ? navigation.navigate('MatchSetup', { tournamentId: tid })
+                    : navigation.navigate('MatchSetup')
+                  }
+                  onPressIn={handleButtonPressIn}
+                  onPressOut={handleButtonPressOut}
+                  activeOpacity={0.9}
+                >
+                  <PlusIcon size={20} color={colors.surface} />
+                  <Text style={styles.newMatchButtonLargeText}>New Match</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+          );
+        })()}
       </ScrollView>
 
       {/* Shareable Scorecard Modal */}
@@ -1458,6 +1513,26 @@ const FullScorecardScreen = ({ navigation, route }) => {
                         </View>
                       ))}
                   </View>
+
+                  {/* Over by Over */}
+                  {matchData.innings1.overHistory?.length > 0 && (
+                    <View style={styles.shareableOverHistory}>
+                      <Text style={styles.shareableOverHistoryTitle}>Over by Over</Text>
+                      {matchData.innings1.overHistory.map((over, idx) => (
+                        <View key={idx} style={styles.shareableOverItem}>
+                          <Text style={styles.shareableOverNumber}>Ov {over.overNumber || idx + 1}</Text>
+                          <View style={styles.shareableOverBalls}>
+                            {(over.balls || []).map((ball, bIdx) => (
+                              <View key={bIdx} style={[styles.shareableOverBall, { backgroundColor: getBallColor(ball) }]}>
+                                <Text style={styles.shareableOverBallText}>{ball}</Text>
+                              </View>
+                            ))}
+                          </View>
+                          <Text style={styles.shareableOverRuns}>{over.runs}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -1524,6 +1599,26 @@ const FullScorecardScreen = ({ navigation, route }) => {
                         </View>
                       ))}
                   </View>
+
+                  {/* Over by Over */}
+                  {matchData.innings2.overHistory?.length > 0 && (
+                    <View style={styles.shareableOverHistory}>
+                      <Text style={styles.shareableOverHistoryTitle}>Over by Over</Text>
+                      {matchData.innings2.overHistory.map((over, idx) => (
+                        <View key={idx} style={styles.shareableOverItem}>
+                          <Text style={styles.shareableOverNumber}>Ov {over.overNumber || idx + 1}</Text>
+                          <View style={styles.shareableOverBalls}>
+                            {(over.balls || []).map((ball, bIdx) => (
+                              <View key={bIdx} style={[styles.shareableOverBall, { backgroundColor: getBallColor(ball) }]}>
+                                <Text style={styles.shareableOverBallText}>{ball}</Text>
+                              </View>
+                            ))}
+                          </View>
+                          <Text style={styles.shareableOverRuns}>{over.runs}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -2243,6 +2338,65 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
   },
+  // Over History
+  overHistoryContainer: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  overHistoryTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: 12,
+  },
+  overHistoryList: {},
+  overHistoryItem: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  overHistoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  overHistoryNumber: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    width: 55,
+  },
+  overHistoryBowler: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  overHistoryStats: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  overHistoryBalls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  overHistoryBall: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    minWidth: 28,
+    alignItems: 'center',
+  },
+  overHistoryBallText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.surface,
+  },
   actionButtons: {
     flexDirection: 'row',
     gap: 12,
@@ -2567,6 +2721,55 @@ const styles = StyleSheet.create({
   shareableWicketsCell: {
     fontWeight: '700',
     color: colors.success,
+  },
+  // Shareable Over History
+  shareableOverHistory: {
+    padding: 8,
+    backgroundColor: colors.surface,
+  },
+  shareableOverHistoryTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginBottom: 6,
+  },
+  shareableOverItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  shareableOverNumber: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.textMuted,
+    width: 30,
+  },
+  shareableOverBalls: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 3,
+  },
+  shareableOverBall: {
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    minWidth: 18,
+    alignItems: 'center',
+  },
+  shareableOverBallText: {
+    fontSize: 8,
+    fontWeight: '700',
+    color: colors.surface,
+  },
+  shareableOverRuns: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.primary,
+    width: 22,
+    textAlign: 'right',
   },
   shareableFooter: {
     backgroundColor: colors.primary,

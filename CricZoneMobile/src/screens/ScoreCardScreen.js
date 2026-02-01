@@ -415,6 +415,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
           setCurrentOverBalls(savedState.currentOverBalls);
         }
 
+        // Restore over history
+        if (savedInnings.overHistory && savedInnings.overHistory.length > 0) {
+          setOverHistory(savedInnings.overHistory);
+        }
+
         // Restore first innings data if in second innings
         if (matchData.innings === 2 && matchData.innings1) {
           setFirstInningsData(matchData.innings1);
@@ -1583,6 +1588,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         bowling: updatedBowlers,
         extras: { ...extras },
         fallOfWickets: fallOfWickets.map(f => ({ ...f })),
+        overHistory: overHistory.map(o => ({ ...o, balls: [...o.balls] })),
       };
     };
 
@@ -1752,6 +1758,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         bowling: matchSnapshot ? matchSnapshot.bowling : allBowlers.map(b => ({ ...b })),
         extras: matchSnapshot ? matchSnapshot.extras : { ...extras },
         fallOfWickets: matchSnapshot ? matchSnapshot.fallOfWickets : fallOfWickets.map(f => ({ ...f })),
+        overHistory: matchSnapshot ? matchSnapshot.overHistory : overHistory.map(o => ({ ...o, balls: [...o.balls] })),
       };
       innings2 = null;
     } else {
@@ -1780,6 +1787,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         bowling: matchSnapshot ? matchSnapshot.bowling : allBowlers.map(b => ({ ...b })),
         extras: matchSnapshot ? matchSnapshot.extras : { ...extras },
         fallOfWickets: matchSnapshot ? matchSnapshot.fallOfWickets : fallOfWickets.map(f => ({ ...f })),
+        overHistory: matchSnapshot ? matchSnapshot.overHistory : overHistory.map(o => ({ ...o, balls: [...o.balls] })),
       };
     }
 
@@ -1861,6 +1869,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       bowling: allBowlers.map(b => ({ ...b })),
       extras: { ...extras },
       fallOfWickets: fallOfWickets.map(f => ({ ...f })),
+      overHistory: overHistory.map(o => ({ ...o, balls: [...o.balls] })),
     };
 
     let innings1, innings2;

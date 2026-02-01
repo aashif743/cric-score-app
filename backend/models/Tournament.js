@@ -68,4 +68,7 @@ TournamentSchema.virtual("matches", {
   foreignField: "tournament"
 });
 
+// Indexes for query performance
+TournamentSchema.index({ user: 1, updatedAt: -1 });
+
 module.exports = mongoose.model("Tournament", TournamentSchema);

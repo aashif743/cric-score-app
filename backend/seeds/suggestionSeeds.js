@@ -7,6 +7,56 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const Suggestion = require('../models/Suggestion');
 
+// Custom / local player names (higher priority)
+const customPlayerNames = [
+  'Anshaf',
+  'Shamlan',
+  'Hamshan',
+  'Naveed',
+  'Maveed',
+  'Aadhik',
+  'Sahas',
+  'Ishfak',
+  'Farhan',
+  'Amby',
+  'Zaahir',
+  'Nashan',
+  'Azman',
+  'Aslan',
+  'Raslan',
+  'Nasmy',
+  'Aadhil',
+  'Riyas',
+  'Iqbal',
+  'Salik',
+  'Anik',
+  'Harshan',
+  'Wazeer',
+  'Shahil',
+  'Inshaf',
+  'Arafath',
+  'Shafan',
+  'Rinoos',
+  'Minshaf',
+  'Rifas',
+  'Shakir',
+  'Sabith',
+  'Rasman',
+];
+
+// Custom / local team names (higher priority)
+const customTeamNames = [
+  'Sahara',
+  'Dark Lions',
+  'Super King',
+  'Matrix',
+  'Super Eight',
+  'RDX',
+  'Don Brothers',
+  'Power Hitter',
+  'Defending Champions',
+];
+
 // Pre-populated player names (famous cricketers)
 const playerNames = [
   // India
@@ -149,13 +199,29 @@ const seedSuggestions = async () => {
     await Suggestion.deleteMany({ isSeeded: true });
     console.log('Cleared existing seeded suggestions');
 
-    // Prepare player suggestions
-    // Lower initial counts so user-added names can easily rank higher
+    // Custom / local names get higher usage count so they rank first
+    const customPlayerSuggestions = customPlayerNames.map((name) => ({
+      name,
+      type: 'player',
+      normalizedName: name.toLowerCase(),
+      usageCount: 15,
+      isSeeded: true,
+    }));
+
+    const customTeamSuggestions = customTeamNames.map((name) => ({
+      name,
+      type: 'team',
+      normalizedName: name.toLowerCase(),
+      usageCount: 15,
+      isSeeded: true,
+    }));
+
+    // Prepare player suggestions (famous cricketers)
     const playerSuggestions = playerNames.map((name, index) => ({
       name,
       type: 'player',
       normalizedName: name.toLowerCase(),
-      usageCount: Math.max(10 - Math.floor(index / 5), 2), // Start at 10, decrease slowly
+      usageCount: Math.max(10 - Math.floor(index / 5), 2),
       isSeeded: true,
     }));
 
@@ -164,15 +230,20 @@ const seedSuggestions = async () => {
       name,
       type: 'team',
       normalizedName: name.toLowerCase(),
-      usageCount: Math.max(10 - Math.floor(index / 5), 2), // Start at 10, decrease slowly
+      usageCount: Math.max(10 - Math.floor(index / 5), 2),
       isSeeded: true,
     }));
 
     // Insert all suggestions
-    await Suggestion.insertMany([...playerSuggestions, ...teamSuggestions]);
+    await Suggestion.insertMany([
+      ...customPlayerSuggestions,
+      ...customTeamSuggestions,
+      ...playerSuggestions,
+      ...teamSuggestions,
+    ]);
 
-    console.log(`Seeded ${playerSuggestions.length} player names`);
-    console.log(`Seeded ${teamSuggestions.length} team names`);
+    console.log(`Seeded ${customPlayerSuggestions.length} custom + ${playerSuggestions.length} famous player names`);
+    console.log(`Seeded ${customTeamSuggestions.length} custom + ${teamSuggestions.length} standard team names`);
     console.log('Seeding completed successfully!');
 
     process.exit(0);

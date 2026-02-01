@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
-// AutocompleteInput removed - plain TextInput used for team names
+import AutocompleteInput from '../components/AutocompleteInput';
 import { colors, spacing, fontWeights, shadows } from '../utils/theme';
 
 // Dropdown Component (same pattern as MatchSetupScreen)
@@ -312,16 +312,14 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                   const defaultName = `Team ${alphabet[index] || index + 1}`;
                   return (
                     <View key={index}>
-                      <TextInput
-                        style={styles.teamNameInput}
+                      <AutocompleteInput
+                        type="team"
                         value={teamName}
                         onChangeText={(val) => handleTeamNameChange(index, val)}
                         placeholder={defaultName}
-                        placeholderTextColor="#94a3b8"
                         maxLength={20}
-                        autoCapitalize="words"
-                        autoCorrect={false}
                         returnKeyType="done"
+                        inputStyle={styles.teamNameInput}
                       />
                       {index < teamNames.length - 1 && <View style={styles.teamDivider} />}
                     </View>
@@ -497,6 +495,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 0,
     borderRadius: 0,
+    marginVertical: 0,
   },
   detailInput: {
     fontSize: 15,

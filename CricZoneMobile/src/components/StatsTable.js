@@ -28,15 +28,20 @@ const StatsTable = ({ title, data, columns }) => {
         {/* Data Rows */}
         {data.map((item, index) => (
           <View
-            key={item._id || index}
+            key={item.name ? `${item.name}-${item.team || index}` : index}
             style={[styles.dataRow, index % 2 === 0 && styles.dataRowEven]}
           >
             <Text style={[styles.dataCell, styles.rankCell, styles.rankText]}>
               {index + 1}
             </Text>
-            <Text style={[styles.dataCell, styles.nameCell]} numberOfLines={1}>
-              {item._id || item.name}
-            </Text>
+            <View style={styles.nameCell}>
+              <Text style={[styles.dataCell, styles.nameText]} numberOfLines={1}>
+                {item.name}
+              </Text>
+              {item.team ? (
+                <Text style={styles.teamText} numberOfLines={1}>{item.team}</Text>
+              ) : null}
+            </View>
             {columns.map((col) => (
               <Text key={col.key} style={[styles.dataCell, styles.valueCell, styles.valueText]}>
                 {item[col.key] ?? '-'}
@@ -105,7 +110,16 @@ const styles = StyleSheet.create({
   },
   nameCell: {
     flex: 1,
+    justifyContent: 'center',
+  },
+  nameText: {
     fontWeight: '600',
+  },
+  teamText: {
+    fontSize: 10,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginTop: 1,
   },
   valueCell: {
     width: 55,

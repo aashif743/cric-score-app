@@ -22,6 +22,38 @@ const statusConfig = {
   completed: { label: 'Completed', bg: '#d1fae5', color: '#059669' },
 };
 
+const oversToDecimal = (overs) => {
+  if (!overs && overs !== 0) return 0;
+  const parts = overs.toString().split('.');
+  const whole = parseInt(parts[0]) || 0;
+  const balls = parseInt(parts[1]) || 0;
+  return whole + (balls / 6);
+};
+
+const calculateMatchNRR = (match) => {
+  if (!match.innings1 || !match.innings2) return null;
+  const scheduledOvers = match.totalOvers || 20;
+  const allOutWickets = (match.playersPerTeam || 11) - 1;
+
+  const i1 = match.innings1;
+  const i2 = match.innings2;
+
+  const aRuns = i1.runs || 0;
+  const aOvers = (i1.wickets || 0) >= allOutWickets ? scheduledOvers : oversToDecimal(i1.overs);
+  const bRuns = i2.runs || 0;
+  const bOvers = (i2.wickets || 0) >= allOutWickets ? scheduledOvers : oversToDecimal(i2.overs);
+
+  if (aOvers === 0 || bOvers === 0) return null;
+
+  const aNRR = (aRuns / aOvers) - (bRuns / bOvers);
+  const bNRR = (bRuns / bOvers) - (aRuns / aOvers);
+
+  return {
+    teamA: { name: match.teamA?.name || 'Team A', nrr: aNRR.toFixed(2) },
+    teamB: { name: match.teamB?.name || 'Team B', nrr: bNRR.toFixed(2) },
+  };
+};
+
 // Simple match card for tournament matches
 const TournamentMatchCard = ({ match, index, onPress }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -48,11 +80,16 @@ const TournamentMatchCard = ({ match, index, onPress }) => {
   const isCompleted = match.status === 'completed';
   const teamA = match.teamA?.name || 'Team A';
   const teamB = match.teamB?.name || 'Team B';
+  const accentColor = isCompleted ? '#059669' : '#2563eb';
 
   const getScore = (innings) => {
-    if (!innings) return '-';
-    return `${innings.runs || 0}/${innings.wickets || 0}`;
+    if (!innings) return null;
+    return { runs: innings.runs || 0, wickets: innings.wickets || 0, overs: innings.overs || '0.0' };
   };
+
+  const scoreA = getScore(match.innings1);
+  const scoreB = getScore(match.innings2);
+  const nrr = isCompleted ? calculateMatchNRR(match) : null;
 
   return (
     <Animated.View
@@ -66,36 +103,82 @@ const TournamentMatchCard = ({ match, index, onPress }) => {
         onPress={() => onPress(match)}
         activeOpacity={0.7}
       >
-        <View style={styles.matchCardHeader}>
-          <View style={[
-            styles.matchStatusDot,
-            { backgroundColor: isCompleted ? '#059669' : '#2563eb' }
-          ]} />
-          <Text style={styles.matchStatusLabel}>
-            {isCompleted ? 'Completed' : 'In Progress'}
-          </Text>
-        </View>
+        {/* Accent strip */}
+        <View style={[styles.matchAccent, { backgroundColor: accentColor }]} />
 
-        <View style={styles.matchTeams}>
-          <View style={styles.matchTeamRow}>
-            <View style={styles.matchTeamBadge}>
-              <Text style={styles.matchTeamInitial}>{teamA.charAt(0)}</Text>
+        <View style={styles.matchCardInner}>
+          {/* Header: status + match number */}
+          <View style={styles.matchCardHeader}>
+            <View style={[styles.matchStatusPill, { backgroundColor: isCompleted ? '#ecfdf5' : '#eff6ff' }]}>
+              <View style={[styles.matchStatusDot, { backgroundColor: accentColor }]} />
+              <Text style={[styles.matchStatusLabel, { color: accentColor }]}>
+                {isCompleted ? 'Completed' : 'Live'}
+              </Text>
             </View>
-            <Text style={styles.matchTeamName} numberOfLines={1}>{teamA}</Text>
-            <Text style={styles.matchTeamScore}>{getScore(match.innings1)}</Text>
+            {match.totalOvers ? (
+              <Text style={styles.matchOversLabel}>{match.totalOvers} ov</Text>
+            ) : null}
           </View>
-          <View style={styles.matchTeamRow}>
-            <View style={[styles.matchTeamBadge, styles.matchTeamBadgeB]}>
-              <Text style={styles.matchTeamInitial}>{teamB.charAt(0)}</Text>
-            </View>
-            <Text style={styles.matchTeamName} numberOfLines={1}>{teamB}</Text>
-            <Text style={styles.matchTeamScore}>{getScore(match.innings2)}</Text>
-          </View>
-        </View>
 
-        {isCompleted && match.result && (
-          <Text style={styles.matchResult} numberOfLines={1}>{match.result}</Text>
-        )}
+          {/* Teams & Scores */}
+          <View style={styles.matchTeams}>
+            <View style={styles.matchTeamRow}>
+              <View style={styles.matchTeamBadge}>
+                <Text style={styles.matchTeamInitial}>{teamA.charAt(0)}</Text>
+              </View>
+              <Text style={styles.matchTeamName} numberOfLines={1}>{teamA}</Text>
+              {scoreA ? (
+                <Text style={styles.matchTeamScore}>
+                  {scoreA.runs}/{scoreA.wickets}
+                  <Text style={styles.matchTeamOvers}> ({scoreA.overs})</Text>
+                </Text>
+              ) : (
+                <Text style={styles.matchTeamScorePending}>-</Text>
+              )}
+            </View>
+            <View style={styles.matchTeamRow}>
+              <View style={[styles.matchTeamBadge, styles.matchTeamBadgeB]}>
+                <Text style={styles.matchTeamInitial}>{teamB.charAt(0)}</Text>
+              </View>
+              <Text style={styles.matchTeamName} numberOfLines={1}>{teamB}</Text>
+              {scoreB ? (
+                <Text style={styles.matchTeamScore}>
+                  {scoreB.runs}/{scoreB.wickets}
+                  <Text style={styles.matchTeamOvers}> ({scoreB.overs})</Text>
+                </Text>
+              ) : (
+                <Text style={styles.matchTeamScorePending}>-</Text>
+              )}
+            </View>
+          </View>
+
+          {/* Result + NRR on same line */}
+          {isCompleted && (match.result || nrr) && (
+            <View style={styles.matchFooter}>
+              {match.result ? (
+                <Text style={styles.matchResult} numberOfLines={1}>{match.result}</Text>
+              ) : <View />}
+              {nrr && (
+                <View style={styles.matchNRRRow}>
+                  <Text style={[
+                    styles.matchNRRValue,
+                    parseFloat(nrr.teamA.nrr) >= 0 ? styles.matchNRRPositive : styles.matchNRRNegative,
+                  ]}>
+                    {parseFloat(nrr.teamA.nrr) >= 0 ? '+' : ''}{nrr.teamA.nrr}
+                  </Text>
+                  <Text style={styles.matchNRRSep}>/</Text>
+                  <Text style={[
+                    styles.matchNRRValue,
+                    parseFloat(nrr.teamB.nrr) >= 0 ? styles.matchNRRPositive : styles.matchNRRNegative,
+                  ]}>
+                    {parseFloat(nrr.teamB.nrr) >= 0 ? '+' : ''}{nrr.teamB.nrr}
+                  </Text>
+                  <Text style={styles.matchNRRLabel}>NRR</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
       </TouchableOpacity>
     </Animated.View>
   );
@@ -112,6 +195,8 @@ const TournamentDetailScreen = ({ navigation, route }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [showStats, setShowStats] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const hasFetchedOnce = useRef(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -123,40 +208,58 @@ const TournamentDetailScreen = ({ navigation, route }) => {
     }).start();
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const fetchTournament = useCallback(async (showLoader = false) => {
     if (!user?.token) return;
 
     try {
+      if (showLoader) setLoading(true);
       setError('');
-      const [tournamentRes, statsRes] = await Promise.all([
-        tournamentService.getTournament(tournamentId, user.token),
-        tournamentService.getTournamentStats(tournamentId, user.token),
-      ]);
-
+      const tournamentRes = await tournamentService.getTournament(tournamentId, user.token);
       const data = tournamentRes.data;
       setTournament(data);
       setMatches(data.matches || []);
-      setStats(statsRes.data);
     } catch (err) {
       console.warn('Fetch tournament error:', err);
-      setError('Failed to load tournament.');
+      if (!hasFetchedOnce.current) setError('Failed to load tournament.');
     } finally {
       setLoading(false);
+      hasFetchedOnce.current = true;
+    }
+  }, [tournamentId, user?.token]);
+
+  const fetchStats = useCallback(async () => {
+    if (!user?.token) return;
+    try {
+      setStatsLoading(true);
+      const statsRes = await tournamentService.getTournamentStats(tournamentId, user.token);
+      setStats(statsRes.data);
+    } catch (err) {
+      console.warn('Fetch stats error:', err);
+    } finally {
+      setStatsLoading(false);
     }
   }, [tournamentId, user?.token]);
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
-      fetchData();
-    }, [fetchData])
+      if (!hasFetchedOnce.current) {
+        // First load — show spinner
+        fetchTournament(true);
+      } else {
+        // Re-focus — background refresh, no spinner
+        fetchTournament(false);
+      }
+    }, [fetchTournament])
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchData();
+    await Promise.all([
+      fetchTournament(false),
+      showStats ? fetchStats() : Promise.resolve(),
+    ]);
     setRefreshing(false);
-  }, [fetchData]);
+  }, [fetchTournament, fetchStats, showStats]);
 
   const handleMatchPress = (match) => {
     if (match.status === 'completed') {
@@ -269,11 +372,15 @@ const TournamentDetailScreen = ({ navigation, route }) => {
       </View>
 
       {/* Stats Section */}
-      {stats && (stats.totalMatches > 0) && (
+      {matches.length > 0 && (
         <View style={styles.statsSection}>
           <TouchableOpacity
             style={styles.statsToggle}
-            onPress={() => setShowStats(!showStats)}
+            onPress={() => {
+              const next = !showStats;
+              setShowStats(next);
+              if (next && !stats) fetchStats();
+            }}
             activeOpacity={0.7}
           >
             <Text style={styles.statsToggleText}>Tournament Stats</Text>
@@ -283,7 +390,13 @@ const TournamentDetailScreen = ({ navigation, route }) => {
             ]} />
           </TouchableOpacity>
 
-          {showStats && (
+          {showStats && statsLoading && !stats && (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color="#d97706" />
+            </View>
+          )}
+
+          {showStats && stats && (
             <View style={styles.statsContent}>
               {/* Overview */}
               <View style={styles.statsOverview}>
@@ -299,12 +412,18 @@ const TournamentDetailScreen = ({ navigation, route }) => {
                   <View style={styles.statBox}>
                     <Text style={styles.statNumber}>{stats.mostRunsInMatch.runs}</Text>
                     <Text style={styles.statLabel}>Best Score</Text>
+                    <Text style={styles.statSubLabel} numberOfLines={1}>
+                      {stats.mostRunsInMatch.name}{stats.mostRunsInMatch.team ? ` (${stats.mostRunsInMatch.team})` : ''}
+                    </Text>
                   </View>
                 )}
                 {stats.bestBowling && (
                   <View style={styles.statBox}>
                     <Text style={styles.statNumber}>{stats.bestBowling.wickets}/{stats.bestBowling.runs}</Text>
                     <Text style={styles.statLabel}>Best Bowling</Text>
+                    <Text style={styles.statSubLabel} numberOfLines={1}>
+                      {stats.bestBowling.name}{stats.bestBowling.team ? ` (${stats.bestBowling.team})` : ''}
+                    </Text>
                   </View>
                 )}
               </View>
@@ -638,6 +757,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginTop: 2,
   },
+  statSubLabel: {
+    fontSize: 9,
+    color: '#64748b',
+    marginTop: 2,
+    textAlign: 'center',
+  },
   // Matches
   matchesHeader: {
     marginBottom: 12,
@@ -650,71 +775,136 @@ const styles = StyleSheet.create({
   },
   matchCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
-    ...shadows.sm,
+    borderRadius: 14,
+    marginBottom: 10,
+    ...shadows.md,
     shadowColor: '#0f172a',
+    overflow: 'hidden',
+    flexDirection: 'row',
+  },
+  matchAccent: {
+    width: 4,
+  },
+  matchCardInner: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
   },
   matchCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  matchStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+    gap: 4,
   },
   matchStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   matchStatusLabel: {
-    fontSize: 11,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  matchOversLabel: {
+    fontSize: 10,
     fontWeight: '600',
     color: '#94a3b8',
   },
   matchTeams: {
-    gap: 6,
+    gap: 4,
   },
   matchTeamRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   matchTeamBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 7,
     backgroundColor: '#0d3b66',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 8,
   },
   matchTeamBadgeB: {
     backgroundColor: '#2d7dd2',
   },
   matchTeamInitial: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '800',
     color: '#fff',
   },
   matchTeamName: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#0f172a',
   },
   matchTeamScore: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '800',
     color: '#0f172a',
   },
-  matchResult: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#d97706',
+  matchTeamOvers: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#94a3b8',
+  },
+  matchTeamScorePending: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#cbd5e1',
+  },
+  matchFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: 8,
-    paddingTop: 8,
+    paddingTop: 7,
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
+  },
+  matchResult: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#d97706',
+    marginRight: 8,
+  },
+  matchNRRRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  matchNRRLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#94a3b8',
+    marginLeft: 3,
+  },
+  matchNRRValue: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  matchNRRPositive: {
+    color: '#059669',
+  },
+  matchNRRNegative: {
+    color: '#ef4444',
+  },
+  matchNRRSep: {
+    fontSize: 9,
+    color: '#cbd5e1',
+    fontWeight: '600',
   },
   emptyMatches: {
     alignItems: 'center',

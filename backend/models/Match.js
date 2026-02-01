@@ -188,6 +188,14 @@ const InningsSchema = new mongoose.Schema({
     type: [FallOfWicketSchema],
     default: []
   },
+  overHistory: [{
+    overNumber: { type: Number },
+    bowlerName: { type: String },
+    balls: [{ type: String }],
+    runs: { type: Number, default: 0 },
+    wickets: { type: Number, default: 0 },
+    _id: false
+  }],
   declared: {
     type: Boolean,
     default: false
@@ -332,5 +340,10 @@ MatchSchema.pre('save', function(next) {
   
   next();
 });
+
+// Indexes for query performance
+MatchSchema.index({ user: 1, updatedAt: -1 });
+MatchSchema.index({ tournament: 1, status: 1 });
+MatchSchema.index({ tournament: 1, updatedAt: -1 });
 
 module.exports = mongoose.model("Match", MatchSchema);

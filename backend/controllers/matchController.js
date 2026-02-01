@@ -169,17 +169,29 @@ exports.createMatch = async (req, res) => {
   }
 };
 
-// Get all matches - Returns full data for in_progress matches to allow resuming
+// Get all matches - lightweight list for completed, full data for in-progress
 exports.getMyMatches = async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ success: false, error: "User not authenticated." });
     }
 
-    // Find all matches for the user - include full data for resuming in_progress matches
-    const matches = await Match.find({ user: req.user.id })
-      .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam toss innings1 innings2 currentState liveState innings target')
-      .sort({ updatedAt: -1 }); // Sort by most recently updated
+    // Split into two parallel queries: lightweight completed + full in-progress
+    const [completedMatches, inProgressMatches] = await Promise.all([
+      // Completed/abandoned: only summary fields needed for list display
+      Match.find({ user: req.user.id, status: { $in: ["completed", "abandoned"] } })
+        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam')
+        .sort({ updatedAt: -1 })
+        .lean(),
+      // In-progress/scheduled/innings_break: full data for resuming
+      Match.find({ user: req.user.id, status: { $in: ["scheduled", "in_progress", "innings_break"] } })
+        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam toss innings1 innings2 currentState innings target')
+        .sort({ updatedAt: -1 })
+        .lean(),
+    ]);
+
+    // Merge: in-progress first, then completed
+    const matches = [...inProgressMatches, ...completedMatches];
 
     res.json({
       success: true,
@@ -285,6 +297,7 @@ exports.updateMatch = async (req, res) => {
           wicket: f.wicket || 0,
           over: f.over || '0.0'
         })),
+        overHistory: innings1.overHistory || [],
       };
     }
 
@@ -305,6 +318,7 @@ exports.updateMatch = async (req, res) => {
           wicket: f.wicket || 0,
           over: f.over || '0.0'
         })),
+        overHistory: innings2.overHistory || [],
         target: target || innings2.target,
       };
     }
@@ -531,6 +545,7 @@ exports.endMatch = async (req, res) => {
           wicket: f.wicket || 0,
           over: f.over || '0.0'
         })),
+        overHistory: inningsData.overHistory || [],
         target: inningsData.target || null
       };
     };

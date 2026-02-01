@@ -25,7 +25,7 @@ const getSuggestions = async (req, res) => {
     // Use lean() for faster reads (returns plain JS objects instead of Mongoose docs)
     const suggestions = await Suggestion.find(searchCriteria)
       .sort({ usageCount: -1 })
-      .limit(8)
+      .limit(20)
       .select('name usageCount')
       .lean()
       .maxTimeMS(3000); // 3 second max query time

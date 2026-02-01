@@ -73,9 +73,18 @@ exports.getTournamentById = async (req, res) => {
       return res.status(403).json({ success: false, error: "Not authorized" });
     }
 
-    const matches = await Match.find({ tournament: id })
-      .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1 innings2')
-      .sort({ updatedAt: -1 });
+    // Fetch lightweight match list for display, and full data only for in-progress matches
+    const [completedMatches, inProgressMatches] = await Promise.all([
+      Match.find({ tournament: id, status: { $in: ["completed", "abandoned"] } })
+        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam')
+        .sort({ updatedAt: -1 })
+        .lean(),
+      Match.find({ tournament: id, status: { $in: ["scheduled", "in_progress", "innings_break"] } })
+        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1 innings2 currentState innings target toss')
+        .sort({ updatedAt: -1 })
+        .lean(),
+    ]);
+    const matches = [...inProgressMatches, ...completedMatches];
 
     res.json({ success: true, data: { ...tournament, matches } });
   } catch (error) {
@@ -176,117 +185,196 @@ exports.getTournamentStats = async (req, res) => {
 
     const tournamentObjectId = new mongoose.Types.ObjectId(id);
 
-    // Top 5 run scorers
-    const topRunScorers = await Match.aggregate([
-      { $match: { tournament: tournamentObjectId, status: "completed" } },
-      {
-        $project: {
-          batsmen: {
-            $concatArrays: [
-              { $ifNull: ["$innings1.batting", []] },
-              { $ifNull: ["$innings2.batting", []] }
-            ]
+    // Run all queries in parallel
+    const [topRunScorers, topWicketTakers, totalMatches, completedMatches, mostRunsInMatch, bestBowling] = await Promise.all([
+      // Top 5 run scorers
+      Match.aggregate([
+        { $match: { tournament: tournamentObjectId, status: "completed" } },
+        {
+          $project: {
+            batsmen: {
+              $concatArrays: [
+                {
+                  $map: {
+                    input: { $ifNull: ["$innings1.batting", []] },
+                    as: "b",
+                    in: { $mergeObjects: ["$$b", { team: "$innings1.battingTeam" }] }
+                  }
+                },
+                {
+                  $map: {
+                    input: { $ifNull: ["$innings2.batting", []] },
+                    as: "b",
+                    in: { $mergeObjects: ["$$b", { team: "$innings2.battingTeam" }] }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        { $unwind: "$batsmen" },
+        { $match: { "batsmen.name": { $not: /^Batsman \d+$/i } } },
+        {
+          $group: {
+            _id: { name: "$batsmen.name", team: "$batsmen.team" },
+            totalRuns: { $sum: "$batsmen.runs" },
+            totalBalls: { $sum: "$batsmen.balls" },
+            totalFours: { $sum: "$batsmen.fours" },
+            totalSixes: { $sum: "$batsmen.sixes" },
+            innings: { $sum: 1 }
+          }
+        },
+        { $sort: { totalRuns: -1 } },
+        { $limit: 5 },
+        {
+          $project: {
+            _id: 0,
+            name: "$_id.name",
+            team: "$_id.team",
+            totalRuns: 1,
+            totalBalls: 1,
+            totalFours: 1,
+            totalSixes: 1,
+            innings: 1
           }
         }
-      },
-      { $unwind: "$batsmen" },
-      {
-        $group: {
-          _id: "$batsmen.name",
-          totalRuns: { $sum: "$batsmen.runs" },
-          totalBalls: { $sum: "$batsmen.balls" },
-          totalFours: { $sum: "$batsmen.fours" },
-          totalSixes: { $sum: "$batsmen.sixes" },
-          innings: { $sum: 1 }
-        }
-      },
-      { $sort: { totalRuns: -1 } },
-      { $limit: 5 }
-    ]);
+      ]),
 
-    // Top 5 wicket takers
-    const topWicketTakers = await Match.aggregate([
-      { $match: { tournament: tournamentObjectId, status: "completed" } },
-      {
-        $project: {
-          bowlers: {
-            $concatArrays: [
-              { $ifNull: ["$innings1.bowling", []] },
-              { $ifNull: ["$innings2.bowling", []] }
-            ]
+      // Top 5 wicket takers
+      Match.aggregate([
+        { $match: { tournament: tournamentObjectId, status: "completed" } },
+        {
+          $project: {
+            bowlers: {
+              $concatArrays: [
+                {
+                  $map: {
+                    input: { $ifNull: ["$innings1.bowling", []] },
+                    as: "b",
+                    in: { $mergeObjects: ["$$b", { team: "$innings1.bowlingTeam" }] }
+                  }
+                },
+                {
+                  $map: {
+                    input: { $ifNull: ["$innings2.bowling", []] },
+                    as: "b",
+                    in: { $mergeObjects: ["$$b", { team: "$innings2.bowlingTeam" }] }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        { $unwind: "$bowlers" },
+        { $match: { "bowlers.name": { $not: /^Bowler \d+$/i } } },
+        {
+          $group: {
+            _id: { name: "$bowlers.name", team: "$bowlers.team" },
+            totalWickets: { $sum: "$bowlers.wickets" },
+            totalRuns: { $sum: "$bowlers.runs" },
+            innings: { $sum: 1 }
+          }
+        },
+        { $sort: { totalWickets: -1 } },
+        { $limit: 5 },
+        {
+          $project: {
+            _id: 0,
+            name: "$_id.name",
+            team: "$_id.team",
+            totalWickets: 1,
+            totalRuns: 1,
+            innings: 1
           }
         }
-      },
-      { $unwind: "$bowlers" },
-      {
-        $group: {
-          _id: "$bowlers.name",
-          totalWickets: { $sum: "$bowlers.wickets" },
-          totalRuns: { $sum: "$bowlers.runs" },
-          innings: { $sum: 1 }
-        }
-      },
-      { $sort: { totalWickets: -1 } },
-      { $limit: 5 }
-    ]);
+      ]),
 
-    // Match counts
-    const totalMatches = await Match.countDocuments({ tournament: tournamentObjectId });
-    const completedMatches = await Match.countDocuments({ tournament: tournamentObjectId, status: "completed" });
+      // Match counts
+      Match.countDocuments({ tournament: tournamentObjectId }),
+      Match.countDocuments({ tournament: tournamentObjectId, status: "completed" }),
 
-    // Most runs in a match
-    const mostRunsInMatch = await Match.aggregate([
-      { $match: { tournament: tournamentObjectId, status: "completed" } },
-      {
-        $project: {
-          batsmen: {
-            $concatArrays: [
-              { $ifNull: ["$innings1.batting", []] },
-              { $ifNull: ["$innings2.batting", []] }
-            ]
-          },
-          matchTitle: { $concat: ["$teamA.name", " vs ", "$teamB.name"] }
+      // Most runs in a match
+      Match.aggregate([
+        { $match: { tournament: tournamentObjectId, status: "completed" } },
+        {
+          $project: {
+            batsmen: {
+              $concatArrays: [
+                {
+                  $map: {
+                    input: { $ifNull: ["$innings1.batting", []] },
+                    as: "b",
+                    in: { $mergeObjects: ["$$b", { team: "$innings1.battingTeam" }] }
+                  }
+                },
+                {
+                  $map: {
+                    input: { $ifNull: ["$innings2.batting", []] },
+                    as: "b",
+                    in: { $mergeObjects: ["$$b", { team: "$innings2.battingTeam" }] }
+                  }
+                }
+              ]
+            },
+            matchTitle: { $concat: ["$teamA.name", " vs ", "$teamB.name"] }
+          }
+        },
+        { $unwind: "$batsmen" },
+        { $match: { "batsmen.name": { $not: /^Batsman \d+$/i } } },
+        { $sort: { "batsmen.runs": -1 } },
+        { $limit: 1 },
+        {
+          $project: {
+            name: "$batsmen.name",
+            team: "$batsmen.team",
+            runs: "$batsmen.runs",
+            balls: "$batsmen.balls",
+            matchTitle: 1
+          }
         }
-      },
-      { $unwind: "$batsmen" },
-      { $sort: { "batsmen.runs": -1 } },
-      { $limit: 1 },
-      {
-        $project: {
-          name: "$batsmen.name",
-          runs: "$batsmen.runs",
-          balls: "$batsmen.balls",
-          matchTitle: 1
-        }
-      }
-    ]);
+      ]),
 
-    // Best bowling in a match
-    const bestBowling = await Match.aggregate([
-      { $match: { tournament: tournamentObjectId, status: "completed" } },
-      {
-        $project: {
-          bowlers: {
-            $concatArrays: [
-              { $ifNull: ["$innings1.bowling", []] },
-              { $ifNull: ["$innings2.bowling", []] }
-            ]
-          },
-          matchTitle: { $concat: ["$teamA.name", " vs ", "$teamB.name"] }
+      // Best bowling in a match
+      Match.aggregate([
+        { $match: { tournament: tournamentObjectId, status: "completed" } },
+        {
+          $project: {
+            bowlers: {
+              $concatArrays: [
+                {
+                  $map: {
+                    input: { $ifNull: ["$innings1.bowling", []] },
+                    as: "b",
+                    in: { $mergeObjects: ["$$b", { team: "$innings1.bowlingTeam" }] }
+                  }
+                },
+                {
+                  $map: {
+                    input: { $ifNull: ["$innings2.bowling", []] },
+                    as: "b",
+                    in: { $mergeObjects: ["$$b", { team: "$innings2.bowlingTeam" }] }
+                  }
+                }
+              ]
+            },
+            matchTitle: { $concat: ["$teamA.name", " vs ", "$teamB.name"] }
+          }
+        },
+        { $unwind: "$bowlers" },
+        { $match: { "bowlers.name": { $not: /^Bowler \d+$/i } } },
+        { $sort: { "bowlers.wickets": -1, "bowlers.runs": 1 } },
+        { $limit: 1 },
+        {
+          $project: {
+            name: "$bowlers.name",
+            team: "$bowlers.team",
+            wickets: "$bowlers.wickets",
+            runs: "$bowlers.runs",
+            overs: "$bowlers.overs",
+            matchTitle: 1
+          }
         }
-      },
-      { $unwind: "$bowlers" },
-      { $sort: { "bowlers.wickets": -1, "bowlers.runs": 1 } },
-      { $limit: 1 },
-      {
-        $project: {
-          name: "$bowlers.name",
-          wickets: "$bowlers.wickets",
-          runs: "$bowlers.runs",
-          overs: "$bowlers.overs",
-          matchTitle: 1
-        }
-      }
+      ]),
     ]);
 
     res.json({
