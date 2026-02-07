@@ -22,6 +22,7 @@ import ProfilePage from './pages/ProfilePage';
 import PointsSystem from './pages/PointsSystem';
 import PublicTournament from './pages/PublicTournament';
 import PublicMatchScorecard from './pages/PublicMatchScorecard';
+import Overlay from './pages/Overlay';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
 
 // --- Placeholder Components for Future Features ---
@@ -192,7 +193,7 @@ const handleResumeMatch = (matchToResume) => {
 
 
   // --- Conditional Rendering Logic for Navigation ---
-  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament'];
+  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament', '/overlay'];
   const isNavHidden = pathsWithoutNav.some(path => location.pathname.startsWith(path) && path !== '/');
   
   // Corrected code
@@ -212,6 +213,7 @@ const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will
           <Route path="/full-scorecard/:matchIdParam" element={<FullScorecardPage />} />
           <Route path="/tournament/:shareId" element={<PublicTournament />} />
           <Route path="/tournament/:shareId/match/:matchId" element={<PublicMatchScorecard />} />
+          <Route path="/overlay/:matchId" element={<Overlay />} />
 
           {/* --- Protected Routes (Require Login) --- */}
           <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/auth" />} />

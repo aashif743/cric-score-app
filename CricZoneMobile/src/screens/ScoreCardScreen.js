@@ -12,6 +12,8 @@ import {
   Animated,
   Platform,
   Keyboard,
+  Share,
+  Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -1950,6 +1952,53 @@ const ScoreCardScreen = ({ navigation, route }) => {
     );
   };
 
+  // Handle sharing overlay URL for streaming
+  const handleShareOverlay = async () => {
+    const matchId = match?._id;
+    if (!matchId) {
+      Alert.alert('Error', 'Match ID not found');
+      return;
+    }
+
+    const overlayUrl = `https://cric-zone.com/overlay/${matchId}`;
+    const barStyleUrl = `${overlayUrl}?style=bar`;
+    const boxStyleUrl = `${overlayUrl}?style=box`;
+
+    Alert.alert(
+      'Broadcast Overlay',
+      'Get live score overlay URL for OBS/streaming software.\n\nAdd as Browser Source in OBS with transparent background.',
+      [
+        {
+          text: 'Copy Bar Style (IPL)',
+          onPress: () => {
+            Clipboard.setString(barStyleUrl);
+            Alert.alert('Copied!', 'Bar-style overlay URL copied to clipboard.\n\nPaste in OBS as Browser Source.');
+          },
+        },
+        {
+          text: 'Copy Box Style (Detailed)',
+          onPress: () => {
+            Clipboard.setString(boxStyleUrl);
+            Alert.alert('Copied!', 'Box-style overlay URL copied to clipboard.\n\nPaste in OBS as Browser Source.');
+          },
+        },
+        {
+          text: 'Share Link',
+          onPress: async () => {
+            try {
+              await Share.share({
+                message: `Live Cricket Score Overlay:\n\nBar Style (IPL): ${barStyleUrl}\n\nBox Style (Detailed): ${boxStyleUrl}\n\nAdd as Browser Source in OBS with transparent background.`,
+              });
+            } catch (err) {
+              console.log('Share error:', err);
+            }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
   // Save current state to history before any action
   const saveToHistory = (actionDescription = '') => {
     const snapshot = {
@@ -2195,20 +2244,34 @@ const ScoreCardScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={styles.settingsButton}
-          onPress={() => setShowSettingsModal(true)}
-        >
-          <View style={styles.settingsIcon}>
-            <View style={styles.settingsGear}>
-              <View style={styles.gearCenter} />
-              <View style={[styles.gearTooth, { transform: [{ rotate: '0deg' }] }]} />
-              <View style={[styles.gearTooth, { transform: [{ rotate: '45deg' }] }]} />
-              <View style={[styles.gearTooth, { transform: [{ rotate: '90deg' }] }]} />
-              <View style={[styles.gearTooth, { transform: [{ rotate: '135deg' }] }]} />
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {/* Broadcast/Overlay Button */}
+          <TouchableOpacity
+            style={styles.broadcastButton}
+            onPress={handleShareOverlay}
+          >
+            <View style={styles.broadcastIcon}>
+              <View style={styles.broadcastWave1} />
+              <View style={styles.broadcastWave2} />
+              <View style={styles.broadcastDot} />
             </View>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={() => setShowSettingsModal(true)}
+          >
+            <View style={styles.settingsIcon}>
+              <View style={styles.settingsGear}>
+                <View style={styles.gearCenter} />
+                <View style={[styles.gearTooth, { transform: [{ rotate: '0deg' }] }]} />
+                <View style={[styles.gearTooth, { transform: [{ rotate: '45deg' }] }]} />
+                <View style={[styles.gearTooth, { transform: [{ rotate: '90deg' }] }]} />
+                <View style={[styles.gearTooth, { transform: [{ rotate: '135deg' }] }]} />
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {viewMode === 'scorecard' ? (
@@ -6313,6 +6376,48 @@ const styles = StyleSheet.create({
   },
 
   // Settings Button Styles
+  broadcastButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#fee2e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  broadcastIcon: {
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  broadcastWave1: {
+    position: 'absolute',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: '#ef4444',
+    borderLeftColor: 'transparent',
+    borderBottomColor: 'transparent',
+    transform: [{ rotate: '-45deg' }],
+  },
+  broadcastWave2: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#ef4444',
+    borderLeftColor: 'transparent',
+    borderBottomColor: 'transparent',
+    transform: [{ rotate: '-45deg' }],
+  },
+  broadcastDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ef4444',
+  },
   settingsButton: {
     width: 36,
     height: 36,
