@@ -23,6 +23,8 @@ import PointsSystem from './pages/PointsSystem';
 import PublicTournament from './pages/PublicTournament';
 import PublicMatchScorecard from './pages/PublicMatchScorecard';
 import Overlay from './pages/Overlay';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
 
 // --- Placeholder Components for Future Features ---
@@ -193,7 +195,7 @@ const handleResumeMatch = (matchToResume) => {
 
 
   // --- Conditional Rendering Logic for Navigation ---
-  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament', '/overlay'];
+  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament', '/overlay', '/privacy', '/terms'];
   const isNavHidden = pathsWithoutNav.some(path => location.pathname.startsWith(path) && path !== '/');
   
   // Corrected code
@@ -214,6 +216,8 @@ const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will
           <Route path="/tournament/:shareId" element={<PublicTournament />} />
           <Route path="/tournament/:shareId/match/:matchId" element={<PublicMatchScorecard />} />
           <Route path="/overlay/:matchId" element={<Overlay />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
 
           {/* --- Protected Routes (Require Login) --- */}
           <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/auth" />} />

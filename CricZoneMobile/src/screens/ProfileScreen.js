@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useRef } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,12 @@ import {
   ScrollView,
   Animated,
   Dimensions,
+  Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
+import API from '../api/config';
 
 const { width } = Dimensions.get('window');
 
@@ -303,8 +306,63 @@ const AnimatedSettingItem = ({ icon, label, value, onPress, delay, isLast }) => 
   );
 };
 
+// Trash Icon for delete account
+const TrashIcon = ({ size = 24, color = colors.error }) => (
+  <View style={[styles.iconContainer, { width: size, height: size }]}>
+    <View style={[styles.trashLid, {
+      width: size * 0.6,
+      height: size * 0.12,
+      backgroundColor: color,
+      borderRadius: size * 0.03,
+    }]} />
+    <View style={[styles.trashBody, {
+      width: size * 0.5,
+      height: size * 0.55,
+      borderWidth: 2,
+      borderColor: color,
+      borderTopWidth: 0,
+      borderBottomLeftRadius: size * 0.08,
+      borderBottomRightRadius: size * 0.08,
+      marginTop: size * 0.05,
+    }]} />
+  </View>
+);
+
+// Document/Privacy Icon
+const DocumentIcon = ({ size = 24, color = colors.primary }) => (
+  <View style={[styles.iconContainer, { width: size, height: size }]}>
+    <View style={[styles.docBody, {
+      width: size * 0.6,
+      height: size * 0.8,
+      borderWidth: 2,
+      borderColor: color,
+      borderRadius: size * 0.08,
+    }]}>
+      <View style={[styles.docLine, {
+        width: size * 0.35,
+        height: 2,
+        backgroundColor: color,
+        marginTop: size * 0.15,
+      }]} />
+      <View style={[styles.docLine, {
+        width: size * 0.35,
+        height: 2,
+        backgroundColor: color,
+        marginTop: size * 0.08,
+      }]} />
+      <View style={[styles.docLine, {
+        width: size * 0.25,
+        height: 2,
+        backgroundColor: color,
+        marginTop: size * 0.08,
+      }]} />
+    </View>
+  </View>
+);
+
 const ProfileScreen = ({ navigation }) => {
   const { user, logout } = useContext(AuthContext);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -361,6 +419,72 @@ const ProfileScreen = ({ navigation }) => {
         },
       ]
     );
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to permanently delete your account? This will remove all your matches, tournaments, and data. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: () => {
+            // Second confirmation
+            Alert.alert(
+              'Final Confirmation',
+              'This will permanently delete your account and all data. Are you absolutely sure?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Yes, Delete Everything',
+                  style: 'destructive',
+                  onPress: performDeleteAccount,
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  const performDeleteAccount = async () => {
+    try {
+      setIsDeleting(true);
+      const config = { headers: { Authorization: `Bearer ${user.token}` } };
+      await API.delete('/users/delete-account', config);
+
+      Alert.alert(
+        'Account Deleted',
+        'Your account and all associated data have been permanently deleted.',
+        [
+          {
+            text: 'OK',
+            onPress: async () => {
+              await logout();
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Auth' }],
+              });
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      Alert.alert('Error', 'Failed to delete account. Please try again or contact support.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleOpenPrivacyPolicy = () => {
+    Linking.openURL('https://cric-zone.com/privacy');
+  };
+
+  const handleOpenTerms = () => {
+    Linking.openURL('https://cric-zone.com/terms');
   };
 
   const handleButtonPressIn = () => {
@@ -541,6 +665,69 @@ const ProfileScreen = ({ navigation }) => {
           />
         </Animated.View>
 
+        {/* Legal Section */}
+        <Animated.View
+          style={[
+            styles.settingsSection,
+            {
+              opacity: cardAnim,
+              transform: [{
+                translateY: cardAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [35, 0],
+                }),
+              }],
+            }
+          ]}
+        >
+          <Text style={styles.sectionTitle}>Legal</Text>
+
+          <AnimatedSettingItem
+            icon={<DocumentIcon size={22} color={colors.primaryLight} />}
+            label="Privacy Policy"
+            onPress={handleOpenPrivacyPolicy}
+            delay={650}
+          />
+
+          <AnimatedSettingItem
+            icon={<DocumentIcon size={22} color={colors.primaryLight} />}
+            label="Terms of Service"
+            onPress={handleOpenTerms}
+            delay={700}
+            isLast
+          />
+        </Animated.View>
+
+        {/* Danger Zone Section */}
+        <Animated.View
+          style={[
+            styles.dangerSection,
+            {
+              opacity: cardAnim,
+              transform: [{
+                translateY: cardAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [40, 0],
+                }),
+              }],
+            }
+          ]}
+        >
+          <Text style={styles.dangerSectionTitle}>Danger Zone</Text>
+
+          <TouchableOpacity
+            style={styles.deleteAccountButton}
+            onPress={handleDeleteAccount}
+            activeOpacity={0.8}
+          >
+            <TrashIcon size={20} color={colors.error} />
+            <Text style={styles.deleteAccountText}>Delete Account</Text>
+          </TouchableOpacity>
+          <Text style={styles.deleteAccountHint}>
+            Permanently delete your account and all data
+          </Text>
+        </Animated.View>
+
         {/* Logout Button */}
         <Animated.View
           style={[
@@ -576,6 +763,16 @@ const ProfileScreen = ({ navigation }) => {
           <Text style={styles.copyrightText}>Made with passion for cricket</Text>
         </Animated.View>
       </ScrollView>
+
+      {/* Loading Overlay for Delete Account */}
+      {isDeleting && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Deleting account...</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -879,6 +1076,73 @@ const styles = StyleSheet.create({
   },
   lockHole: {},
   chevronLine: {},
+  // Trash icon styles
+  trashLid: {},
+  trashBody: {},
+  // Document icon styles
+  docBody: {
+    alignItems: 'center',
+  },
+  docLine: {},
+  // Danger zone styles
+  dangerSection: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.2)',
+  },
+  dangerSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.error,
+    marginBottom: 16,
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    padding: 16,
+    borderRadius: 12,
+    gap: 10,
+  },
+  deleteAccountText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.error,
+  },
+  deleteAccountHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  // Loading overlay styles
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingContainer: {
+    backgroundColor: colors.surface,
+    padding: 32,
+    borderRadius: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
 });
 
 export default ProfileScreen;

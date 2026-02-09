@@ -17,10 +17,18 @@
       "bundleIdentifier": "com.criczone.mobile",
       "buildNumber": "8",
       "infoPlist": {
-        "NSCameraUsageDescription": "CricZone needs camera access for profile photos.",
-        "NSPhotoLibraryUsageDescription": "CricZone needs photo library access to select profile pictures.",
+        "NSCameraUsageDescription": "CricZone needs camera access to capture and share scorecard images.",
+        "NSPhotoLibraryUsageDescription": "CricZone needs photo library access to save and share scorecard images.",
+        "NSPhotoLibraryAddUsageDescription": "CricZone needs permission to save scorecard images to your photo library.",
         "CFBundleDisplayName": "CricZone",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["mailto"]
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": []
       }
     },
     "android": {
@@ -30,7 +38,19 @@
       },
       "package": "com.criczone.mobile",
       "edgeToEdgeEnabled": true,
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ],
+      "blockedPermissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_CONTACTS",
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -43,6 +63,10 @@
         "projectId": "cac88344-c992-4c6a-bcc7-392995ef99f0"
       }
     },
-    "owner": "aashif"
+    "owner": "aashif",
+    "privacy": "public",
+    "platforms": ["ios", "android"],
+    "githubUrl": "https://github.com/aashif743/cric-score-app",
+    "primaryColor": "#d97706"
   }
 }

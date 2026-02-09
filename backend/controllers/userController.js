@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const User = require('../models/User');
+const Match = require('../models/Match');
+const Tournament = require('../models/Tournament');
 
 // Helper to generate a JWT
 const generateToken = (id) => {
@@ -120,4 +122,60 @@ const setUserName = async (req, res) => {
     });
 };
 
-module.exports = { sendOtp, verifyOtp, setUserName };
+// @desc    Delete user account and all associated data
+// @route   DELETE /api/users/delete-account
+// @access  Private (requires auth token)
+const deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Delete all user's matches
+    await Match.deleteMany({ user: userId });
+
+    // Delete all user's tournaments and their associated matches
+    const tournaments = await Tournament.find({ user: userId });
+    for (const tournament of tournaments) {
+      await Match.deleteMany({ tournament: tournament._id });
+    }
+    await Tournament.deleteMany({ user: userId });
+
+    // Delete the user account
+    await User.findByIdAndDelete(userId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Your account and all associated data have been permanently deleted.'
+    });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete account. Please try again or contact support.'
+    });
+  }
+};
+
+// @desc    Get current user profile
+// @route   GET /api/users/profile
+// @access  Private
+const getProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-otp -otpExpires');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    res.json({
+      success: true,
+      data: {
+        _id: user._id,
+        name: user.name,
+        phoneNumber: user.phoneNumber,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to get profile' });
+  }
+};
+
+module.exports = { sendOtp, verifyOtp, setUserName, deleteAccount, getProfile };
