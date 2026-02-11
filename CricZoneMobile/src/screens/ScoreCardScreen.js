@@ -1954,9 +1954,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
   // Handle sharing overlay URL for streaming
   const handleShareOverlay = async () => {
-    const matchId = match?._id;
+    const matchId = matchData?._id;
     if (!matchId) {
-      Alert.alert('Error', 'Match ID not found');
+      Alert.alert('Error', 'Match must be saved first. Please save the match to use live broadcast.');
+      return;
+    }
+
+    // Don't allow overlay for guest matches
+    if (matchId.startsWith('guest_')) {
+      Alert.alert('Login Required', 'Please login to use the live broadcast feature. Guest matches cannot be streamed.');
       return;
     }
 
