@@ -30,18 +30,16 @@ const PlayerNameEditModal = ({
   const [value, setValue] = useState(initialValue);
   const [suggestions, setSuggestions] = useState([]);
   const inputRef = useRef(null);
-  const debounceTimer = useRef(null);
   const requestId = useRef(0);
 
   // Reset value when modal opens
   useEffect(() => {
     if (visible) {
       setValue(initialValue);
-      // Fetch initial suggestions
+      // Fetch initial suggestions immediately
       if (initialValue.trim().length >= 1) {
         fetchSuggestions(initialValue.trim());
       } else {
-        // Show recent suggestions when empty
         fetchRecentSuggestions();
       }
       // Focus input after a short delay
@@ -65,7 +63,7 @@ const PlayerNameEditModal = ({
     }
   };
 
-  // Fetch suggestions - fast with no debounce for immediate response
+  // Fetch suggestions - immediate, no debounce
   const fetchSuggestions = async (query) => {
     requestId.current += 1;
     const currentRequestId = requestId.current;
@@ -85,19 +83,13 @@ const PlayerNameEditModal = ({
     }
   };
 
-  // Handle text change with very short debounce (50ms) for fast response
+  // Handle text change - immediate suggestions, no debounce
   const handleTextChange = useCallback((text) => {
     setValue(text);
 
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
-
+    // Immediate fetch - no debounce for fastest response
     if (text.trim().length >= 1) {
-      // Very short debounce for fast suggestions
-      debounceTimer.current = setTimeout(() => {
-        fetchSuggestions(text.trim());
-      }, 50);
+      fetchSuggestions(text.trim());
     } else {
       fetchRecentSuggestions();
     }
@@ -106,9 +98,7 @@ const PlayerNameEditModal = ({
   // Handle suggestion selection
   const handleSelectSuggestion = (suggestion) => {
     setValue(suggestion.name);
-    // Save selected suggestion to bump its usage count
     suggestionService.addSuggestion(suggestion.name, type);
-    // Close modal with selected name
     handleSave(suggestion.name);
   };
 
@@ -116,7 +106,6 @@ const PlayerNameEditModal = ({
   const handleSave = (nameToSave = value) => {
     const trimmedName = nameToSave.trim();
     if (trimmedName) {
-      // Save to suggestions for future use
       suggestionService.addSuggestion(trimmedName, type);
       onSave(trimmedName);
     }
@@ -132,15 +121,6 @@ const PlayerNameEditModal = ({
   const handleBackdropPress = () => {
     handleSave();
   };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-    };
-  }, []);
 
   const isPopular = (suggestion) => suggestion.usageCount >= 50;
 
@@ -180,8 +160,26 @@ const PlayerNameEditModal = ({
           >
             <TouchableWithoutFeedback>
               <View style={styles.modalContainer}>
-                {/* Title */}
-                <Text style={styles.title}>{title}</Text>
+                {/* Header with Title and Buttons */}
+                <View style={styles.header}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={handleCancel}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.title}>{title}</Text>
+
+                  <TouchableOpacity
+                    style={styles.doneButton}
+                    onPress={() => handleSave()}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.doneButtonText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
 
                 {/* Input Field */}
                 <View style={styles.inputContainer}>
@@ -232,25 +230,6 @@ const PlayerNameEditModal = ({
                     />
                   </View>
                 )}
-
-                {/* Buttons */}
-                <View style={styles.buttonRow}>
-                  <TouchableOpacity
-                    style={styles.cancelButton}
-                    onPress={handleCancel}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.doneButton}
-                    onPress={() => handleSave()}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.doneButtonText}>Done</Text>
-                  </TouchableOpacity>
-                </View>
               </View>
             </TouchableWithoutFeedback>
           </KeyboardAvoidingView>
@@ -265,17 +244,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'flex-start',
-    paddingTop: Platform.OS === 'ios' ? 100 : 80,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
   },
   keyboardAvoid: {
     flex: 1,
   },
   modalContainer: {
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 20,
-    maxHeight: SCREEN_HEIGHT * 0.6,
+    borderRadius: 16,
+    padding: 16,
+    maxHeight: SCREEN_HEIGHT * 0.7,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -288,12 +267,36 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '600',
     color: '#1e293b',
     textAlign: 'center',
-    marginBottom: 16,
+    flex: 1,
+  },
+  cancelButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#64748b',
+  },
+  doneButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  doneButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.primary,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -302,53 +305,53 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: colors.primary,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
   },
   input: {
     flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '500',
     color: '#0f172a',
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
   clearButton: {
     padding: 8,
   },
   clearIcon: {
-    width: 20,
-    height: 20,
+    width: 18,
+    height: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
   clearLine: {
     position: 'absolute',
-    width: 14,
+    width: 12,
     height: 2,
     backgroundColor: '#94a3b8',
     borderRadius: 1,
   },
   suggestionsContainer: {
-    marginTop: 16,
-    maxHeight: 250,
+    marginTop: 12,
+    maxHeight: 280,
   },
   suggestionsLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#64748b',
-    marginBottom: 8,
+    marginBottom: 6,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   suggestionsList: {
     backgroundColor: '#f8fafc',
-    borderRadius: 12,
+    borderRadius: 10,
   },
   suggestionItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
   },
@@ -356,51 +359,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   suggestionText: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#334155',
     fontWeight: '500',
     flex: 1,
   },
   popularBadge: {
     backgroundColor: '#fef3c7',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
     marginLeft: 8,
   },
   popularBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#92400e',
     fontWeight: '600',
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    marginTop: 20,
-    gap: 12,
-  },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#f1f5f9',
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  doneButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-  },
-  doneButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffff',
   },
 });
 
