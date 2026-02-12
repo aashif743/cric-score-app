@@ -57,6 +57,11 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 
+// Health check endpoint (for keep-alive pings)
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 // API Routes
 app.use("/api/matches", matchRoutes);
 app.use("/api/users", userRoutes);
