@@ -854,12 +854,44 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Save state before action for undo
     saveToHistory(`Wicket - ${wicketType}`);
 
+    // Determine the out batsman based on selection
+    // runOutBatsman refers to ORIGINAL positions before the ball
     const outBatsman = runOutBatsman === 'nonStriker' ? nonStriker : striker;
+    const runsScored = selectedRuns;
+    const shouldRotate = runsScored % 2 === 1;
+
+    // For Run Out with runs: credit runs to striker (who hit the ball)
+    // The striker ALWAYS faces the ball, so runs go to them
+    if (wicketType === 'Run Out' && runsScored > 0) {
+      // Update striker's runs in allBatsmen
+      setAllBatsmen(prev => prev.map(b =>
+        b.id === striker.id
+          ? {
+              ...b,
+              runs: b.runs + runsScored,
+              balls: b.balls + 1,
+              fours: runsScored === 4 ? b.fours + 1 : b.fours,
+              sixes: runsScored === 6 ? b.sixes + 1 : b.sixes,
+              // Also mark as out if striker is out
+              ...(outBatsman.id === b.id ? { isOut: true, outType: wicketType } : {}),
+            }
+          : b.id === outBatsman.id && outBatsman.id !== striker.id
+            ? { ...b, isOut: true, outType: wicketType }
+            : b
+      ));
+    } else {
+      // Non-runout wicket or runout with 0 runs
+      setAllBatsmen(prev => prev.map(b =>
+        b.id === outBatsman.id
+          ? { ...b, isOut: true, outType: wicketType, balls: b.balls + (wicketType !== 'Run Out' || runOutBatsman !== 'nonStriker' ? 1 : 0) }
+          : b
+      ));
+    }
 
     // Update match state
     setMatch(prev => ({
       ...prev,
-      runs: prev.runs + selectedRuns,
+      runs: prev.runs + runsScored,
       wickets: prev.wickets + 1,
       balls: prev.balls + 1,
     }));
@@ -870,22 +902,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Update bowler stats
     if (wicketType !== 'Run Out') {
-      updateBowlerStats(selectedRuns, true);
+      updateBowlerStats(runsScored, true);
     } else {
-      updateBowlerStats(selectedRuns, false);
+      updateBowlerStats(runsScored, false);
     }
-
-    // Mark batsman as out
-    setAllBatsmen(prev => prev.map(b =>
-      b.id === outBatsman.id
-        ? { ...b, isOut: true, outType: wicketType, balls: b.balls + (runOutBatsman !== 'nonStriker' ? 1 : 0) }
-        : b
-    ));
 
     // Record fall of wicket
     setFallOfWickets(prev => [...prev, {
       batsman_name: outBatsman.name,
-      score: match.runs + selectedRuns,
+      score: match.runs + runsScored,
       wicket: match.wickets + 1,
       over: getCurrentOver(),
     }]);
@@ -904,11 +929,65 @@ const ScoreCardScreen = ({ navigation, route }) => {
       }
     }
 
-    if (nextBatsman) {
-      if (runOutBatsman === 'nonStriker') {
-        setCurrentBatsmen(prev => ({ ...prev, nonStriker: nextBatsman }));
+    // Handle batsmen positioning for Run Out with runs
+    if (wicketType === 'Run Out' && runsScored > 0) {
+      // Create updated striker with runs
+      const updatedStriker = {
+        ...striker,
+        runs: striker.runs + runsScored,
+        balls: striker.balls + 1,
+        fours: runsScored === 4 ? striker.fours + 1 : striker.fours,
+        sixes: runsScored === 6 ? striker.sixes + 1 : striker.sixes,
+      };
+
+      if (shouldRotate) {
+        // Odd runs: batsmen have swapped positions
+        // Original striker is now at non-striker end
+        // Original non-striker is now at striker end
+        if (runOutBatsman === 'striker') {
+          // Original striker (now at NS end) is out
+          // New batsman comes to NS end
+          // Original non-striker (now at striker end) stays as striker
+          setCurrentBatsmen({
+            striker: nonStriker,
+            nonStriker: nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 },
+          });
+        } else {
+          // Original non-striker (now at striker end) is out
+          // New batsman comes to striker end
+          // Original striker (now at NS end with updated stats) stays as non-striker
+          setCurrentBatsmen({
+            striker: nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 },
+            nonStriker: updatedStriker,
+          });
+        }
       } else {
-        setCurrentBatsmen(prev => ({ ...prev, striker: nextBatsman }));
+        // Even runs: batsmen are at original positions
+        if (runOutBatsman === 'striker') {
+          // Striker (at striker end) is out
+          // New batsman comes to striker end
+          setCurrentBatsmen({
+            striker: nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 },
+            nonStriker: nonStriker,
+          });
+        } else {
+          // Non-striker (at NS end) is out
+          // New batsman comes to NS end
+          // Striker stays with updated stats
+          setCurrentBatsmen({
+            striker: updatedStriker,
+            nonStriker: nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 },
+          });
+        }
+      }
+    } else {
+      // Non-runout wickets or runout with 0 runs - simple replacement
+      if (nextBatsman) {
+        if (runOutBatsman === 'nonStriker') {
+          setCurrentBatsmen(prev => ({ ...prev, nonStriker: nextBatsman }));
+        } else {
+          setCurrentBatsmen(prev => ({ ...prev, striker: nextBatsman }));
+        }
       }
     }
 
@@ -917,7 +996,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Check for end of over (wicket counts as a ball)
     if ((match.balls + 1) % settings.ballsPerOver === 0) {
-      handleEndOfOver({ display: 'W', runs: selectedRuns, isWicket: true });
+      handleEndOfOver({ display: 'W', runs: runsScored, isWicket: true });
     }
 
     // Compute pending bowler update
@@ -929,7 +1008,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     const pendingBowlerUpdate = {
       ...currentBowler,
       overs: `${newOvers}.${finalBalls}`,
-      runs: currentBowler.runs + selectedRuns,
+      runs: currentBowler.runs + runsScored,
       wickets: isWicket ? currentBowler.wickets + 1 : currentBowler.wickets,
     };
 
@@ -938,12 +1017,13 @@ const ScoreCardScreen = ({ navigation, route }) => {
       ...outBatsman,
       isOut: true,
       outType: wicketType,
-      balls: outBatsman.balls + (runOutBatsman !== 'nonStriker' ? 1 : 0),
+      balls: outBatsman.balls + (wicketType !== 'Run Out' || runOutBatsman !== 'nonStriker' ? 1 : 0),
+      runs: outBatsman.id === striker.id && wicketType === 'Run Out' ? outBatsman.runs + runsScored : outBatsman.runs,
     };
 
     // Check match end conditions with pending updates
     checkMatchEndConditions(
-      match.runs + selectedRuns,
+      match.runs + runsScored,
       match.wickets + 1,
       match.balls + 1,
       pendingBowlerUpdate,
@@ -1000,9 +1080,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
       b.id === currentBowler.id ? { ...b, runs: b.runs + totalRuns } : b
     ));
 
-    // Handle run out if selected
+    // Handle run out if selected (wides: all runs are extras, rotation based on overthrows)
     if (wideNoBallRunOut && wideNoBallRunOutBatsman) {
-      handleWideNoBallRunOut(wideNoBallRunOutBatsman);
+      handleWideNoBallRunOut(wideNoBallRunOutBatsman, extraRuns, false);
     }
 
     // Reset and close modal
@@ -1049,33 +1129,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Update extras (only the no ball run, not batsman runs)
     setExtras(prev => ({ ...prev, noBalls: prev.noBalls + settings.noBallRuns, total: prev.total + settings.noBallRuns }));
 
-    // If batsman scored runs, update batsman stats with atomic rotation handling
+    // If batsman scored runs, update batsman stats
     if (extraRuns > 0) {
       const shouldRotate = extraRuns % 2 === 1;
       const currentStrikerId = striker.id;
 
-      // Use functional update to avoid stale closures
-      setCurrentBatsmen(prev => {
-        const updatedStriker = {
-          ...prev.striker,
-          runs: prev.striker.runs + extraRuns,
-          fours: extraRuns === 4 ? prev.striker.fours + 1 : prev.striker.fours,
-          sixes: extraRuns === 6 ? prev.striker.sixes + 1 : prev.striker.sixes,
-        };
-
-        if (shouldRotate) {
-          return {
-            striker: prev.nonStriker,
-            nonStriker: updatedStriker,
-          };
-        } else {
-          return {
-            ...prev,
-            striker: updatedStriker,
-          };
-        }
-      });
-
+      // Update allBatsmen with striker's runs
       setAllBatsmen(prev => prev.map(b =>
         b.id === currentStrikerId
           ? {
@@ -1086,6 +1145,30 @@ const ScoreCardScreen = ({ navigation, route }) => {
             }
           : b
       ));
+
+      // Only rotate batsmen if NO run out (run out handler will manage positioning)
+      if (!wideNoBallRunOut) {
+        setCurrentBatsmen(prev => {
+          const updatedStriker = {
+            ...prev.striker,
+            runs: prev.striker.runs + extraRuns,
+            fours: extraRuns === 4 ? prev.striker.fours + 1 : prev.striker.fours,
+            sixes: extraRuns === 6 ? prev.striker.sixes + 1 : prev.striker.sixes,
+          };
+
+          if (shouldRotate) {
+            return {
+              striker: prev.nonStriker,
+              nonStriker: updatedStriker,
+            };
+          } else {
+            return {
+              ...prev,
+              striker: updatedStriker,
+            };
+          }
+        });
+      }
     }
 
     // Update match state (ball not counted)
@@ -1104,9 +1187,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
       b.id === currentBowler.id ? { ...b, runs: b.runs + totalRuns } : b
     ));
 
-    // Handle run out if selected
+    // Handle run out if selected (no ball: batsman runs count for rotation)
     if (wideNoBallRunOut && wideNoBallRunOutBatsman) {
-      handleWideNoBallRunOut(wideNoBallRunOutBatsman);
+      handleWideNoBallRunOut(wideNoBallRunOutBatsman, extraRuns, true);
     }
 
     // Reset and close modal
@@ -1129,8 +1212,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
   };
 
   // Handle run out during wide/no ball
-  const handleWideNoBallRunOut = (batsmanType) => {
+  // runsForRotation: For wides, this is overthrow runs. For no balls, this is batsman runs.
+  // isNoBall: true if this is a no ball run out (runs credited to batsman)
+  const handleWideNoBallRunOut = (batsmanType, runsForRotation = 0, isNoBall = false) => {
     const outBatsman = batsmanType === 'nonStriker' ? nonStriker : striker;
+    const shouldRotate = runsForRotation % 2 === 1;
 
     // Update match wickets
     setMatch(prev => ({
@@ -1170,11 +1256,52 @@ const ScoreCardScreen = ({ navigation, route }) => {
       }
     }
 
-    if (nextBatsman) {
-      if (batsmanType === 'nonStriker') {
-        setCurrentBatsmen(prev => ({ ...prev, nonStriker: nextBatsman }));
+    const defaultBatsman = { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 };
+    const newBatsman = nextBatsman || defaultBatsman;
+
+    // For no ball run outs, update striker's runs in currentBatsmen display
+    const updatedStriker = isNoBall && runsForRotation > 0 ? {
+      ...striker,
+      runs: striker.runs + runsForRotation,
+      fours: runsForRotation === 4 ? striker.fours + 1 : striker.fours,
+      sixes: runsForRotation === 6 ? striker.sixes + 1 : striker.sixes,
+    } : striker;
+
+    // Handle positioning based on rotation and who got out
+    if (shouldRotate) {
+      // Odd runs: batsmen crossed before run out
+      // Original striker is now at non-striker end, original non-striker at striker end
+      if (batsmanType === 'striker') {
+        // Original striker (now at NS end after crossing) is out
+        // New batsman comes to NS end
+        // Original non-striker (now at striker end) stays
+        setCurrentBatsmen({
+          striker: nonStriker,
+          nonStriker: newBatsman,
+        });
       } else {
-        setCurrentBatsmen(prev => ({ ...prev, striker: nextBatsman }));
+        // Original non-striker (now at striker end after crossing) is out
+        // New batsman comes to striker end
+        // Original striker (now at NS end, with updated stats) stays
+        setCurrentBatsmen({
+          striker: newBatsman,
+          nonStriker: updatedStriker,
+        });
+      }
+    } else {
+      // Even runs or 0 runs: batsmen at original positions
+      if (batsmanType === 'nonStriker') {
+        // Non-striker out, striker stays (with updated stats for no ball)
+        setCurrentBatsmen({
+          striker: updatedStriker,
+          nonStriker: newBatsman,
+        });
+      } else {
+        // Striker out, non-striker stays
+        setCurrentBatsmen({
+          striker: newBatsman,
+          nonStriker: nonStriker,
+        });
       }
     }
 
@@ -1242,14 +1369,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
       };
     });
 
-    // Rotate strike for odd runs
-    if (runs % 2 === 1) {
+    // Only rotate strike for odd runs if NO run out
+    // (run out handler will manage positioning)
+    if (runs % 2 === 1 && !byeRunOut) {
       rotateStrike();
     }
 
-    // Handle run out if selected
+    // Handle run out if selected (byes: all runs are extras, rotation based on bye runs)
     if (byeRunOut && byeRunOutBatsman) {
-      handleByeRunOut(byeRunOutBatsman);
+      handleByeRunOut(byeRunOutBatsman, runs);
     }
 
     // Check for end of over
@@ -1281,8 +1409,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
   };
 
   // Handle run out during bye
-  const handleByeRunOut = (batsmanType) => {
+  // runsForRotation: bye runs (extras) which determine rotation
+  const handleByeRunOut = (batsmanType, runsForRotation = 0) => {
     const outBatsman = batsmanType === 'nonStriker' ? nonStriker : striker;
+    const shouldRotate = runsForRotation % 2 === 1;
 
     // Update match wickets
     setMatch(prev => ({
@@ -1308,7 +1438,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Record fall of wicket
     setFallOfWickets(prev => [...prev, {
       batsman_name: outBatsman.name,
-      score: match.runs + byeRuns,
+      score: match.runs + runsForRotation,
       wicket: match.wickets + 1,
       over: getCurrentOver(),
     }]);
@@ -1327,11 +1457,31 @@ const ScoreCardScreen = ({ navigation, route }) => {
       }
     }
 
-    if (nextBatsman) {
-      if (batsmanType === 'nonStriker') {
-        setCurrentBatsmen(prev => ({ ...prev, nonStriker: nextBatsman }));
+    const defaultBatsman = { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 };
+    const newBatsman = nextBatsman || defaultBatsman;
+
+    // Handle positioning based on rotation and who got out
+    if (shouldRotate) {
+      // Odd bye runs: batsmen crossed before run out
+      if (batsmanType === 'striker') {
+        // Original striker (now at NS end after crossing) is out
+        setCurrentBatsmen({
+          striker: nonStriker,
+          nonStriker: newBatsman,
+        });
       } else {
-        setCurrentBatsmen(prev => ({ ...prev, striker: nextBatsman }));
+        // Original non-striker (now at striker end after crossing) is out
+        setCurrentBatsmen({
+          striker: newBatsman,
+          nonStriker: striker,
+        });
+      }
+    } else {
+      // Even bye runs or 0: batsmen at original positions
+      if (batsmanType === 'nonStriker') {
+        setCurrentBatsmen(prev => ({ ...prev, nonStriker: newBatsman }));
+      } else {
+        setCurrentBatsmen(prev => ({ ...prev, striker: newBatsman }));
       }
     }
 
