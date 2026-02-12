@@ -1080,6 +1080,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
       b.id === currentBowler.id ? { ...b, runs: b.runs + totalRuns } : b
     ));
 
+    // Handle rotation for odd overthrow runs (wides are extras, not batsman runs)
+    // Only rotate if NO run out (run out handler will manage positioning)
+    if (extraRuns > 0 && extraRuns % 2 === 1 && !wideNoBallRunOut) {
+      rotateStrike();
+    }
+
     // Handle run out if selected (wides: all runs are extras, rotation based on overthrows)
     if (wideNoBallRunOut && wideNoBallRunOutBatsman) {
       handleWideNoBallRunOut(wideNoBallRunOutBatsman, extraRuns, false);
