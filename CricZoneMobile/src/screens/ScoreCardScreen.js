@@ -21,6 +21,7 @@ import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
 import suggestionService from '../utils/suggestionService';
 import AutocompleteInput from '../components/AutocompleteInput';
+import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import { colors, spacing, borderRadius, fontSizes, fontWeights, shadows } from '../utils/theme';
 import io from 'socket.io-client';
 import { SOCKET_URL } from '../api/config';
@@ -173,6 +174,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [showExtrasModal, setShowExtrasModal] = useState(false);
   const [showChangeBowlerModal, setShowChangeBowlerModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+
+  // Player name edit modal state
+  const [playerNameEditModal, setPlayerNameEditModal] = useState({
+    visible: false,
+    playerId: null,
+    playerName: '',
+    playerType: null, // 'striker', 'nonStriker', 'bowler'
+    title: 'Edit Name',
+  });
   const [showEndInningsModal, setShowEndInningsModal] = useState(false);
   const [endInningsPromptDismissed, setEndInningsPromptDismissed] = useState(false); // Track if user dismissed end innings prompt
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -2117,6 +2127,49 @@ const ScoreCardScreen = ({ navigation, route }) => {
     }
   };
 
+  // Open player name edit modal
+  const openPlayerNameModal = (playerType) => {
+    let playerId, playerName, title;
+
+    if (playerType === 'striker') {
+      playerId = striker.id;
+      playerName = striker.name;
+      title = 'Edit Striker';
+    } else if (playerType === 'nonStriker') {
+      playerId = nonStriker.id;
+      playerName = nonStriker.name;
+      title = 'Edit Non-Striker';
+    } else if (playerType === 'bowler') {
+      playerId = currentBowler.id;
+      playerName = currentBowler.name;
+      title = 'Edit Bowler';
+    }
+
+    setPlayerNameEditModal({
+      visible: true,
+      playerId,
+      playerName,
+      playerType,
+      title,
+    });
+  };
+
+  // Handle save from player name edit modal
+  const handlePlayerNameModalSave = (newName) => {
+    const { playerId, playerType } = playerNameEditModal;
+
+    if (playerType === 'bowler') {
+      handleUpdatePlayerName(playerId, newName, false, true);
+    } else {
+      handleUpdatePlayerName(playerId, newName, playerType === 'striker', false);
+    }
+  };
+
+  // Close player name edit modal
+  const closePlayerNameModal = () => {
+    setPlayerNameEditModal(prev => ({ ...prev, visible: false }));
+  };
+
   // Update team name
   const handleUpdateTeamName = (team, newName) => {
     if (team === 'batting') {
@@ -2784,15 +2837,19 @@ const ScoreCardScreen = ({ navigation, route }) => {
                 <Text style={styles.strikerLabelText}>STRIKER</Text>
               </View>
             </View>
-            <AutocompleteInput
-              value={striker.name}
-              onChangeText={(text) => handleUpdatePlayerName(striker.id, text, true)}
-              type="player"
-              placeholder="Striker"
-              inputStyle={styles.playerName}
-              style={styles.playerNameWrapper}
-              selectTextOnFocus
-            />
+            <TouchableOpacity
+              style={styles.playerNameTouchable}
+              onPress={() => openPlayerNameModal('striker')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.playerNameText} numberOfLines={1}>
+                {striker.name || 'Tap to edit'}
+              </Text>
+              <View style={styles.editIconSmall}>
+                <View style={styles.editPencilBody} />
+                <View style={styles.editPencilTip} />
+              </View>
+            </TouchableOpacity>
             <View style={styles.batsmanStats}>
               <Text style={styles.runsText}>{striker.runs}</Text>
               <Text style={styles.ballsText}>({striker.balls})</Text>
@@ -2800,15 +2857,19 @@ const ScoreCardScreen = ({ navigation, route }) => {
           </View>
 
           <View style={styles.batsmanCard}>
-            <AutocompleteInput
-              value={nonStriker.name}
-              onChangeText={(text) => handleUpdatePlayerName(nonStriker.id, text, false)}
-              type="player"
-              placeholder="Non-Striker"
-              inputStyle={styles.playerName}
-              style={styles.playerNameWrapper}
-              selectTextOnFocus
-            />
+            <TouchableOpacity
+              style={styles.playerNameTouchable}
+              onPress={() => openPlayerNameModal('nonStriker')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.playerNameText} numberOfLines={1}>
+                {nonStriker.name || 'Tap to edit'}
+              </Text>
+              <View style={styles.editIconSmall}>
+                <View style={styles.editPencilBody} />
+                <View style={styles.editPencilTip} />
+              </View>
+            </TouchableOpacity>
             <View style={styles.batsmanStats}>
               <Text style={styles.runsText}>{nonStriker.runs}</Text>
               <Text style={styles.ballsText}>({nonStriker.balls})</Text>
@@ -2822,15 +2883,19 @@ const ScoreCardScreen = ({ navigation, route }) => {
           {/* Bowler Row */}
           <View style={styles.bowlerRow}>
             <View style={styles.bowlerNameContainer}>
-              <AutocompleteInput
-                value={currentBowler.name}
-                onChangeText={(text) => handleUpdatePlayerName(currentBowler.id, text, false, true)}
-                type="player"
-                placeholder="Bowler"
-                inputStyle={styles.bowlerName}
-                style={styles.bowlerNameWrapper}
-                selectTextOnFocus
-              />
+              <TouchableOpacity
+                style={styles.bowlerNameTouchable}
+                onPress={() => openPlayerNameModal('bowler')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.bowlerNameText} numberOfLines={1}>
+                  {currentBowler.name || 'Tap to edit'}
+                </Text>
+                <View style={styles.editIconSmall}>
+                  <View style={styles.editPencilBody} />
+                  <View style={styles.editPencilTip} />
+                </View>
+              </TouchableOpacity>
             </View>
             <View style={styles.bowlerSpellContainer}>
               <Text style={styles.bowlerSpellLabel}>Spell</Text>
@@ -4594,6 +4659,17 @@ const ScoreCardScreen = ({ navigation, route }) => {
           </View>
         </View>
       </Modal>
+
+      {/* Player Name Edit Modal */}
+      <PlayerNameEditModal
+        visible={playerNameEditModal.visible}
+        initialValue={playerNameEditModal.playerName}
+        title={playerNameEditModal.title}
+        placeholder="Enter player name"
+        type="player"
+        onSave={handlePlayerNameModalSave}
+        onClose={closePlayerNameModal}
+      />
       </View>
     </SafeAreaView>
   );
@@ -4860,6 +4936,51 @@ const styles = StyleSheet.create({
   playerNameWrapper: {
     zIndex: 1000,
   },
+  playerNameTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: responsiveSpacing.xs,
+    paddingVertical: responsiveSpacing.xs,
+    paddingHorizontal: responsiveSpacing.sm,
+    backgroundColor: 'rgba(0, 0, 0, 0.03)',
+    borderRadius: borderRadius.sm,
+    minHeight: 32,
+  },
+  playerNameText: {
+    fontSize: responsiveFontSize.sm,
+    fontWeight: fontWeights.semibold,
+    color: colors.textPrimary,
+    textAlign: 'center',
+    flex: 1,
+  },
+  editIconSmall: {
+    width: 14,
+    height: 14,
+    marginLeft: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  editPencilBody: {
+    width: 10,
+    height: 3,
+    backgroundColor: colors.textMuted,
+    borderRadius: 1,
+    transform: [{ rotate: '45deg' }],
+  },
+  editPencilTip: {
+    position: 'absolute',
+    right: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 3,
+    borderTopWidth: 1.5,
+    borderBottomWidth: 1.5,
+    borderLeftColor: colors.textMuted,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    transform: [{ rotate: '45deg' }, { translateX: 4 }, { translateY: 4 }],
+  },
   batsmanStats: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -4903,6 +5024,21 @@ const styles = StyleSheet.create({
   bowlerNameWrapper: {
     flex: 1,
     zIndex: 1000,
+  },
+  bowlerNameTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: responsiveSpacing.sm,
+    paddingHorizontal: responsiveSpacing.sm,
+    backgroundColor: 'rgba(0, 0, 0, 0.03)',
+    borderRadius: borderRadius.sm,
+    minHeight: 36,
+  },
+  bowlerNameText: {
+    fontSize: responsiveFontSize.md,
+    fontWeight: fontWeights.semibold,
+    color: colors.textPrimary,
+    flex: 1,
   },
   bowlerSpellContainer: {
     flex: 1,

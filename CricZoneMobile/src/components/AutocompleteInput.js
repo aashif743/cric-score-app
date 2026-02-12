@@ -95,9 +95,10 @@ const AutocompleteInput = ({
     const currentRequestId = requestId.current;
 
     if (text.trim().length >= 1) {
+      // Fast debounce for immediate suggestions
       debounceTimer.current = setTimeout(() => {
         fetchSuggestions(text.trim(), currentRequestId);
-      }, 150);
+      }, 50);
     } else {
       setSuggestions([]);
       setShowDropdown(false);
