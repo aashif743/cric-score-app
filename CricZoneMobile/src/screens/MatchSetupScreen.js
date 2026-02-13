@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
+import tournamentService from '../utils/tournamentService';
 import suggestionService from '../utils/suggestionService';
 import AutocompleteInput from '../components/AutocompleteInput';
 import { colors, spacing, borderRadius, fontSizes, fontWeights, shadows } from '../utils/theme';
@@ -148,10 +149,15 @@ const BallsIcon = () => (
 const MatchSetupScreen = ({ navigation, route }) => {
   const { user } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
+  const [fetchingTournament, setFetchingTournament] = useState(false);
 
   // Tournament params
   const tournamentId = route.params?.tournamentId || null;
-  const tournamentDefaults = route.params?.tournamentDefaults || null;
+  const initialTournamentDefaults = route.params?.tournamentDefaults || null;
+
+  // Tournament data (can be fetched if not provided)
+  const [tournamentData, setTournamentData] = useState(initialTournamentDefaults);
+  const [completedMatches, setCompletedMatches] = useState([]);
 
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -159,29 +165,57 @@ const MatchSetupScreen = ({ navigation, route }) => {
   const teamAInputRef = useRef(null);
   const teamBInputRef = useRef(null);
 
+  // Get tournament team names (from fetched data or initial defaults)
+  const tournamentTeamNames = tournamentData?.teamNames?.filter(Boolean) || [];
+  const hasTournamentTeams = tournamentTeamNames.length >= 2;
+
+  // Calculate next teams to play based on completed matches
+  const getNextTeamPair = () => {
+    if (!hasTournamentTeams) return { team1: 'Team A', team2: 'Team B' };
+
+    // Get all played team combinations
+    const playedPairs = new Set();
+    completedMatches.forEach(match => {
+      const teamA = match.teamA?.name;
+      const teamB = match.teamB?.name;
+      if (teamA && teamB) {
+        // Store both orderings to check against
+        playedPairs.add(`${teamA}|${teamB}`);
+        playedPairs.add(`${teamB}|${teamA}`);
+      }
+    });
+
+    // Find first pair of teams that haven't played
+    for (let i = 0; i < tournamentTeamNames.length; i++) {
+      for (let j = i + 1; j < tournamentTeamNames.length; j++) {
+        const team1 = tournamentTeamNames[i];
+        const team2 = tournamentTeamNames[j];
+        if (!playedPairs.has(`${team1}|${team2}`)) {
+          return { team1, team2 };
+        }
+      }
+    }
+
+    // All teams have played each other, default to first two
+    return { team1: tournamentTeamNames[0], team2: tournamentTeamNames[1] };
+  };
+
   // Match settings (use tournament defaults if available)
-  const initialTeamNames = tournamentDefaults?.teamNames?.filter(Boolean) || [];
-  const [battingTeam, setBattingTeam] = useState(
-    initialTeamNames.length >= 2 ? initialTeamNames[0] : 'Team A'
-  );
-  const [bowlingTeam, setBowlingTeam] = useState(
-    initialTeamNames.length >= 2 ? initialTeamNames[1] : 'Team B'
-  );
+  const [battingTeam, setBattingTeam] = useState('Team A');
+  const [bowlingTeam, setBowlingTeam] = useState('Team B');
   const [overs, setOvers] = useState(
-    tournamentDefaults?.totalOvers?.toString() || '4'
+    tournamentData?.totalOvers?.toString() || '4'
   );
   const [playersPerTeam, setPlayersPerTeam] = useState(
-    tournamentDefaults?.playersPerTeam?.toString() || '11'
+    tournamentData?.playersPerTeam?.toString() || '11'
   );
   const [ballsPerOver, setBallsPerOver] = useState(
-    tournamentDefaults?.ballsPerOver?.toString() || '6'
+    tournamentData?.ballsPerOver?.toString() || '6'
   );
   const [isEditingBatting, setIsEditingBatting] = useState(false);
   const [isEditingBowling, setIsEditingBowling] = useState(false);
 
   // Tournament team selection
-  const tournamentTeamNames = tournamentDefaults?.teamNames?.filter(Boolean) || [];
-  const hasTournamentTeams = tournamentTeamNames.length >= 2;
   const [showBattingDropdown, setShowBattingDropdown] = useState(false);
   const [showBowlingDropdown, setShowBowlingDropdown] = useState(false);
   const battingDropdownAnim = useRef(new Animated.Value(0)).current;
@@ -191,6 +225,50 @@ const MatchSetupScreen = ({ navigation, route }) => {
   const playerOptions = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
   const overOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50];
   const ballsOptions = [2, 3, 4, 5, 6];
+
+  // Fetch tournament data if only tournamentId is provided
+  useEffect(() => {
+    const fetchTournamentData = async () => {
+      if (tournamentId && !initialTournamentDefaults && user?.token) {
+        setFetchingTournament(true);
+        try {
+          const response = await tournamentService.getTournament(tournamentId, user.token);
+          const tournament = response.data || response;
+          if (tournament) {
+            setTournamentData({
+              totalOvers: tournament.totalOvers,
+              playersPerTeam: tournament.playersPerTeam,
+              ballsPerOver: tournament.ballsPerOver,
+              teamNames: tournament.teamNames,
+              venue: tournament.venue,
+              tournamentName: tournament.name,
+            });
+            // Store completed matches for determining next teams
+            setCompletedMatches(tournament.matches || []);
+            // Update settings
+            setOvers(tournament.totalOvers?.toString() || '4');
+            setPlayersPerTeam(tournament.playersPerTeam?.toString() || '11');
+            setBallsPerOver(tournament.ballsPerOver?.toString() || '6');
+          }
+        } catch (error) {
+          console.log('Error fetching tournament:', error);
+        } finally {
+          setFetchingTournament(false);
+        }
+      }
+    };
+
+    fetchTournamentData();
+  }, [tournamentId, initialTournamentDefaults, user?.token]);
+
+  // Update team names when tournament data is available
+  useEffect(() => {
+    if (hasTournamentTeams) {
+      const { team1, team2 } = getNextTeamPair();
+      setBattingTeam(team1);
+      setBowlingTeam(team2);
+    }
+  }, [tournamentData, completedMatches]);
 
   useEffect(() => {
     Animated.parallel([
@@ -242,7 +320,7 @@ const MatchSetupScreen = ({ navigation, route }) => {
       playersPerTeam: parseInt(playersPerTeam),
       ballsPerOver: parseInt(ballsPerOver),
       matchType: 'T20',
-      venue: tournamentDefaults?.venue || 'Not specified',
+      venue: tournamentData?.venue || 'Not specified',
       toss: {
         winner: teamA,
         decision: 'bat',
@@ -276,6 +354,31 @@ const MatchSetupScreen = ({ navigation, route }) => {
     }
   };
 
+  // Show loading when fetching tournament data
+  if (fetchingTournament) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.7}
+          >
+            <View style={styles.backIcon}>
+              <View style={styles.backArrow} />
+            </View>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Tournament Match</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading tournament...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
@@ -307,7 +410,7 @@ const MatchSetupScreen = ({ navigation, route }) => {
           }}
         >
           {/* Tournament Info Banner */}
-          {tournamentId && tournamentDefaults?.tournamentName && (
+          {tournamentId && tournamentData?.tournamentName && (
             <View style={styles.tournamentBanner}>
               <View style={styles.tournamentBannerIcon}>
                 <View style={styles.trophyMini} />
@@ -316,7 +419,7 @@ const MatchSetupScreen = ({ navigation, route }) => {
               <View style={styles.tournamentBannerText}>
                 <Text style={styles.tournamentBannerLabel}>Tournament</Text>
                 <Text style={styles.tournamentBannerName} numberOfLines={1}>
-                  {tournamentDefaults.tournamentName}
+                  {tournamentData.tournamentName}
                 </Text>
               </View>
             </View>
@@ -694,6 +797,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8fafc',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#64748b',
+    fontWeight: '500',
   },
   header: {
     flexDirection: 'row',
