@@ -11,6 +11,7 @@ import {
   Share,
   Alert,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
@@ -302,23 +303,100 @@ const TournamentDetailScreen = ({ navigation, route }) => {
   };
 
   const [sharing, setSharing] = useState(false);
+  const [shareId, setShareId] = useState(null);
+
+  // Update shareId when tournament data is fetched
+  useEffect(() => {
+    if (tournament?.shareId) {
+      setShareId(tournament.shareId);
+    }
+  }, [tournament?.shareId]);
 
   const handleShare = useCallback(async () => {
     if (!user?.token || !tournament) return;
+
+    // If already has shareId, show options directly
+    if (shareId) {
+      showShareOptions(shareId);
+      return;
+    }
+
+    // Generate share link first
     try {
       setSharing(true);
       const res = await tournamentService.generateShareLink(tournament._id, user.token);
-      if (res.success && res.data?.shareUrl) {
-        await Share.share({
-          message: `Check out ${tournament.name} on CricZone!\n${res.data.shareUrl}`,
-        });
+      if (res.success && res.data?.shareId) {
+        setShareId(res.data.shareId);
+        showShareOptions(res.data.shareId);
+      } else {
+        Alert.alert('Error', 'Failed to generate share link.');
       }
     } catch (err) {
       Alert.alert('Error', 'Failed to generate share link.');
     } finally {
       setSharing(false);
     }
-  }, [tournament, user?.token]);
+  }, [tournament, user?.token, shareId]);
+
+  const showShareOptions = (id) => {
+    Alert.alert(
+      'Share Tournament',
+      'Choose how to share:',
+      [
+        {
+          text: 'TV Scoreboard',
+          onPress: () => handleTVShare(id),
+        },
+        {
+          text: 'Tournament Link',
+          onPress: () => handleTournamentShare(id),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const handleTVShare = (id) => {
+    const tvUrl = `https://cric-zone.com/tournament/${id}/tv`;
+
+    Alert.alert(
+      'TV Scoreboard',
+      'Display all tournament matches on TV.\n\nThe scoreboard shows live matches automatically and allows switching between matches.',
+      [
+        {
+          text: 'Copy URL',
+          onPress: () => {
+            Clipboard.setString(tvUrl);
+            Alert.alert('Copied!', 'TV Scoreboard URL copied.\n\nOpen this URL on any device connected to your TV.');
+          },
+        },
+        {
+          text: 'Share',
+          onPress: async () => {
+            try {
+              await Share.share({
+                message: `${tournament.name} - Live Scoreboard\n\n${tvUrl}\n\nOpen this link on your TV to view all matches live.`,
+              });
+            } catch (err) {
+              console.log('Share error:', err);
+            }
+          },
+        },
+        { text: 'Back', style: 'cancel', onPress: () => showShareOptions(id) },
+      ]
+    );
+  };
+
+  const handleTournamentShare = async (id) => {
+    const shareUrl = `https://cric-zone.com/tournament/${id}`;
+    try {
+      await Share.share({
+        message: `Check out ${tournament.name} on CricZone!\n${shareUrl}`,
+      });
+    } catch (err) {
+      console.log('Share error:', err);
+    }
+  };
 
   if (loading) {
     return (

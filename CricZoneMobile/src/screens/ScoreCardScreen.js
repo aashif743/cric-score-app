@@ -2180,41 +2180,92 @@ const ScoreCardScreen = ({ navigation, route }) => {
       return;
     }
 
-    const overlayUrl = `https://cric-zone.com/overlay/${matchId}`;
-    const barStyleUrl = `${overlayUrl}?style=bar`;
-    const boxStyleUrl = `${overlayUrl}?style=box`;
-
     Alert.alert(
-      'Broadcast Overlay',
-      'Get live score overlay URL for OBS/streaming software.\n\nAdd as Browser Source in OBS with transparent background.',
+      'Live Broadcast',
+      'Choose how to display live scores:',
       [
         {
-          text: 'Copy Bar Style (IPL)',
+          text: 'TV Scoreboard',
+          onPress: () => handleTVScoreboard(matchId),
+        },
+        {
+          text: 'OBS Overlay',
+          onPress: () => handleOBSOverlay(matchId),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  // Handle TV Scoreboard sharing
+  const handleTVScoreboard = (matchId) => {
+    const tvUrl = `https://cric-zone.com/tv/${matchId}`;
+
+    Alert.alert(
+      'TV Scoreboard',
+      'Display live scores on TV or big screen.\n\nMethods to connect:\n• Screen mirror from laptop/phone\n• Smart TV browser\n• HDMI from laptop\n• Chromecast/AirPlay',
+      [
+        {
+          text: 'Copy URL',
           onPress: () => {
-            Clipboard.setString(barStyleUrl);
-            Alert.alert('Copied!', 'Bar-style overlay URL copied to clipboard.\n\nPaste in OBS as Browser Source.');
+            Clipboard.setString(tvUrl);
+            Alert.alert('Copied!', 'TV Scoreboard URL copied.\n\nOpen this URL on any device connected to your TV.');
           },
         },
         {
-          text: 'Copy Box Style (Detailed)',
-          onPress: () => {
-            Clipboard.setString(boxStyleUrl);
-            Alert.alert('Copied!', 'Box-style overlay URL copied to clipboard.\n\nPaste in OBS as Browser Source.');
-          },
-        },
-        {
-          text: 'Share Link',
+          text: 'Share',
           onPress: async () => {
             try {
               await Share.share({
-                message: `Live Cricket Score Overlay:\n\nBar Style (IPL): ${barStyleUrl}\n\nBox Style (Detailed): ${boxStyleUrl}\n\nAdd as Browser Source in OBS with transparent background.`,
+                message: `Live Cricket Scoreboard\n\n${tvUrl}\n\nOpen this link on your TV or any device to view live scores.`,
               });
             } catch (err) {
               console.log('Share error:', err);
             }
           },
         },
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Back', style: 'cancel', onPress: () => handleShareOverlay() },
+      ]
+    );
+  };
+
+  // Handle OBS Overlay sharing
+  const handleOBSOverlay = (matchId) => {
+    const overlayUrl = `https://cric-zone.com/overlay/${matchId}`;
+    const barStyleUrl = `${overlayUrl}?style=bar`;
+    const boxStyleUrl = `${overlayUrl}?style=box`;
+
+    Alert.alert(
+      'OBS Overlay',
+      'Get live score overlay URL for OBS/streaming software.\n\nAdd as Browser Source with transparent background.',
+      [
+        {
+          text: 'Bar Style (IPL)',
+          onPress: () => {
+            Clipboard.setString(barStyleUrl);
+            Alert.alert('Copied!', 'Bar-style overlay URL copied.\n\nPaste in OBS as Browser Source.');
+          },
+        },
+        {
+          text: 'Box Style (Detailed)',
+          onPress: () => {
+            Clipboard.setString(boxStyleUrl);
+            Alert.alert('Copied!', 'Box-style overlay URL copied.\n\nPaste in OBS as Browser Source.');
+          },
+        },
+        {
+          text: 'Share All',
+          onPress: async () => {
+            try {
+              await Share.share({
+                message: `Live Cricket Score Overlay:\n\nBar Style: ${barStyleUrl}\n\nBox Style: ${boxStyleUrl}\n\nAdd as Browser Source in OBS.`,
+              });
+            } catch (err) {
+              console.log('Share error:', err);
+            }
+          },
+        },
+        { text: 'Back', style: 'cancel', onPress: () => handleShareOverlay() },
       ]
     );
   };

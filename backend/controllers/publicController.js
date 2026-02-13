@@ -324,44 +324,69 @@ exports.getOverlayData = async (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid match ID" });
     }
 
-    const match = await Match.findById(matchId)
-      .select('teamA teamB status result totalOvers ballsPerOver playersPerTeam innings innings1 innings2 target currentState')
-      .lean();
+    const match = await Match.findById(matchId).lean();
 
     if (!match) {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
 
-    // Extract current batsmen (on strike and non-strike)
+    // Extract current innings data
     const currentInnings = match.innings === 1 ? match.innings1 : match.innings2;
     const batting = currentInnings?.batting || [];
-
-    // Find active batsmen (not out and have faced balls or are at crease)
-    const activeBatsmen = batting
-      .filter(b => !b.isOut && (b.balls > 0 || b.runs > 0))
-      .slice(-2); // Last two active batsmen
-
-    // Find current bowler (last bowler in bowling array with overs)
     const bowling = currentInnings?.bowling || [];
-    const currentBowler = bowling
-      .filter(b => b.overs && b.overs !== "0.0")
-      .slice(-1)[0];
 
-    // Calculate required run rate for second innings
+    // Find active batsmen (not out)
+    const activeBatsmen = batting
+      .filter(b => !b.isOut && !b.isRetired)
+      .slice(-2);
+
+    // Find current bowler (last active bowler)
+    const currentBowler = bowling.slice(-1)[0];
+
+    // Calculate overs as decimal for calculations
+    const parseOvers = (overs) => {
+      if (!overs) return 0;
+      const parts = overs.toString().split('.');
+      return parseInt(parts[0] || 0) + (parseInt(parts[1] || 0) / 6);
+    };
+
+    // Calculate current run rate
+    const currentOvers = parseOvers(currentInnings?.overs);
+    const currentRuns = currentInnings?.runs || 0;
+    const currentRunRate = currentOvers > 0 ? (currentRuns / currentOvers).toFixed(2) : "0.00";
+
+    // Calculate required info for second innings
+    let requiredRuns = null;
     let requiredRunRate = null;
+    let ballsRemaining = null;
     if (match.innings === 2 && match.target) {
-      const runsNeeded = match.target - (currentInnings?.runs || 0);
-      const oversLeft = match.totalOvers - parseFloat(currentInnings?.overs || 0);
-      if (oversLeft > 0 && runsNeeded > 0) {
-        requiredRunRate = (runsNeeded / oversLeft).toFixed(2);
+      requiredRuns = match.target - currentRuns;
+      const totalBalls = match.totalOvers * (match.ballsPerOver || 6);
+      const currentBalls = Math.floor(currentOvers) * (match.ballsPerOver || 6) +
+                          Math.round((currentOvers % 1) * 6);
+      ballsRemaining = totalBalls - currentBalls;
+      const oversRemaining = ballsRemaining / (match.ballsPerOver || 6);
+      if (oversRemaining > 0 && requiredRuns > 0) {
+        requiredRunRate = (requiredRuns / oversRemaining).toFixed(2);
       }
     }
 
-    // Build overlay data
+    // Get extras
+    const extras = currentInnings?.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 };
+
+    // Get fall of wickets
+    const fallOfWickets = currentInnings?.fallOfWickets || [];
+
+    // Get this over balls
+    const thisOver = currentInnings?.thisOver || [];
+
+    // Build comprehensive overlay data
     const overlayData = {
       matchId: match._id,
       status: match.status,
       result: match.result,
+
+      // Team info
       teamA: {
         name: match.teamA?.name || "Team A",
         shortName: (match.teamA?.name || "TMA").substring(0, 3).toUpperCase(),
@@ -370,47 +395,134 @@ exports.getOverlayData = async (req, res) => {
         name: match.teamB?.name || "Team B",
         shortName: (match.teamB?.name || "TMB").substring(0, 3).toUpperCase(),
       },
+
+      // Match settings
       totalOvers: match.totalOvers,
+      ballsPerOver: match.ballsPerOver || 6,
+      playersPerTeam: match.playersPerTeam || 11,
+
+      // Current state
       currentInnings: match.innings || 1,
-      innings1: match.innings1 ? {
+      battingTeam: currentInnings?.battingTeam || match.teamA?.name,
+      bowlingTeam: match.innings === 1 ? match.teamB?.name : match.teamA?.name,
+
+      // Score
+      runs: currentRuns,
+      wickets: currentInnings?.wickets || 0,
+      overs: currentInnings?.overs || "0.0",
+      runRate: currentRunRate,
+
+      // First innings summary (for 2nd innings display)
+      firstInnings: match.innings1 ? {
         battingTeam: match.innings1.battingTeam,
         runs: match.innings1.runs || 0,
         wickets: match.innings1.wickets || 0,
         overs: match.innings1.overs || "0.0",
-        runRate: match.innings1.runRate || 0,
       } : null,
-      innings2: match.innings2 ? {
-        battingTeam: match.innings2.battingTeam,
-        runs: match.innings2.runs || 0,
-        wickets: match.innings2.wickets || 0,
-        overs: match.innings2.overs || "0.0",
-        runRate: match.innings2.runRate || 0,
-      } : null,
+
+      // Second innings chase info
       target: match.target,
+      requiredRuns,
       requiredRunRate,
-      currentBatsmen: activeBatsmen.map(b => ({
-        name: b.name,
-        runs: b.runs || 0,
-        balls: b.balls || 0,
-        fours: b.fours || 0,
-        sixes: b.sixes || 0,
-        strikeRate: b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0",
-        onStrike: b.onStrike || false,
-      })),
-      currentBowler: currentBowler ? {
+      ballsRemaining,
+
+      // Current batsmen (striker first)
+      striker: activeBatsmen.find(b => b.onStrike) || activeBatsmen[0] ? {
+        name: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.name || "Batsman",
+        runs: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.runs || 0,
+        balls: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.balls || 0,
+        fours: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.fours || 0,
+        sixes: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.sixes || 0,
+        strikeRate: (() => {
+          const b = activeBatsmen.find(b => b.onStrike) || activeBatsmen[0];
+          return b && b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0";
+        })(),
+      } : null,
+
+      nonStriker: activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1] ? {
+        name: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.name || "Batsman",
+        runs: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.runs || 0,
+        balls: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.balls || 0,
+        fours: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.fours || 0,
+        sixes: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.sixes || 0,
+        strikeRate: (() => {
+          const b = activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1];
+          return b && b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0";
+        })(),
+      } : null,
+
+      // Current bowler with spell
+      bowler: currentBowler ? {
         name: currentBowler.name,
-        overs: currentBowler.overs,
+        overs: currentBowler.overs || "0.0",
+        maidens: currentBowler.maidens || 0,
         runs: currentBowler.runs || 0,
         wickets: currentBowler.wickets || 0,
-        economy: currentBowler.economyRate || 0,
+        economy: (() => {
+          const o = parseOvers(currentBowler.overs);
+          return o > 0 ? (currentBowler.runs / o).toFixed(2) : "0.00";
+        })(),
       } : null,
+
+      // This over
+      thisOver: thisOver.slice(-6), // Last 6 balls
+
+      // Extras
+      extras: {
+        total: extras.total || 0,
+        wides: extras.wides || 0,
+        noBalls: extras.noBalls || 0,
+        byes: extras.byes || 0,
+        legByes: extras.legByes || 0,
+      },
+
+      // Partnership
+      partnership: match.currentState?.partnership || { runs: 0, balls: 0 },
+
+      // Recent fall of wickets (last 3)
+      recentWickets: fallOfWickets.slice(-3).map(fow => ({
+        batsman: fow.batsman_name,
+        score: fow.score,
+        wicket: fow.wicket,
+        over: fow.over,
+      })),
+
+      // Last ball result
       lastBall: match.currentState?.lastBallResult || null,
-      partnership: match.currentState?.partnership || null,
+
+      // Toss info
+      toss: match.toss,
+
+      // Timestamp
+      updatedAt: match.updatedAt,
     };
 
     res.json({ success: true, data: overlayData });
   } catch (error) {
     console.error("Get overlay data error:", error);
     res.status(500).json({ success: false, error: "Failed to fetch overlay data." });
+  }
+};
+
+// Get live TV scoreboard data (comprehensive for TV display)
+exports.getTVScoreboard = async (req, res) => {
+  try {
+    const { matchId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(matchId)) {
+      return res.status(400).json({ success: false, error: "Invalid match ID" });
+    }
+
+    const match = await Match.findById(matchId).lean();
+
+    if (!match) {
+      return res.status(404).json({ success: false, error: "Match not found" });
+    }
+
+    // Return full match data for TV display
+    res.json({ success: true, data: match });
+  } catch (error) {
+    console.error("Get TV scoreboard error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch TV scoreboard data." });
   }
 };

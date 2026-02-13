@@ -7,5 +7,6 @@ router.get("/tournament/:shareId/stats", publicController.getPublicTournamentSta
 router.get("/tournament/:shareId/matches", publicController.getPublicTournamentMatches);
 router.get("/match/:matchId", publicController.getPublicMatch);
 router.get("/overlay/:matchId", publicController.getOverlayData);
+router.get("/tv/:matchId", publicController.getTVScoreboard);
 
 module.exports = router;
