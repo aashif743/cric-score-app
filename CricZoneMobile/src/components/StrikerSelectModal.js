@@ -6,11 +6,8 @@ import {
   StyleSheet,
   Modal,
   Platform,
-  Dimensions,
 } from 'react-native';
-import { colors, spacing, borderRadius, fontWeights } from '../utils/theme';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import { colors } from '../utils/theme';
 
 const StrikerSelectModal = ({
   visible,
@@ -33,9 +30,6 @@ const StrikerSelectModal = ({
         <View style={styles.modalContainer}>
           {/* Header */}
           <View style={styles.header}>
-            <View style={styles.iconContainer}>
-              <Text style={styles.iconText}>🏏</Text>
-            </View>
             <Text style={styles.title}>{title}</Text>
             <Text style={styles.subtitle}>Who will face the next ball?</Text>
           </View>
@@ -52,67 +46,45 @@ const StrikerSelectModal = ({
                 onPress={() => onSelect(batsman)}
                 activeOpacity={0.7}
               >
-                <View style={styles.optionContent}>
-                  {/* Avatar */}
-                  <View style={[
-                    styles.avatar,
-                    batsman.isSuggested && styles.avatarSuggested,
-                  ]}>
-                    <Text style={[
-                      styles.avatarText,
-                      batsman.isSuggested && styles.avatarTextSuggested,
-                    ]}>
-                      {batsman.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-
-                  {/* Info */}
-                  <View style={styles.optionInfo}>
-                    <View style={styles.nameRow}>
-                      <Text style={[
-                        styles.optionName,
-                        batsman.isSuggested && styles.optionNameSuggested,
-                      ]} numberOfLines={1}>
-                        {batsman.name}
-                      </Text>
-                      {batsman.isNew && (
-                        <View style={styles.newBadge}>
-                          <Text style={styles.newBadgeText}>NEW</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.optionStats}>
-                      {batsman.isNew ? 'Coming in to bat' : `${batsman.runs} (${batsman.balls})`}
-                    </Text>
-                  </View>
-
-                  {/* Suggested indicator */}
-                  {batsman.isSuggested && (
-                    <View style={styles.suggestedBadge}>
-                      <Text style={styles.suggestedText}>Suggested</Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Tap indicator */}
+                {/* Avatar */}
                 <View style={[
-                  styles.selectIndicator,
-                  batsman.isSuggested && styles.selectIndicatorSuggested,
+                  styles.avatar,
+                  batsman.isSuggested && styles.avatarSuggested,
                 ]}>
                   <Text style={[
-                    styles.selectText,
-                    batsman.isSuggested && styles.selectTextSuggested,
+                    styles.avatarText,
+                    batsman.isSuggested && styles.avatarTextSuggested,
                   ]}>
-                    Tap to select
+                    {batsman.name.charAt(0).toUpperCase()}
                   </Text>
                 </View>
+
+                {/* Name and Stats */}
+                <View style={styles.optionInfo}>
+                  <Text style={[
+                    styles.optionName,
+                    batsman.isSuggested && styles.optionNameSuggested,
+                  ]} numberOfLines={2}>
+                    {batsman.name}
+                  </Text>
+                  <Text style={styles.optionStats}>
+                    {batsman.isNew ? 'Coming in to bat' : `${batsman.runs} runs (${batsman.balls} balls)`}
+                  </Text>
+                </View>
+
+                {/* Checkmark for suggested */}
+                {batsman.isSuggested && (
+                  <View style={styles.checkContainer}>
+                    <Text style={styles.checkText}>✓</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             ))}
           </View>
 
           {/* Info text */}
           <Text style={styles.infoText}>
-            Select the batsman who should face the next delivery
+            Tap to select the next striker
           </Text>
         </View>
       </View>
@@ -126,11 +98,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
   },
   modalContainer: {
     width: '100%',
-    maxWidth: 360,
+    maxWidth: 340,
     backgroundColor: '#ffffff',
     borderRadius: 20,
     padding: 24,
@@ -148,25 +120,13 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 24,
-  },
-  iconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#f0f9ff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  iconText: {
-    fontSize: 28,
+    marginBottom: 20,
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
     color: '#1e293b',
-    marginBottom: 6,
+    marginBottom: 4,
     textAlign: 'center',
   },
   subtitle: {
@@ -178,25 +138,22 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   optionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#f8fafc',
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 2,
     borderColor: '#e2e8f0',
-    overflow: 'hidden',
+    padding: 14,
   },
   optionCardSuggested: {
     backgroundColor: '#f0f9ff',
     borderColor: colors.primary,
   },
-  optionContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#e2e8f0',
     justifyContent: 'center',
     alignItems: 'center',
@@ -205,7 +162,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   avatarText: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#64748b',
   },
@@ -214,73 +171,40 @@ const styles = StyleSheet.create({
   },
   optionInfo: {
     flex: 1,
-    marginLeft: 14,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    marginLeft: 12,
+    marginRight: 8,
   },
   optionName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#334155',
-    flex: 1,
+    marginBottom: 2,
   },
   optionNameSuggested: {
     color: '#1e293b',
   },
-  newBadge: {
-    backgroundColor: '#dcfce7',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  newBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#16a34a',
-  },
   optionStats: {
     fontSize: 13,
     color: '#64748b',
-    marginTop: 2,
   },
-  suggestedBadge: {
+  checkContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: colors.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  suggestedText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  selectIndicator: {
-    backgroundColor: '#f1f5f9',
-    paddingVertical: 10,
+    justifyContent: 'center',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
   },
-  selectIndicatorSuggested: {
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-    borderTopColor: 'rgba(59, 130, 246, 0.2)',
-  },
-  selectText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#94a3b8',
-  },
-  selectTextSuggested: {
-    color: colors.primary,
+  checkText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
   },
   infoText: {
     fontSize: 12,
     color: '#94a3b8',
     textAlign: 'center',
-    marginTop: 20,
+    marginTop: 16,
   },
 });
 
