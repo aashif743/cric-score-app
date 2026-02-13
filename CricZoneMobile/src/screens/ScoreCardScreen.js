@@ -863,9 +863,23 @@ const ScoreCardScreen = ({ navigation, route }) => {
       const isAllOut = match.wickets >= settings.playersPerTeam - 1;
 
       if (!isOversComplete && !isAllOut) {
+        // Find next bowler in sequential rotation
+        // Sort by ID to ensure consistent order, then find the next one after current
+        const sortedBowlers = [...allBowlers].sort((a, b) => a.id - b.id);
+        const currentIndex = sortedBowlers.findIndex(b => b.id === currentBowlerId);
+
         // Find next eligible bowler (not the one who just bowled)
-        const nextBowler = allBowlers.find(b => b.id !== currentBowlerId);
-        if (nextBowler) {
+        let nextIndex = (currentIndex + 1) % sortedBowlers.length;
+        let attempts = 0;
+
+        // Skip the previous bowler (the one who just finished - can't bowl consecutive overs)
+        while (sortedBowlers[nextIndex].id === currentBowlerId && attempts < sortedBowlers.length) {
+          nextIndex = (nextIndex + 1) % sortedBowlers.length;
+          attempts++;
+        }
+
+        const nextBowler = sortedBowlers[nextIndex];
+        if (nextBowler && nextBowler.id !== currentBowlerId) {
           const bowlerWithStats = allBowlers.find(b => b.id === nextBowler.id) || nextBowler;
           setCurrentBowler({ ...bowlerWithStats });
         }
