@@ -9,13 +9,13 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Keyboard,
-  TouchableWithoutFeedback,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
-import AutocompleteInput from '../components/AutocompleteInput';
+import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import { colors, spacing, fontWeights, shadows } from '../utils/theme';
 
 // Dropdown Component (same pattern as MatchSetupScreen)
@@ -125,6 +125,13 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   const [venue, setVenue] = useState(existingData?.venue || '');
   const [description, setDescription] = useState(existingData?.description || '');
 
+  // Team name edit modal state
+  const [teamNameModal, setTeamNameModal] = useState({
+    visible: false,
+    index: null,
+    currentName: '',
+  });
+
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -163,6 +170,28 @@ const TournamentCreateScreen = ({ navigation, route }) => {
       updated[index] = value;
       return updated;
     });
+  };
+
+  const openTeamNameModal = (index) => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRST';
+    const currentName = teamNames[index] || '';
+    setTeamNameModal({
+      visible: true,
+      index,
+      currentName,
+      defaultName: `Team ${alphabet[index] || index + 1}`,
+    });
+  };
+
+  const handleTeamNameModalSave = (newName) => {
+    if (teamNameModal.index !== null) {
+      handleTeamNameChange(teamNameModal.index, newName);
+    }
+    setTeamNameModal({ visible: false, index: null, currentName: '' });
+  };
+
+  const closeTeamNameModal = () => {
+    setTeamNameModal({ visible: false, index: null, currentName: '' });
   };
 
   const handleSubmit = async () => {
@@ -234,13 +263,16 @@ const TournamentCreateScreen = ({ navigation, route }) => {
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           <Animated.View
             style={{
               opacity: fadeAnim,
@@ -305,22 +337,38 @@ const TournamentCreateScreen = ({ navigation, route }) => {
             {/* Team Names */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Team Names</Text>
-              <Text style={styles.sectionHint}>Leave blank for default names (Team A, Team B...)</Text>
-              <View style={styles.inputCard}>
+              <Text style={styles.sectionHint}>Tap to edit team names</Text>
+              <View style={styles.teamNamesCard}>
                 {teamNames.map((teamName, index) => {
                   const alphabet = 'ABCDEFGHIJKLMNOPQRST';
                   const defaultName = `Team ${alphabet[index] || index + 1}`;
+                  const displayName = teamName?.trim() || defaultName;
+                  const isDefault = !teamName?.trim();
                   return (
                     <View key={index}>
-                      <AutocompleteInput
-                        type="team"
-                        value={teamName}
-                        onChangeText={(val) => handleTeamNameChange(index, val)}
-                        placeholder={defaultName}
-                        maxLength={20}
-                        returnKeyType="done"
-                        inputStyle={styles.teamNameInput}
-                      />
+                      <TouchableOpacity
+                        style={styles.teamNameItem}
+                        onPress={() => openTeamNameModal(index)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.teamNameLeft}>
+                          <View style={styles.teamNumberBadge}>
+                            <Text style={styles.teamNumberText}>{index + 1}</Text>
+                          </View>
+                          <Text
+                            style={[
+                              styles.teamNameText,
+                              isDefault && styles.teamNameTextDefault,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {displayName}
+                          </Text>
+                        </View>
+                        <View style={styles.editIconContainer}>
+                          <Text style={styles.editIcon}>✎</Text>
+                        </View>
+                      </TouchableOpacity>
                       {index < teamNames.length - 1 && <View style={styles.teamDivider} />}
                     </View>
                   );
@@ -388,8 +436,19 @@ const TournamentCreateScreen = ({ navigation, route }) => {
               )}
             </TouchableOpacity>
           </Animated.View>
-        </TouchableWithoutFeedback>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Team Name Edit Modal */}
+      <PlayerNameEditModal
+        visible={teamNameModal.visible}
+        initialValue={teamNameModal.currentName}
+        title={`Edit Team ${teamNameModal.index !== null ? teamNameModal.index + 1 : ''}`}
+        placeholder={teamNameModal.defaultName || 'Enter team name'}
+        type="team"
+        onSave={handleTeamNameModalSave}
+        onClose={closeTeamNameModal}
+      />
     </SafeAreaView>
   );
 };
@@ -484,18 +543,61 @@ const styles = StyleSheet.create({
   teamDivider: {
     height: 1,
     backgroundColor: '#f1f5f9',
-    marginVertical: spacing.sm,
+    marginHorizontal: spacing.md,
   },
-  teamNameInput: {
+  teamNamesCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    ...shadows.small,
+  },
+  teamNameItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: spacing.lg,
+  },
+  teamNameLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  teamNumberBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#fef3c7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  teamNumberText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#d97706',
+  },
+  teamNameText: {
     fontSize: 15,
+    fontWeight: fontWeights.semibold,
+    color: '#1e293b',
+    flex: 1,
+  },
+  teamNameTextDefault: {
+    color: '#94a3b8',
     fontWeight: fontWeights.medium,
-    color: '#0f172a',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    borderRadius: 0,
-    marginVertical: 0,
+  },
+  editIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#f1f5f9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  editIcon: {
+    fontSize: 14,
+    color: '#64748b',
   },
   detailInput: {
     fontSize: 15,
