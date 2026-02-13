@@ -243,8 +243,9 @@ const MatchSetupScreen = ({ navigation, route }) => {
               venue: tournament.venue,
               tournamentName: tournament.name,
             });
-            // Store completed matches for determining next teams
-            setCompletedMatches(tournament.matches || []);
+            // Store only completed matches for determining next teams
+            const completed = (tournament.matches || []).filter(m => m.status === 'completed');
+            setCompletedMatches(completed);
             // Update settings
             setOvers(tournament.totalOvers?.toString() || '4');
             setPlayersPerTeam(tournament.playersPerTeam?.toString() || '11');

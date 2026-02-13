@@ -15,8 +15,15 @@ const TournamentTVScoreboard = () => {
   const [matchData, setMatchData] = useState(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
+  const [debugInfo, setDebugInfo] = useState("");
   const socketRef = useRef(null);
   const matchesRef = useRef([]);
+  const selectedMatchIdRef = useRef(null);
+
+  // Keep ref in sync
+  useEffect(() => {
+    selectedMatchIdRef.current = selectedMatchId;
+  }, [selectedMatchId]);
 
   // Fetch match overlay data
   const fetchMatchData = useCallback(async (matchId) => {
@@ -24,11 +31,13 @@ const TournamentTVScoreboard = () => {
     try {
       const res = await fetch(`${API_URL}/api/public/overlay/${matchId}`);
       const json = await res.json();
-      if (json.success) {
+      if (json.success && json.data) {
         setMatchData(json.data);
+        setDebugInfo(`Updated: ${new Date().toLocaleTimeString()}`);
       }
     } catch (err) {
       console.error("Failed to fetch match data:", err);
+      setDebugInfo(`Error: ${err.message}`);
     }
   }, []);
 
@@ -48,7 +57,7 @@ const TournamentTVScoreboard = () => {
         );
         if (liveMatch) {
           setSelectedMatchId(prev => prev || liveMatch._id);
-        } else if (m?.length > 0 && !selectedMatchId) {
+        } else if (m?.length > 0 && !selectedMatchIdRef.current) {
           setSelectedMatchId(m[0]._id);
         }
       } else {
@@ -83,6 +92,7 @@ const TournamentTVScoreboard = () => {
     socketRef.current = socket;
 
     socket.on("connect", () => {
+      console.log("Socket connected");
       setConnected(true);
       // Join rooms for all current matches
       matchesRef.current.forEach(match => {
@@ -91,30 +101,32 @@ const TournamentTVScoreboard = () => {
     });
 
     socket.on("disconnect", () => {
+      console.log("Socket disconnected");
       setConnected(false);
     });
 
-    socket.on("score-updated", () => {
+    socket.on("score-updated", (payload) => {
+      console.log("Score updated event:", payload);
       // Refetch current match data
-      if (selectedMatchId) {
-        fetchMatchData(selectedMatchId);
+      if (selectedMatchIdRef.current) {
+        fetchMatchData(selectedMatchIdRef.current);
       }
       fetchTournament();
     });
 
-    // Aggressive polling for real-time feel (every 2 seconds)
+    // Very aggressive polling for real-time feel (every 1.5 seconds)
     const refreshInterval = setInterval(() => {
-      if (selectedMatchId) {
-        fetchMatchData(selectedMatchId);
+      if (selectedMatchIdRef.current) {
+        fetchMatchData(selectedMatchIdRef.current);
       }
       fetchTournament();
-    }, 2000);
+    }, 1500);
 
     return () => {
       socket.disconnect();
       clearInterval(refreshInterval);
     };
-  }, []);
+  }, [fetchMatchData, fetchTournament]);
 
   // Join new match rooms when matches list updates
   useEffect(() => {
@@ -124,13 +136,6 @@ const TournamentTVScoreboard = () => {
       });
     }
   }, [matches]);
-
-  // Refetch match data when selectedMatchId changes
-  useEffect(() => {
-    if (selectedMatchId) {
-      fetchMatchData(selectedMatchId);
-    }
-  }, [selectedMatchId]);
 
   if (error) {
     return (
@@ -151,17 +156,21 @@ const TournamentTVScoreboard = () => {
   }
 
   const liveMatches = matches.filter(m => m.status === 'in_progress' || m.status === 'innings_break');
-  const otherMatches = matches.filter(m => m.status !== 'in_progress' && m.status !== 'innings_break');
+  const completedMatches = matches.filter(m => m.status === 'completed');
+  const otherMatches = matches.filter(m => m.status !== 'in_progress' && m.status !== 'innings_break' && m.status !== 'completed');
 
   return (
     <TVContainer>
       {/* Left Panel - Match List */}
       <LeftPanel>
-        <TournamentName>{tournament.name}</TournamentName>
+        <TournamentHeader>
+          <TournamentName>{tournament.name}</TournamentName>
+          <TournamentMeta>{matches.length} matches</TournamentMeta>
+        </TournamentHeader>
 
         <MatchList>
           {liveMatches.length > 0 && (
-            <>
+            <MatchSection>
               <MatchGroupLabel $live>LIVE</MatchGroupLabel>
               {liveMatches.map(match => (
                 <MatchCard
@@ -170,68 +179,97 @@ const TournamentTVScoreboard = () => {
                   $live
                   onClick={() => setSelectedMatchId(match._id)}
                 >
-                  <MatchTeamRow>
-                    <TeamInitial>{(match.teamA?.name || "A")[0]}</TeamInitial>
-                    <TeamNameSmall>{match.teamA?.name || "Team A"}</TeamNameSmall>
-                    <MatchScoreSmall>
-                      {match.innings1?.runs || 0}/{match.innings1?.wickets || 0}
-                    </MatchScoreSmall>
-                  </MatchTeamRow>
-                  <MatchTeamRow>
-                    <TeamInitial $alt>{(match.teamB?.name || "B")[0]}</TeamInitial>
-                    <TeamNameSmall>{match.teamB?.name || "Team B"}</TeamNameSmall>
-                    <MatchScoreSmall>
-                      {match.innings2?.runs || 0}/{match.innings2?.wickets || 0}
-                    </MatchScoreSmall>
-                  </MatchTeamRow>
-                  <LiveDot />
+                  <MatchTeams>
+                    <TeamRow>
+                      <TeamBadge>{(match.teamA?.name || "A")[0]}</TeamBadge>
+                      <TeamName>{match.teamA?.name || "Team A"}</TeamName>
+                      <TeamScore>{match.innings1?.runs ?? 0}/{match.innings1?.wickets ?? 0}</TeamScore>
+                    </TeamRow>
+                    <TeamRow>
+                      <TeamBadge $alt>{(match.teamB?.name || "B")[0]}</TeamBadge>
+                      <TeamName>{match.teamB?.name || "Team B"}</TeamName>
+                      <TeamScore>{match.innings2?.runs ?? 0}/{match.innings2?.wickets ?? 0}</TeamScore>
+                    </TeamRow>
+                  </MatchTeams>
+                  <LivePulse />
                 </MatchCard>
               ))}
-            </>
+            </MatchSection>
           )}
 
-          {otherMatches.length > 0 && (
-            <>
-              <MatchGroupLabel>MATCHES</MatchGroupLabel>
-              {otherMatches.slice(0, 4).map(match => (
+          {completedMatches.length > 0 && (
+            <MatchSection>
+              <MatchGroupLabel>COMPLETED</MatchGroupLabel>
+              {completedMatches.slice(0, 5).map(match => (
                 <MatchCard
                   key={match._id}
                   $selected={selectedMatchId === match._id}
                   onClick={() => setSelectedMatchId(match._id)}
                 >
-                  <MatchTeamRow>
-                    <TeamInitial>{(match.teamA?.name || "A")[0]}</TeamInitial>
-                    <TeamNameSmall>{match.teamA?.name || "Team A"}</TeamNameSmall>
-                    <MatchScoreSmall>
-                      {match.innings1?.runs ?? "-"}/{match.innings1?.wickets ?? "-"}
-                    </MatchScoreSmall>
-                  </MatchTeamRow>
-                  <MatchTeamRow>
-                    <TeamInitial $alt>{(match.teamB?.name || "B")[0]}</TeamInitial>
-                    <TeamNameSmall>{match.teamB?.name || "Team B"}</TeamNameSmall>
-                    <MatchScoreSmall>
-                      {match.innings2?.runs ?? "-"}/{match.innings2?.wickets ?? "-"}
-                    </MatchScoreSmall>
-                  </MatchTeamRow>
+                  <MatchTeams>
+                    <TeamRow>
+                      <TeamBadge>{(match.teamA?.name || "A")[0]}</TeamBadge>
+                      <TeamName>{match.teamA?.name || "Team A"}</TeamName>
+                      <TeamScore>{match.innings1?.runs ?? "-"}/{match.innings1?.wickets ?? "-"}</TeamScore>
+                    </TeamRow>
+                    <TeamRow>
+                      <TeamBadge $alt>{(match.teamB?.name || "B")[0]}</TeamBadge>
+                      <TeamName>{match.teamB?.name || "Team B"}</TeamName>
+                      <TeamScore>{match.innings2?.runs ?? "-"}/{match.innings2?.wickets ?? "-"}</TeamScore>
+                    </TeamRow>
+                  </MatchTeams>
                 </MatchCard>
               ))}
-            </>
+            </MatchSection>
+          )}
+
+          {otherMatches.length > 0 && (
+            <MatchSection>
+              <MatchGroupLabel>UPCOMING</MatchGroupLabel>
+              {otherMatches.slice(0, 3).map(match => (
+                <MatchCard
+                  key={match._id}
+                  $selected={selectedMatchId === match._id}
+                  $upcoming
+                  onClick={() => setSelectedMatchId(match._id)}
+                >
+                  <MatchTeams>
+                    <TeamRow>
+                      <TeamBadge>{(match.teamA?.name || "A")[0]}</TeamBadge>
+                      <TeamName>{match.teamA?.name || "Team A"}</TeamName>
+                    </TeamRow>
+                    <TeamRow>
+                      <TeamBadge $alt>{(match.teamB?.name || "B")[0]}</TeamBadge>
+                      <TeamName>{match.teamB?.name || "Team B"}</TeamName>
+                    </TeamRow>
+                  </MatchTeams>
+                </MatchCard>
+              ))}
+            </MatchSection>
           )}
         </MatchList>
 
-        <ConnectionStatus $connected={connected}>
-          {connected ? "LIVE" : "CONNECTING..."}
-        </ConnectionStatus>
+        <StatusBar>
+          <StatusIndicator $connected={connected} />
+          <StatusText>{connected ? "LIVE" : "CONNECTING"}</StatusText>
+          <DebugText>{debugInfo}</DebugText>
+        </StatusBar>
       </LeftPanel>
 
       {/* Main Scoreboard */}
       <MainPanel>
         {matchData ? (
           <ScoreboardContent data={matchData} />
+        ) : selectedMatchId ? (
+          <LoadingState>
+            <LoadingSpinner />
+            <span>Loading match...</span>
+          </LoadingState>
         ) : (
-          <NoMatchSelected>
-            <span>Select a match</span>
-          </NoMatchSelected>
+          <EmptyState>
+            <EmptyIcon>🏏</EmptyIcon>
+            <EmptyText>Select a match to view</EmptyText>
+          </EmptyState>
         )}
       </MainPanel>
     </TVContainer>
@@ -245,153 +283,155 @@ const ScoreboardContent = ({ data }) => {
   const bowlingTeam = data.bowlingTeam || data.teamB?.name || "Bowling";
 
   return (
-    <ScoreboardGrid>
-      {/* Top Row - Main Score */}
-      <TopSection>
-        {/* Status Badge */}
-        <StatusBadge $status={data.status}>
+    <Scoreboard>
+      {/* Header with Status */}
+      <ScoreboardHeader>
+        <MatchStatus $status={data.status}>
           {data.status === "in_progress" ? "LIVE" : data.status?.toUpperCase().replace("_", " ")}
-        </StatusBadge>
+        </MatchStatus>
+        <MatchInfo>
+          {data.teamA?.name} vs {data.teamB?.name}
+        </MatchInfo>
+      </ScoreboardHeader>
 
-        {/* Main Score Display */}
-        <MainScoreBlock>
-          <BattingTeamName>{battingTeam}</BattingTeamName>
-          <ScoreDisplay>
-            <BigRuns>{data.runs || 0}</BigRuns>
-            <ScoreDivider>/</ScoreDivider>
-            <BigWickets>{data.wickets || 0}</BigWickets>
-            <OversText>({data.overs || "0.0"})</OversText>
-          </ScoreDisplay>
-        </MainScoreBlock>
+      {/* Main Score Display */}
+      <MainScore>
+        <BattingTeam>{battingTeam}</BattingTeam>
+        <ScoreRow>
+          <RunsDisplay>{data.runs ?? 0}</RunsDisplay>
+          <Divider>/</Divider>
+          <WicketsDisplay>{data.wickets ?? 0}</WicketsDisplay>
+          <OversDisplay>({data.overs || "0.0"} ov)</OversDisplay>
+        </ScoreRow>
+        <RunRateDisplay>Run Rate: {data.runRate || "0.00"}</RunRateDisplay>
+      </MainScore>
 
-        {/* Run Rate & Target Info */}
-        <RateBlock>
-          <RateItem>
-            <RateLabel>CRR</RateLabel>
-            <RateValue>{data.runRate || "0.00"}</RateValue>
-          </RateItem>
-          {isSecondInnings && data.target && (
-            <>
-              <RateItem $highlight>
-                <RateLabel>TARGET</RateLabel>
-                <RateValue>{data.target}</RateValue>
-              </RateItem>
-              <RateItem $highlight>
-                <RateLabel>NEED</RateLabel>
-                <RateValue>{data.requiredRuns > 0 ? data.requiredRuns : 0}</RateValue>
-              </RateItem>
-              <RateItem>
-                <RateLabel>BALLS</RateLabel>
-                <RateValue>{data.ballsRemaining || 0}</RateValue>
-              </RateItem>
-              <RateItem $highlight>
-                <RateLabel>RRR</RateLabel>
-                <RateValue>{data.requiredRunRate || "-"}</RateValue>
-              </RateItem>
-            </>
-          )}
-        </RateBlock>
-      </TopSection>
+      {/* Target Info for 2nd Innings */}
+      {isSecondInnings && data.target && (
+        <TargetBar>
+          <TargetItem>
+            <TargetLabel>TARGET</TargetLabel>
+            <TargetValue>{data.target}</TargetValue>
+          </TargetItem>
+          <TargetItem $highlight>
+            <TargetLabel>NEED</TargetLabel>
+            <TargetValue>{Math.max(0, data.requiredRuns || 0)}</TargetValue>
+          </TargetItem>
+          <TargetItem>
+            <TargetLabel>BALLS</TargetLabel>
+            <TargetValue>{data.ballsRemaining || 0}</TargetValue>
+          </TargetItem>
+          <TargetItem $highlight>
+            <TargetLabel>REQ RR</TargetLabel>
+            <TargetValue>{data.requiredRunRate || "-"}</TargetValue>
+          </TargetItem>
+        </TargetBar>
+      )}
 
-      {/* Middle Row - Batsmen & Bowler */}
-      <MiddleSection>
+      {/* Players Row */}
+      <PlayersRow>
         {/* Batsmen */}
-        <PlayersBlock>
-          <BlockTitle>BATTING</BlockTitle>
-          <BatsmenContainer>
+        <PlayerCard>
+          <CardTitle>BATTING</CardTitle>
+          <BatsmenList>
             {data.striker && (
-              <BatsmanRow $striker>
+              <BatsmanItem $striker>
                 <BatsmanName>{data.striker.name} *</BatsmanName>
-                <BatsmanStats>
-                  <StatBig>{data.striker.runs}</StatBig>
-                  <StatSmall>({data.striker.balls})</StatSmall>
-                  <StatMeta>4s:{data.striker.fours} 6s:{data.striker.sixes}</StatMeta>
-                </BatsmanStats>
-              </BatsmanRow>
+                <BatsmanScore>
+                  <Big>{data.striker.runs}</Big>
+                  <Small>({data.striker.balls})</Small>
+                </BatsmanScore>
+                <BatsmanMeta>
+                  4s: {data.striker.fours} | 6s: {data.striker.sixes} | SR: {data.striker.strikeRate}
+                </BatsmanMeta>
+              </BatsmanItem>
             )}
             {data.nonStriker && (
-              <BatsmanRow>
+              <BatsmanItem>
                 <BatsmanName>{data.nonStriker.name}</BatsmanName>
-                <BatsmanStats>
-                  <StatBig>{data.nonStriker.runs}</StatBig>
-                  <StatSmall>({data.nonStriker.balls})</StatSmall>
-                  <StatMeta>4s:{data.nonStriker.fours} 6s:{data.nonStriker.sixes}</StatMeta>
-                </BatsmanStats>
-              </BatsmanRow>
+                <BatsmanScore>
+                  <Big>{data.nonStriker.runs}</Big>
+                  <Small>({data.nonStriker.balls})</Small>
+                </BatsmanScore>
+                <BatsmanMeta>
+                  4s: {data.nonStriker.fours} | 6s: {data.nonStriker.sixes} | SR: {data.nonStriker.strikeRate}
+                </BatsmanMeta>
+              </BatsmanItem>
             )}
-          </BatsmenContainer>
+          </BatsmenList>
           {data.partnership && (data.partnership.runs > 0 || data.partnership.balls > 0) && (
-            <PartnershipText>
+            <Partnership>
               Partnership: {data.partnership.runs} ({data.partnership.balls})
-            </PartnershipText>
+            </Partnership>
           )}
-        </PlayersBlock>
+        </PlayerCard>
 
         {/* Bowler */}
-        <PlayersBlock>
-          <BlockTitle>BOWLING</BlockTitle>
-          {data.bowler && (
-            <BowlerContainer>
+        <PlayerCard>
+          <CardTitle>BOWLING</CardTitle>
+          {data.bowler ? (
+            <BowlerInfo>
               <BowlerName>{data.bowler.name}</BowlerName>
               <BowlerStats>
-                <BowlerFigure>
-                  <span>{data.bowler.overs}</span>
-                  <small>O</small>
-                </BowlerFigure>
-                <BowlerFigure>
-                  <span>{data.bowler.maidens}</span>
-                  <small>M</small>
-                </BowlerFigure>
-                <BowlerFigure>
-                  <span>{data.bowler.runs}</span>
-                  <small>R</small>
-                </BowlerFigure>
-                <BowlerFigure $highlight>
-                  <span>{data.bowler.wickets}</span>
-                  <small>W</small>
-                </BowlerFigure>
-                <BowlerFigure>
-                  <span>{data.bowler.economy}</span>
-                  <small>EC</small>
-                </BowlerFigure>
+                <BowlerStat>
+                  <Big>{data.bowler.overs}</Big>
+                  <Label>Ov</Label>
+                </BowlerStat>
+                <BowlerStat>
+                  <Big>{data.bowler.maidens}</Big>
+                  <Label>M</Label>
+                </BowlerStat>
+                <BowlerStat>
+                  <Big>{data.bowler.runs}</Big>
+                  <Label>R</Label>
+                </BowlerStat>
+                <BowlerStat $highlight>
+                  <Big>{data.bowler.wickets}</Big>
+                  <Label>W</Label>
+                </BowlerStat>
+                <BowlerStat>
+                  <Big>{data.bowler.economy}</Big>
+                  <Label>Ec</Label>
+                </BowlerStat>
               </BowlerStats>
-            </BowlerContainer>
+            </BowlerInfo>
+          ) : (
+            <NoBowler>No bowler data</NoBowler>
           )}
-        </PlayersBlock>
+        </PlayerCard>
 
         {/* This Over */}
-        <PlayersBlock>
-          <BlockTitle>THIS OVER</BlockTitle>
-          <ThisOverContainer>
+        <PlayerCard>
+          <CardTitle>THIS OVER</CardTitle>
+          <BallsContainer>
             {data.thisOver && data.thisOver.length > 0 ? (
               data.thisOver.map((ball, idx) => (
-                <BallCircle key={idx} $type={getBallType(ball)}>
+                <Ball key={idx} $type={getBallType(ball)}>
                   {formatBall(ball)}
-                </BallCircle>
+                </Ball>
               ))
             ) : (
-              <NewOverText>New Over</NewOverText>
+              <NewOver>New Over</NewOver>
             )}
-          </ThisOverContainer>
-          <ExtrasText>
-            Extras: {data.extras?.total || 0} (Wd:{data.extras?.wides || 0} Nb:{data.extras?.noBalls || 0} B:{data.extras?.byes || 0} Lb:{data.extras?.legByes || 0})
-          </ExtrasText>
-        </PlayersBlock>
-      </MiddleSection>
+          </BallsContainer>
+          <Extras>
+            Extras: {data.extras?.total || 0}
+            (Wd: {data.extras?.wides || 0}, Nb: {data.extras?.noBalls || 0}, B: {data.extras?.byes || 0}, Lb: {data.extras?.legByes || 0})
+          </Extras>
+        </PlayerCard>
+      </PlayersRow>
 
-      {/* Bottom Row - First Innings & Result */}
-      <BottomSection>
+      {/* Footer */}
+      <ScoreboardFooter>
         {isSecondInnings && data.firstInnings && (
-          <FirstInningsBlock>
+          <FirstInnings>
             {data.firstInnings.battingTeam}: {data.firstInnings.runs}/{data.firstInnings.wickets} ({data.firstInnings.overs} ov)
-          </FirstInningsBlock>
+          </FirstInnings>
         )}
-        {data.status === "completed" && data.result && (
-          <ResultBlock>{data.result}</ResultBlock>
-        )}
-        <BrandBlock>CricZone</BrandBlock>
-      </BottomSection>
-    </ScoreboardGrid>
+        {data.result && <ResultText>{data.result}</ResultText>}
+        <Brand>CricZone</Brand>
+      </ScoreboardFooter>
+    </Scoreboard>
   );
 };
 
@@ -429,8 +469,8 @@ const formatBall = (ball) => {
 
 // Animations
 const pulse = keyframes`
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.1); }
 `;
 
 const spin = keyframes`
@@ -438,128 +478,161 @@ const spin = keyframes`
   to { transform: rotate(360deg); }
 `;
 
-// Styled Components - TV Optimized (Landscape, No Scroll)
+// Styled Components
 const TVContainer = styled.div`
   width: 100vw;
   height: 100vh;
   display: flex;
-  background: linear-gradient(135deg, #0a0f1c 0%, #1a1f3c 100%);
+  background: linear-gradient(135deg, #0c1222 0%, #1a2744 50%, #0c1222 100%);
   color: #fff;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   overflow: hidden;
 `;
 
 const LeftPanel = styled.aside`
-  width: 280px;
-  background: rgba(0, 0, 0, 0.4);
+  width: 300px;
+  min-width: 300px;
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
+  border-right: 2px solid rgba(255, 255, 255, 0.1);
+`;
+
+const TournamentHeader = styled.div`
   padding: 20px;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 `;
 
 const TournamentName = styled.h1`
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 800;
   color: #60a5fa;
-  margin: 0 0 20px 0;
-  padding-bottom: 15px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 0 0 4px 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 `;
 
+const TournamentMeta = styled.div`
+  font-size: 12px;
+  color: #64748b;
+`;
+
 const MatchList = styled.div`
   flex: 1;
   overflow-y: auto;
+  padding: 12px;
   &::-webkit-scrollbar { width: 4px; }
   &::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
 `;
 
+const MatchSection = styled.div`
+  margin-bottom: 16px;
+`;
+
 const MatchGroupLabel = styled.div`
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   color: ${props => props.$live ? '#22c55e' : '#64748b'};
-  margin: 12px 0 8px;
-  letter-spacing: 1px;
+  margin-bottom: 8px;
+  letter-spacing: 1.5px;
 `;
 
 const MatchCard = styled.div`
   background: ${props => props.$selected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255, 255, 255, 0.05)'};
   border: 2px solid ${props => props.$selected ? '#3b82f6' : 'transparent'};
-  border-radius: 10px;
-  padding: 10px;
+  border-radius: 12px;
+  padding: 12px;
   margin-bottom: 8px;
   cursor: pointer;
   position: relative;
   transition: all 0.2s;
 
   ${props => props.$live && css`
-    border-color: ${props.$selected ? '#22c55e' : 'rgba(34, 197, 94, 0.4)'};
+    border-color: ${props.$selected ? '#22c55e' : 'rgba(34, 197, 94, 0.5)'};
     background: ${props.$selected ? 'rgba(34, 197, 94, 0.2)' : 'rgba(34, 197, 94, 0.1)'};
   `}
 
-  &:hover {
-    background: rgba(59, 130, 246, 0.2);
-  }
+  ${props => props.$upcoming && css`opacity: 0.6;`}
+
+  &:hover { background: rgba(255, 255, 255, 0.1); }
 `;
 
-const MatchTeamRow = styled.div`
+const MatchTeams = styled.div``;
+
+const TeamRow = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 10px;
+  margin-bottom: 6px;
   &:last-child { margin-bottom: 0; }
 `;
 
-const TeamInitial = styled.div`
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+const TeamBadge = styled.div`
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   background: ${props => props.$alt ? '#8b5cf6' : '#3b82f6'};
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
 `;
 
-const TeamNameSmall = styled.span`
+const TeamName = styled.span`
   flex: 1;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   color: #e2e8f0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 `;
 
-const MatchScoreSmall = styled.span`
-  font-size: 12px;
-  font-weight: 700;
+const TeamScore = styled.span`
+  font-size: 14px;
+  font-weight: 800;
   color: #60a5fa;
 `;
 
-const LiveDot = styled.div`
+const LivePulse = styled.div`
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 8px;
-  height: 8px;
+  top: 10px;
+  right: 10px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #22c55e;
   animation: ${pulse} 1.5s ease-in-out infinite;
 `;
 
-const ConnectionStatus = styled.div`
-  padding: 10px;
-  text-align: center;
+const StatusBar = styled.div`
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const StatusIndicator = styled.div`
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: ${props => props.$connected ? '#22c55e' : '#f59e0b'};
+  ${props => props.$connected && css`animation: ${pulse} 2s ease-in-out infinite;`}
+`;
+
+const StatusText = styled.span`
   font-size: 12px;
   font-weight: 700;
   color: ${props => props.$connected ? '#22c55e' : '#f59e0b'};
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  margin-top: 10px;
-  ${props => props.$connected && css`animation: ${pulse} 2s ease-in-out infinite;`}
+`;
+
+const DebugText = styled.span`
+  font-size: 10px;
+  color: #64748b;
+  margin-left: auto;
 `;
 
 const MainPanel = styled.main`
@@ -570,37 +643,53 @@ const MainPanel = styled.main`
   overflow: hidden;
 `;
 
-const NoMatchSelected = styled.div`
+const LoadingState = styled.div`
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 16px;
+  color: #94a3b8;
+`;
+
+const EmptyState = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+`;
+
+const EmptyIcon = styled.div`
+  font-size: 64px;
+  margin-bottom: 16px;
+`;
+
+const EmptyText = styled.div`
   font-size: 24px;
   color: #64748b;
 `;
 
-const ScoreboardGrid = styled.div`
+const Scoreboard = styled.div`
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 `;
 
-const TopSection = styled.div`
+const ScoreboardHeader = styled.div`
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 20px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 16px;
+  gap: 20px;
 `;
 
-const StatusBadge = styled.div`
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 14px;
+const MatchStatus = styled.div`
+  padding: 10px 24px;
+  border-radius: 10px;
+  font-size: 16px;
   font-weight: 800;
-  letter-spacing: 1px;
+  letter-spacing: 2px;
   ${props => props.$status === 'in_progress' && css`
     background: #22c55e;
     animation: ${pulse} 2s ease-in-out infinite;
@@ -610,212 +699,227 @@ const StatusBadge = styled.div`
   ${props => !['in_progress', 'completed', 'innings_break'].includes(props.$status) && css`background: #64748b;`}
 `;
 
-const MainScoreBlock = styled.div`
-  flex: 1;
+const MatchInfo = styled.div`
+  font-size: 18px;
+  color: #94a3b8;
 `;
 
-const BattingTeamName = styled.div`
-  font-size: 20px;
-  font-weight: 600;
+const MainScore = styled.div`
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 20px;
+  padding: 30px 40px;
+  text-align: center;
+`;
+
+const BattingTeam = styled.div`
+  font-size: 28px;
+  font-weight: 700;
   color: #60a5fa;
-  margin-bottom: 4px;
+  margin-bottom: 10px;
 `;
 
-const ScoreDisplay = styled.div`
+const ScoreRow = styled.div`
   display: flex;
   align-items: baseline;
-  gap: 2px;
+  justify-content: center;
+  gap: 8px;
 `;
 
-const BigRuns = styled.span`
-  font-size: 72px;
-  font-weight: 800;
+const RunsDisplay = styled.span`
+  font-size: 100px;
+  font-weight: 900;
   line-height: 1;
   color: #fff;
 `;
 
-const ScoreDivider = styled.span`
-  font-size: 48px;
-  color: #64748b;
-  margin: 0 4px;
+const Divider = styled.span`
+  font-size: 60px;
+  color: #475569;
 `;
 
-const BigWickets = styled.span`
-  font-size: 48px;
-  font-weight: 700;
-  color: #f87171;
-`;
-
-const OversText = styled.span`
-  font-size: 24px;
-  color: #94a3b8;
-  margin-left: 12px;
-`;
-
-const RateBlock = styled.div`
-  display: flex;
-  gap: 16px;
-`;
-
-const RateItem = styled.div`
-  text-align: center;
-  padding: 10px 16px;
-  background: ${props => props.$highlight ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.05)'};
-  border-radius: 10px;
-  min-width: 70px;
-`;
-
-const RateLabel = styled.div`
-  font-size: 10px;
-  color: #94a3b8;
-  font-weight: 600;
-  letter-spacing: 1px;
-  margin-bottom: 4px;
-`;
-
-const RateValue = styled.div`
-  font-size: 22px;
+const WicketsDisplay = styled.span`
+  font-size: 60px;
   font-weight: 800;
+  color: #ef4444;
+`;
+
+const OversDisplay = styled.span`
+  font-size: 28px;
+  color: #94a3b8;
+  margin-left: 16px;
+`;
+
+const RunRateDisplay = styled.div`
+  font-size: 18px;
+  color: #22c55e;
+  margin-top: 12px;
+`;
+
+const TargetBar = styled.div`
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+`;
+
+const TargetItem = styled.div`
+  text-align: center;
+  padding: 16px 28px;
+  background: ${props => props.$highlight ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255, 255, 255, 0.08)'};
+  border-radius: 14px;
+  border: 2px solid ${props => props.$highlight ? 'rgba(239, 68, 68, 0.5)' : 'transparent'};
+`;
+
+const TargetLabel = styled.div`
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+`;
+
+const TargetValue = styled.div`
+  font-size: 32px;
+  font-weight: 900;
   color: #fff;
 `;
 
-const MiddleSection = styled.div`
+const PlayersRow = styled.div`
   flex: 1;
   display: flex;
-  gap: 16px;
+  gap: 20px;
 `;
 
-const PlayersBlock = styled.div`
+const PlayerCard = styled.div`
   flex: 1;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.4);
   border-radius: 16px;
-  padding: 16px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
 `;
 
-const BlockTitle = styled.div`
-  font-size: 12px;
-  font-weight: 700;
+const CardTitle = styled.div`
+  font-size: 13px;
+  font-weight: 800;
   color: #94a3b8;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
+  letter-spacing: 1.5px;
+  margin-bottom: 16px;
 `;
 
-const BatsmenContainer = styled.div`
+const BatsmenList = styled.div`
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 `;
 
-const BatsmanRow = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
+const BatsmanItem = styled.div`
+  padding: 14px;
   background: ${props => props.$striker ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)'};
-  border-radius: 10px;
+  border-radius: 12px;
   border-left: 4px solid ${props => props.$striker ? '#22c55e' : 'transparent'};
 `;
 
 const BatsmanName = styled.div`
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
   color: #fff;
-  flex: 1;
+  margin-bottom: 6px;
 `;
 
-const BatsmanStats = styled.div`
+const BatsmanScore = styled.div`
   display: flex;
   align-items: baseline;
   gap: 6px;
+  margin-bottom: 6px;
 `;
 
-const StatBig = styled.span`
-  font-size: 28px;
-  font-weight: 800;
+const Big = styled.span`
+  font-size: 32px;
+  font-weight: 900;
   color: #fff;
 `;
 
-const StatSmall = styled.span`
+const Small = styled.span`
   font-size: 14px;
   color: #94a3b8;
 `;
 
-const StatMeta = styled.span`
+const BatsmanMeta = styled.div`
   font-size: 12px;
   color: #64748b;
-  margin-left: 8px;
 `;
 
-const PartnershipText = styled.div`
-  margin-top: 10px;
-  padding: 8px 12px;
-  background: rgba(96, 165, 250, 0.1);
+const Partnership = styled.div`
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(96, 165, 250, 0.15);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   color: #60a5fa;
   text-align: center;
 `;
 
-const BowlerContainer = styled.div`
+const BowlerInfo = styled.div`
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
 `;
 
 const BowlerName = styled.div`
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: #fff;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 `;
 
 const BowlerStats = styled.div`
   display: flex;
-  gap: 12px;
+  gap: 16px;
 `;
 
-const BowlerFigure = styled.div`
+const BowlerStat = styled.div`
   text-align: center;
-  padding: 10px 14px;
-  background: ${props => props.$highlight ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.05)'};
+  padding: 12px 16px;
+  background: ${props => props.$highlight ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255, 255, 255, 0.08)'};
   border-radius: 10px;
-
-  span {
-    display: block;
-    font-size: 24px;
-    font-weight: 800;
-    color: #fff;
-  }
-  small {
-    font-size: 10px;
-    color: #94a3b8;
-    letter-spacing: 1px;
-  }
 `;
 
-const ThisOverContainer = styled.div`
+const Label = styled.div`
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 4px;
+  letter-spacing: 1px;
+`;
+
+const NoBowler = styled.div`
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  color: #64748b;
+`;
+
+const BallsContainer = styled.div`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   flex-wrap: wrap;
 `;
 
-const BallCircle = styled.div`
-  width: 44px;
-  height: 44px;
+const Ball = styled.div`
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 800;
   ${props => {
     switch (props.$type) {
       case 'wicket': return css`background: #ef4444; color: white;`;
@@ -829,43 +933,43 @@ const BallCircle = styled.div`
   }}
 `;
 
-const NewOverText = styled.span`
+const NewOver = styled.span`
   color: #64748b;
-  font-size: 14px;
+  font-size: 16px;
 `;
 
-const ExtrasText = styled.div`
-  margin-top: 12px;
-  font-size: 12px;
+const Extras = styled.div`
+  margin-top: 16px;
+  font-size: 13px;
   color: #94a3b8;
   text-align: center;
 `;
 
-const BottomSection = styled.div`
+const ScoreboardFooter = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  background: rgba(0, 0, 0, 0.3);
+  padding: 16px 24px;
+  background: rgba(0, 0, 0, 0.4);
   border-radius: 12px;
 `;
 
-const FirstInningsBlock = styled.div`
+const FirstInnings = styled.div`
   font-size: 16px;
   color: #94a3b8;
 `;
 
-const ResultBlock = styled.div`
+const ResultText = styled.div`
   flex: 1;
   text-align: center;
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 800;
   color: #a78bfa;
 `;
 
-const BrandBlock = styled.div`
-  font-size: 16px;
-  font-weight: 700;
+const Brand = styled.div`
+  font-size: 18px;
+  font-weight: 800;
   color: #60a5fa;
 `;
 
@@ -876,7 +980,7 @@ const ErrorContainer = styled.div`
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #0a0f1c;
+  background: #0c1222;
   color: #f87171;
 `;
 
@@ -889,9 +993,10 @@ const RetryButton = styled.button`
   background: #3b82f6;
   color: white;
   border: none;
-  padding: 12px 24px;
-  border-radius: 8px;
+  padding: 14px 28px;
+  border-radius: 10px;
   font-size: 16px;
+  font-weight: 600;
   cursor: pointer;
   &:hover { background: #2563eb; }
 `;
@@ -903,7 +1008,7 @@ const LoadingContainer = styled.div`
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #0a0f1c;
+  background: #0c1222;
 `;
 
 const LoadingSpinner = styled.div`
@@ -913,10 +1018,10 @@ const LoadingSpinner = styled.div`
   border-top-color: #3b82f6;
   border-radius: 50%;
   animation: ${spin} 1s linear infinite;
-  margin-bottom: 16px;
 `;
 
 const LoadingText = styled.div`
+  margin-top: 16px;
   font-size: 18px;
   color: #94a3b8;
 `;
