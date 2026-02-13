@@ -22,6 +22,7 @@ import matchService from '../utils/matchService';
 import suggestionService from '../utils/suggestionService';
 import AutocompleteInput from '../components/AutocompleteInput';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
+import StrikerSelectModal from '../components/StrikerSelectModal';
 import { colors, spacing, borderRadius, fontSizes, fontWeights, shadows } from '../utils/theme';
 import io from 'socket.io-client';
 import { SOCKET_URL } from '../api/config';
@@ -218,6 +219,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [showRetireModal, setShowRetireModal] = useState(false);
   const [retireType, setRetireType] = useState(null); // 'retired' or 'retiredOut'
   const [retireBatsman, setRetireBatsman] = useState(null); // 'striker' or 'nonStriker'
+
+  // Striker selection modal state (after run out)
+  const [showStrikerSelectModal, setShowStrikerSelectModal] = useState(false);
+  const [strikerSelectOptions, setStrikerSelectOptions] = useState([]);
+  const [pendingRunOutData, setPendingRunOutData] = useState(null);
 
   // Striker swap animation
   const swapIconOpacity = useRef(new Animated.Value(0)).current;
@@ -780,6 +786,27 @@ const ScoreCardScreen = ({ navigation, route }) => {
     }
   };
 
+  // Handle striker selection after run out
+  const handleStrikerSelection = (selectedBatsman) => {
+    if (!pendingRunOutData) return;
+
+    const { newBatsman, survivingBatsman, updatedSurvivingBatsman } = pendingRunOutData;
+
+    // Determine positions based on selection
+    const strikerBatsman = selectedBatsman.id === newBatsman.id ? newBatsman : (updatedSurvivingBatsman || survivingBatsman);
+    const nonStrikerBatsman = selectedBatsman.id === newBatsman.id ? (updatedSurvivingBatsman || survivingBatsman) : newBatsman;
+
+    setCurrentBatsmen({
+      striker: strikerBatsman,
+      nonStriker: nonStrikerBatsman,
+    });
+
+    // Close modal and clear pending data
+    setShowStrikerSelectModal(false);
+    setStrikerSelectOptions([]);
+    setPendingRunOutData(null);
+  };
+
   // Animated rotate strike (for button press)
   const handleChangeStriker = () => {
     // Save state before action for undo
@@ -929,65 +956,59 @@ const ScoreCardScreen = ({ navigation, route }) => {
       }
     }
 
-    // Handle batsmen positioning for Run Out with runs
-    if (wicketType === 'Run Out' && runsScored > 0) {
-      // Create updated striker with runs
-      const updatedStriker = {
+    // Handle batsmen positioning for Run Out
+    if (wicketType === 'Run Out') {
+      // Create updated striker with runs (for run outs with runs scored)
+      const updatedStriker = runsScored > 0 ? {
         ...striker,
         runs: striker.runs + runsScored,
         balls: striker.balls + 1,
         fours: runsScored === 4 ? striker.fours + 1 : striker.fours,
         sixes: runsScored === 6 ? striker.sixes + 1 : striker.sixes,
-      };
+      } : striker;
 
+      // Determine the surviving batsman (the one not out)
+      const survivingBatsman = runOutBatsman === 'striker' ? nonStriker : updatedStriker;
+      const newBatsman = nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 };
+
+      // Calculate suggested striker based on runs
+      let suggestedStriker;
       if (shouldRotate) {
-        // Odd runs: batsmen have swapped positions
-        // Original striker is now at non-striker end
-        // Original non-striker is now at striker end
-        if (runOutBatsman === 'striker') {
-          // Original striker (now at NS end) is out
-          // New batsman comes to NS end
-          // Original non-striker (now at striker end) stays as striker
-          setCurrentBatsmen({
-            striker: nonStriker,
-            nonStriker: nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 },
-          });
-        } else {
-          // Original non-striker (now at striker end) is out
-          // New batsman comes to striker end
-          // Original striker (now at NS end with updated stats) stays as non-striker
-          setCurrentBatsmen({
-            striker: nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 },
-            nonStriker: updatedStriker,
-          });
-        }
+        // Odd runs: batsmen crossed
+        suggestedStriker = runOutBatsman === 'striker' ? survivingBatsman : newBatsman;
       } else {
-        // Even runs: batsmen are at original positions
-        if (runOutBatsman === 'striker') {
-          // Striker (at striker end) is out
-          // New batsman comes to striker end
-          setCurrentBatsmen({
-            striker: nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 },
-            nonStriker: nonStriker,
-          });
-        } else {
-          // Non-striker (at NS end) is out
-          // New batsman comes to NS end
-          // Striker stays with updated stats
-          setCurrentBatsmen({
-            striker: updatedStriker,
-            nonStriker: nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 },
-          });
-        }
+        // Even/0 runs: batsmen at original positions
+        suggestedStriker = runOutBatsman === 'striker' ? newBatsman : survivingBatsman;
       }
+
+      // Show striker selection modal
+      const options = [
+        {
+          ...survivingBatsman,
+          isNew: false,
+          isSuggested: suggestedStriker.id === survivingBatsman.id,
+        },
+        {
+          ...newBatsman,
+          isNew: true,
+          isSuggested: suggestedStriker.id === newBatsman.id,
+        },
+      ];
+
+      // Sort so suggested is first
+      options.sort((a, b) => (b.isSuggested ? 1 : 0) - (a.isSuggested ? 1 : 0));
+
+      setPendingRunOutData({
+        newBatsman,
+        survivingBatsman,
+        updatedSurvivingBatsman: runOutBatsman === 'nonStriker' ? updatedStriker : null,
+      });
+      setStrikerSelectOptions(options);
+      setShowStrikerSelectModal(true);
     } else {
-      // Non-runout wickets or runout with 0 runs - simple replacement
+      // Non-runout wickets - simple replacement (striker is always out)
       if (nextBatsman) {
-        if (runOutBatsman === 'nonStriker') {
-          setCurrentBatsmen(prev => ({ ...prev, nonStriker: nextBatsman }));
-        } else {
-          setCurrentBatsmen(prev => ({ ...prev, striker: nextBatsman }));
-        }
+        setCurrentBatsmen(prev => ({ ...prev, striker: nextBatsman }));
       }
     }
 
@@ -1273,43 +1294,43 @@ const ScoreCardScreen = ({ navigation, route }) => {
       sixes: runsForRotation === 6 ? striker.sixes + 1 : striker.sixes,
     } : striker;
 
-    // Handle positioning based on rotation and who got out
+    // Determine the surviving batsman (the one not out)
+    const survivingBatsman = batsmanType === 'striker' ? nonStriker : updatedStriker;
+
+    // Calculate suggested striker based on runs
+    let suggestedStriker;
     if (shouldRotate) {
-      // Odd runs: batsmen crossed before run out
-      // Original striker is now at non-striker end, original non-striker at striker end
-      if (batsmanType === 'striker') {
-        // Original striker (now at NS end after crossing) is out
-        // New batsman comes to NS end
-        // Original non-striker (now at striker end) stays
-        setCurrentBatsmen({
-          striker: nonStriker,
-          nonStriker: newBatsman,
-        });
-      } else {
-        // Original non-striker (now at striker end after crossing) is out
-        // New batsman comes to striker end
-        // Original striker (now at NS end, with updated stats) stays
-        setCurrentBatsmen({
-          striker: newBatsman,
-          nonStriker: updatedStriker,
-        });
-      }
+      // Odd runs: batsmen crossed
+      suggestedStriker = batsmanType === 'striker' ? survivingBatsman : newBatsman;
     } else {
-      // Even runs or 0 runs: batsmen at original positions
-      if (batsmanType === 'nonStriker') {
-        // Non-striker out, striker stays (with updated stats for no ball)
-        setCurrentBatsmen({
-          striker: updatedStriker,
-          nonStriker: newBatsman,
-        });
-      } else {
-        // Striker out, non-striker stays
-        setCurrentBatsmen({
-          striker: newBatsman,
-          nonStriker: nonStriker,
-        });
-      }
+      // Even/0 runs: batsmen at original positions
+      suggestedStriker = batsmanType === 'striker' ? newBatsman : survivingBatsman;
     }
+
+    // Show striker selection modal
+    const options = [
+      {
+        ...survivingBatsman,
+        isNew: false,
+        isSuggested: suggestedStriker.id === survivingBatsman.id,
+      },
+      {
+        ...newBatsman,
+        isNew: true,
+        isSuggested: suggestedStriker.id === newBatsman.id,
+      },
+    ];
+
+    // Sort so suggested is first
+    options.sort((a, b) => (b.isSuggested ? 1 : 0) - (a.isSuggested ? 1 : 0));
+
+    setPendingRunOutData({
+      newBatsman,
+      survivingBatsman,
+      updatedSurvivingBatsman: batsmanType === 'nonStriker' ? updatedStriker : null,
+    });
+    setStrikerSelectOptions(options);
+    setShowStrikerSelectModal(true);
 
     // Check for innings end (all out - including checking retired batsmen)
     const retiredAvailable = allBatsmen.filter(b =>
@@ -1466,30 +1487,43 @@ const ScoreCardScreen = ({ navigation, route }) => {
     const defaultBatsman = { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 };
     const newBatsman = nextBatsman || defaultBatsman;
 
-    // Handle positioning based on rotation and who got out
+    // Determine the surviving batsman (the one not out)
+    const survivingBatsman = batsmanType === 'striker' ? nonStriker : striker;
+
+    // Calculate suggested striker based on runs
+    let suggestedStriker;
     if (shouldRotate) {
-      // Odd bye runs: batsmen crossed before run out
-      if (batsmanType === 'striker') {
-        // Original striker (now at NS end after crossing) is out
-        setCurrentBatsmen({
-          striker: nonStriker,
-          nonStriker: newBatsman,
-        });
-      } else {
-        // Original non-striker (now at striker end after crossing) is out
-        setCurrentBatsmen({
-          striker: newBatsman,
-          nonStriker: striker,
-        });
-      }
+      // Odd runs: batsmen crossed
+      suggestedStriker = batsmanType === 'striker' ? survivingBatsman : newBatsman;
     } else {
-      // Even bye runs or 0: batsmen at original positions
-      if (batsmanType === 'nonStriker') {
-        setCurrentBatsmen(prev => ({ ...prev, nonStriker: newBatsman }));
-      } else {
-        setCurrentBatsmen(prev => ({ ...prev, striker: newBatsman }));
-      }
+      // Even/0 runs: batsmen at original positions
+      suggestedStriker = batsmanType === 'striker' ? newBatsman : survivingBatsman;
     }
+
+    // Show striker selection modal
+    const options = [
+      {
+        ...survivingBatsman,
+        isNew: false,
+        isSuggested: suggestedStriker.id === survivingBatsman.id,
+      },
+      {
+        ...newBatsman,
+        isNew: true,
+        isSuggested: suggestedStriker.id === newBatsman.id,
+      },
+    ];
+
+    // Sort so suggested is first
+    options.sort((a, b) => (b.isSuggested ? 1 : 0) - (a.isSuggested ? 1 : 0));
+
+    setPendingRunOutData({
+      newBatsman,
+      survivingBatsman,
+      updatedSurvivingBatsman: null,
+    });
+    setStrikerSelectOptions(options);
+    setShowStrikerSelectModal(true);
 
     // Check for innings end (all out - including checking retired batsmen)
     const retiredAvailable = allBatsmen.filter(b =>
@@ -4825,6 +4859,14 @@ const ScoreCardScreen = ({ navigation, route }) => {
         type="player"
         onSave={handlePlayerNameModalSave}
         onClose={closePlayerNameModal}
+      />
+
+      {/* Striker Selection Modal (after run out) */}
+      <StrikerSelectModal
+        visible={showStrikerSelectModal}
+        onSelect={handleStrikerSelection}
+        batsmanOptions={strikerSelectOptions}
+        title="Select Next Striker"
       />
       </View>
     </SafeAreaView>
