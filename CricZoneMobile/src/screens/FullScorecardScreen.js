@@ -1299,7 +1299,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
                 <TouchableOpacity
                   style={styles.newMatchButtonLarge}
                   onPress={() => tid
-                    ? navigation.navigate('MatchSetup', { tournamentId: tid })
+                    ? navigation.replace('MatchSetup', { tournamentId: tid })
                     : navigation.navigate('MatchSetup')
                   }
                   onPressIn={handleButtonPressIn}
@@ -1307,7 +1307,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
                   activeOpacity={0.9}
                 >
                   <PlusIcon size={20} color={colors.surface} />
-                  <Text style={styles.newMatchButtonLargeText}>New Match</Text>
+                  <Text style={styles.newMatchButtonLargeText}>{tid ? 'Next Match' : 'New Match'}</Text>
                 </TouchableOpacity>
               </Animated.View>
             </View>

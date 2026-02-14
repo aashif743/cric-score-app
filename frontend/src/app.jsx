@@ -23,6 +23,8 @@ import PointsSystem from './pages/PointsSystem';
 import PublicTournament from './pages/PublicTournament';
 import PublicMatchScorecard from './pages/PublicMatchScorecard';
 import Overlay from './pages/Overlay';
+import TVScoreboard from './pages/TVScoreboard';
+import TournamentTVScoreboard from './pages/TournamentTVScoreboard';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
@@ -195,7 +197,7 @@ const handleResumeMatch = (matchToResume) => {
 
 
   // --- Conditional Rendering Logic for Navigation ---
-  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament', '/overlay', '/privacy', '/terms'];
+  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament', '/overlay', '/tv', '/privacy', '/terms'];
   const isNavHidden = pathsWithoutNav.some(path => location.pathname.startsWith(path) && path !== '/');
   
   // Corrected code
@@ -215,7 +217,9 @@ const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will
           <Route path="/full-scorecard/:matchIdParam" element={<FullScorecardPage />} />
           <Route path="/tournament/:shareId" element={<PublicTournament />} />
           <Route path="/tournament/:shareId/match/:matchId" element={<PublicMatchScorecard />} />
+          <Route path="/tournament/:shareId/tv" element={<TournamentTVScoreboard />} />
           <Route path="/overlay/:matchId" element={<Overlay />} />
+          <Route path="/tv/:matchId" element={<TVScoreboard />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<TermsOfService />} />
 

@@ -235,7 +235,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const MAX_UNDO_HISTORY = 50; // Limit history to prevent memory issues
 
   // Socket.io
-  const [socket, setSocket] = useState(null);
+  const socketRef = useRef(null);
 
   // View mode toggle - 'live' for live scoring, 'scorecard' for full scorecard view
   const [viewMode, setViewMode] = useState('live');
@@ -333,6 +333,35 @@ const ScoreCardScreen = ({ navigation, route }) => {
       return () => pulseAnimation.stop();
     }
   }, [viewMode, liveDotPulse]);
+
+  // Socket.IO connection for live TV updates
+  useEffect(() => {
+    const matchId = matchData?._id;
+    if (!matchId || matchId.startsWith('guest_')) return;
+
+    const s = io(SOCKET_URL, { transports: ['websocket'] });
+    socketRef.current = s;
+
+    s.on('connect', () => {
+      console.log('Socket connected for live updates');
+      s.emit('join-match', matchId);
+    });
+
+    return () => {
+      if (s) {
+        s.emit('leave-match', matchId);
+        s.disconnect();
+      }
+      socketRef.current = null;
+    };
+  }, [matchData?._id]);
+
+  // Emit score update to TV viewers
+  const emitScoreUpdate = () => {
+    const matchId = matchData?._id;
+    if (!socketRef.current || !matchId || matchId.startsWith('guest_')) return;
+    socketRef.current.emit('live-score-update', { matchId, payload: { timestamp: Date.now() } });
+  };
 
   // Get batting team key (teamA or teamB)
   const getBattingTeamKey = () => {
@@ -640,6 +669,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       pendingBowlerUpdate
     );
 
+    emitScoreUpdate();
     setShowRunsModal(false);
     setShowExtrasModal(false);
     } catch (error) {
@@ -1065,6 +1095,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       pendingBatsmanUpdate
     );
 
+    emitScoreUpdate();
     setShowWicketModal(false);
     setSelectedWicketType('');
     setSelectedRuns(0);
@@ -1953,6 +1984,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     setCurrentOverWickets(0);
     setFallOfWickets([]);
 
+    emitScoreUpdate();
     setShowSummaryModal(false);
   };
 
@@ -2012,6 +2044,8 @@ const ScoreCardScreen = ({ navigation, route }) => {
       status: 'completed',
       innings1,
       innings2,
+      teamA: { name: teams.teamA.name, shortName: teams.teamA.name.substring(0, 3).toUpperCase() },
+      teamB: { name: teams.teamB.name, shortName: teams.teamB.name.substring(0, 3).toUpperCase() },
       totalOvers: settings.overs,
       date: new Date().toISOString(),
     };
@@ -2046,6 +2080,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
         const result = await matchService.endMatch(matchData._id, pendingMatchEnd, user.token);
         console.log('Match saved successfully:', result);
+        emitScoreUpdate();
         saveSuccess = true;
       } else {
         console.log('Skipping server save - conditions not met');
@@ -2103,6 +2138,8 @@ const ScoreCardScreen = ({ navigation, route }) => {
       target: match.target,
       innings1,
       innings2,
+      teamA: { name: teams.teamA.name, shortName: teams.teamA.name.substring(0, 3).toUpperCase() },
+      teamB: { name: teams.teamB.name, shortName: teams.teamB.name.substring(0, 3).toUpperCase() },
       // Include all settings to preserve them
       totalOvers: settings.overs,
       ballsPerOver: settings.ballsPerOver,
@@ -2133,6 +2170,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         console.log('Calling updateMatch API...');
         const result = await matchService.updateMatch(matchData._id, matchProgressData, user.token);
         console.log('Save result:', result);
+        emitScoreUpdate();
         return true;
       } else {
         console.log('Save skipped - no token or guest match');

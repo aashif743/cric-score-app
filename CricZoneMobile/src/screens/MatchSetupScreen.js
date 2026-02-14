@@ -215,6 +215,12 @@ const MatchSetupScreen = ({ navigation, route }) => {
   const [isEditingBatting, setIsEditingBatting] = useState(false);
   const [isEditingBowling, setIsEditingBowling] = useState(false);
 
+  // Tournament team rename
+  const [isEditingTournamentBatting, setIsEditingTournamentBatting] = useState(false);
+  const [isEditingTournamentBowling, setIsEditingTournamentBowling] = useState(false);
+  const tournamentBattingInputRef = useRef(null);
+  const tournamentBowlingInputRef = useRef(null);
+
   // Tournament team selection
   const [showBattingDropdown, setShowBattingDropdown] = useState(false);
   const [showBowlingDropdown, setShowBowlingDropdown] = useState(false);
@@ -527,6 +533,31 @@ const MatchSetupScreen = ({ navigation, route }) => {
                       ))}
                     </View>
                   </Animated.View>
+                  {/* Rename batting team */}
+                  {isEditingTournamentBatting ? (
+                    <TextInput
+                      ref={tournamentBattingInputRef}
+                      style={styles.tournamentRenameInput}
+                      value={battingTeam}
+                      onChangeText={setBattingTeam}
+                      onBlur={() => setIsEditingTournamentBatting(false)}
+                      onSubmitEditing={() => setIsEditingTournamentBatting(false)}
+                      maxLength={20}
+                      autoFocus
+                      selectTextOnFocus
+                      returnKeyType="done"
+                    />
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setIsEditingTournamentBatting(true);
+                        setTimeout(() => tournamentBattingInputRef.current?.focus(), 100);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.tournamentRenameHint}>Tap to rename</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 <View style={styles.tournamentVsDivider}>
@@ -627,6 +658,31 @@ const MatchSetupScreen = ({ navigation, route }) => {
                       ))}
                     </View>
                   </Animated.View>
+                  {/* Rename bowling team */}
+                  {isEditingTournamentBowling ? (
+                    <TextInput
+                      ref={tournamentBowlingInputRef}
+                      style={styles.tournamentRenameInput}
+                      value={bowlingTeam}
+                      onChangeText={setBowlingTeam}
+                      onBlur={() => setIsEditingTournamentBowling(false)}
+                      onSubmitEditing={() => setIsEditingTournamentBowling(false)}
+                      maxLength={20}
+                      autoFocus
+                      selectTextOnFocus
+                      returnKeyType="done"
+                    />
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setIsEditingTournamentBowling(true);
+                        setTimeout(() => tournamentBowlingInputRef.current?.focus(), 100);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.tournamentRenameHint}>Tap to rename</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             ) : (
@@ -1363,6 +1419,24 @@ const styles = StyleSheet.create({
   },
   tournamentDropdownItemTextDisabled: {
     color: '#94a3b8',
+  },
+  tournamentRenameHint: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 6,
+    fontStyle: 'italic',
+  },
+  tournamentRenameInput: {
+    marginTop: 6,
+    fontSize: 15,
+    fontWeight: fontWeights.bold,
+    color: '#0f172a',
+    backgroundColor: '#f8fafc',
+    borderWidth: 2,
+    borderColor: '#d97706',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   checkMark: {
     width: 14,

@@ -252,8 +252,8 @@ exports.updateMatch = async (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid match ID" });
     }
 
-    // First check authorization
-    const existingMatch = await Match.findById(id).select('user').lean();
+    // First check authorization (also fetch teamA, teamB, tournament for propagation)
+    const existingMatch = await Match.findById(id).select('user teamA teamB tournament').lean();
     if (!existingMatch) {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
@@ -261,13 +261,21 @@ exports.updateMatch = async (req, res) => {
       return res.status(403).json({ success: false, error: "Not authorized" });
     }
 
-    const { innings1, innings2, currentState, innings, target, totalOvers, ballsPerOver, playersPerTeam } = req.body;
+    const { innings1, innings2, currentState, innings, target, totalOvers, ballsPerOver, playersPerTeam, teamA, teamB } = req.body;
 
     // Build update object
     const updateData = {
       status: "in_progress",
       updatedAt: new Date()
     };
+
+    // Persist team names if provided
+    if (teamA) {
+      updateData.teamA = { name: teamA.name, shortName: teamA.shortName || teamA.name.substring(0, 3).toUpperCase() };
+    }
+    if (teamB) {
+      updateData.teamB = { name: teamB.name, shortName: teamB.shortName || teamB.name.substring(0, 3).toUpperCase() };
+    }
 
     // Preserve match settings if provided
     if (totalOvers !== undefined) {
@@ -347,6 +355,20 @@ exports.updateMatch = async (req, res) => {
 
     console.log('=== MATCH SAVED SUCCESSFULLY ===');
     console.log('Has currentState:', !!updatedMatch.currentState);
+
+    // Propagate team name changes to tournament if applicable
+    if (existingMatch.tournament) {
+      if (teamA && existingMatch.teamA?.name && teamA.name !== existingMatch.teamA.name) {
+        propagateTeamNameToTournament(existingMatch.tournament, existingMatch.teamA.name, teamA.name).catch(e =>
+          console.error('Tournament propagation error (teamA):', e.message)
+        );
+      }
+      if (teamB && existingMatch.teamB?.name && teamB.name !== existingMatch.teamB.name) {
+        propagateTeamNameToTournament(existingMatch.tournament, existingMatch.teamB.name, teamB.name).catch(e =>
+          console.error('Tournament propagation error (teamB):', e.message)
+        );
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -485,7 +507,7 @@ exports.endMatch = async (req, res) => {
     });
 
     const { id } = req.params;
-    const { innings1, innings2, result, matchSummary } = req.body;
+    const { innings1, innings2, result, matchSummary, teamA, teamB } = req.body;
 
     // Validate required data
     if (!innings1 || !result) {
@@ -550,6 +572,10 @@ exports.endMatch = async (req, res) => {
       };
     };
 
+    // Capture old team names for tournament propagation
+    const oldTeamAName = match.teamA?.name;
+    const oldTeamBName = match.teamB?.name;
+
     // Update match document
     match.innings1 = processInnings(innings1);
     match.innings2 = processInnings(innings2);
@@ -563,7 +589,29 @@ exports.endMatch = async (req, res) => {
     };
     match.liveState = null;
 
+    // Persist team names if provided
+    if (teamA) {
+      match.teamA = { name: teamA.name, shortName: teamA.shortName || teamA.name.substring(0, 3).toUpperCase() };
+    }
+    if (teamB) {
+      match.teamB = { name: teamB.name, shortName: teamB.shortName || teamB.name.substring(0, 3).toUpperCase() };
+    }
+
     await match.save();
+
+    // Propagate team name changes to tournament if applicable
+    if (match.tournament) {
+      if (teamA && oldTeamAName && teamA.name !== oldTeamAName) {
+        propagateTeamNameToTournament(match.tournament, oldTeamAName, teamA.name).catch(e =>
+          console.error('Tournament propagation error (teamA):', e.message)
+        );
+      }
+      if (teamB && oldTeamBName && teamB.name !== oldTeamBName) {
+        propagateTeamNameToTournament(match.tournament, oldTeamBName, teamB.name).catch(e =>
+          console.error('Tournament propagation error (teamB):', e.message)
+        );
+      }
+    }
 
     res.json({
       success: true,
@@ -584,6 +632,67 @@ exports.endMatch = async (req, res) => {
       error: "Failed to end match",
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+};
+
+// Helper: propagate team name change to tournament and sibling matches
+const propagateTeamNameToTournament = async (tournamentId, oldName, newName) => {
+  try {
+    if (!tournamentId || !oldName || !newName || oldName === newName) return;
+
+    console.log(`Propagating team rename: "${oldName}" → "${newName}" in tournament ${tournamentId}`);
+
+    // Update tournament.teamNames array
+    const tournament = await Tournament.findById(tournamentId);
+    if (tournament) {
+      const idx = tournament.teamNames.indexOf(oldName);
+      if (idx !== -1) {
+        tournament.teamNames[idx] = newName;
+        await tournament.save();
+        console.log('Updated tournament.teamNames');
+      }
+    }
+
+    // Update sibling matches that reference the old team name
+    const siblingMatches = await Match.find({
+      tournament: tournamentId,
+      $or: [
+        { 'teamA.name': oldName },
+        { 'teamB.name': oldName },
+      ],
+    });
+
+    for (const sibling of siblingMatches) {
+      let changed = false;
+
+      if (sibling.teamA?.name === oldName) {
+        sibling.teamA.name = newName;
+        sibling.teamA.shortName = newName.substring(0, 3).toUpperCase();
+        changed = true;
+      }
+      if (sibling.teamB?.name === oldName) {
+        sibling.teamB.name = newName;
+        sibling.teamB.shortName = newName.substring(0, 3).toUpperCase();
+        changed = true;
+      }
+
+      // Update innings references
+      if (sibling.innings1) {
+        if (sibling.innings1.battingTeam === oldName) { sibling.innings1.battingTeam = newName; changed = true; }
+        if (sibling.innings1.bowlingTeam === oldName) { sibling.innings1.bowlingTeam = newName; changed = true; }
+      }
+      if (sibling.innings2) {
+        if (sibling.innings2.battingTeam === oldName) { sibling.innings2.battingTeam = newName; changed = true; }
+        if (sibling.innings2.bowlingTeam === oldName) { sibling.innings2.bowlingTeam = newName; changed = true; }
+      }
+
+      if (changed) {
+        await sibling.save();
+        console.log(`Updated sibling match ${sibling._id}`);
+      }
+    }
+  } catch (error) {
+    console.error('propagateTeamNameToTournament error:', error.message);
   }
 };
 
