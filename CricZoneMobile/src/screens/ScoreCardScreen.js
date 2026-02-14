@@ -2059,48 +2059,25 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const confirmMatchEnd = async () => {
     if (!pendingMatchEnd) return;
 
-    console.log('=== CONFIRMING MATCH END ===');
-    console.log('User token exists:', !!user?.token);
-    console.log('Match ID:', matchData?._id);
-    console.log('Is guest match:', matchData?._id?.startsWith('guest_'));
-
-    // Try to save to server
-    let saveSuccess = false;
-    try {
-      if (user?.token && matchData?._id && !matchData._id.startsWith('guest_')) {
-        console.log('Attempting to save completed match...');
-        console.log('Match end data:', JSON.stringify({
-          result: pendingMatchEnd.result,
-          status: pendingMatchEnd.status,
-          hasInnings1: !!pendingMatchEnd.innings1,
-          hasInnings2: !!pendingMatchEnd.innings2,
-          innings1Runs: pendingMatchEnd.innings1?.runs,
-          innings2Runs: pendingMatchEnd.innings2?.runs,
-        }));
-
-        const result = await matchService.endMatch(matchData._id, pendingMatchEnd, user.token);
-        console.log('Match saved successfully:', result);
-        emitScoreUpdate();
-        saveSuccess = true;
-      } else {
-        console.log('Skipping server save - conditions not met');
-        if (!user?.token) console.log('  - No user token');
-        if (!matchData?._id) console.log('  - No match ID');
-        if (matchData?._id?.startsWith('guest_')) console.log('  - Guest match');
-      }
-    } catch (error) {
-      console.error('Failed to save match to server:', error);
-      console.error('Error details:', JSON.stringify(error));
-      // Show alert but don't block navigation
-      Alert.alert(
-        'Save Warning',
-        'Match completed but could not be saved to server. You can still view the scorecard.',
-        [{ text: 'OK' }]
-      );
-    }
-
+    // Navigate immediately for instant feedback
     setShowMatchEndModal(false);
     navigation.replace('FullScorecard', { matchData: { ...matchData, ...pendingMatchEnd } });
+
+    // Save to server in the background (non-blocking)
+    try {
+      if (user?.token && matchData?._id && !matchData._id.startsWith('guest_')) {
+        matchService.endMatch(matchData._id, pendingMatchEnd, user.token)
+          .then(() => {
+            console.log('Match saved to server in background');
+            emitScoreUpdate();
+          })
+          .catch((err) => {
+            console.error('Background save failed:', err);
+          });
+      }
+    } catch (error) {
+      console.error('Failed to initiate background save:', error);
+    }
   };
 
   // Save current match progress (for leaving mid-match)

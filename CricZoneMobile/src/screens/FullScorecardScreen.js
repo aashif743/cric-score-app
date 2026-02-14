@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
+import tournamentService from '../utils/tournamentService';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
@@ -342,6 +343,9 @@ const FullScorecardScreen = ({ navigation, route }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
 
+  // Tournament data for "Next Match" navigation
+  const [tournamentDefaults, setTournamentDefaults] = useState(null);
+
   // Refs
   const shareableRef = useRef(null);
 
@@ -386,6 +390,28 @@ const FullScorecardScreen = ({ navigation, route }) => {
       }),
     ]).start();
   }, [matchId, user]);
+
+  // Pre-fetch tournament data for "Next Match" button
+  useEffect(() => {
+    const tid = matchData?.tournament || initialMatchData?.tournament;
+    if (tid && user?.token) {
+      tournamentService.getTournament(tid, user.token)
+        .then((response) => {
+          const tournament = response.data || response;
+          if (tournament) {
+            setTournamentDefaults({
+              totalOvers: tournament.totalOvers,
+              playersPerTeam: tournament.playersPerTeam,
+              ballsPerOver: tournament.ballsPerOver,
+              teamNames: tournament.teamNames,
+              venue: tournament.venue,
+              tournamentName: tournament.name,
+            });
+          }
+        })
+        .catch((err) => console.log('Tournament pre-fetch error:', err));
+    }
+  }, [matchData?.tournament, initialMatchData?.tournament, user?.token]);
 
   useEffect(() => {
     // Animate tab indicator
@@ -1299,7 +1325,10 @@ const FullScorecardScreen = ({ navigation, route }) => {
                 <TouchableOpacity
                   style={styles.newMatchButtonLarge}
                   onPress={() => tid
-                    ? navigation.replace('MatchSetup', { tournamentId: tid })
+                    ? navigation.replace('MatchSetup', {
+                        tournamentId: tid,
+                        ...(tournamentDefaults ? { tournamentDefaults } : {}),
+                      })
                     : navigation.navigate('MatchSetup')
                   }
                   onPressIn={handleButtonPressIn}
