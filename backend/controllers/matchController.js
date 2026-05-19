@@ -1,6 +1,7 @@
 const Match = require("../models/Match");
 const Tournament = require("../models/Tournament");
 const mongoose = require("mongoose");
+const { propagateTeamNameToTournament } = require("../utils/teamRename");
 
 // Helper function to process innings data
 const processInnings = (inningsData) => {
@@ -429,7 +430,10 @@ exports.endInnings = async (req, res) => {
     }
 
     const match = await Match.findById(req.params.id);
-    if (match && match.user.toString() !== req.user.id) {
+    if (!match) {
+      return res.status(404).json({ success: false, error: "Match not found" });
+    }
+    if (match.user.toString() !== req.user.id) {
       return res.status(401).json({ success: false, error: "Not authorized" });
     }
 
@@ -613,6 +617,12 @@ exports.endMatch = async (req, res) => {
       }
     }
 
+    // Knockout: advance winner into the next bracket match.
+    if (match.nextMatchId && match.matchSummary?.winner) {
+      propagateKnockoutWinner(match.nextMatchId, match.nextMatchSlot, match.matchSummary.winner)
+        .catch(e => console.error('Knockout propagation error:', e.message));
+    }
+
     res.json({
       success: true,
       message: "Match ended successfully",
@@ -635,65 +645,38 @@ exports.endMatch = async (req, res) => {
   }
 };
 
-// Helper: propagate team name change to tournament and sibling matches
-const propagateTeamNameToTournament = async (tournamentId, oldName, newName) => {
-  try {
-    if (!tournamentId || !oldName || !newName || oldName === newName) return;
+// Helper: place the winner of a knockout match into the appropriate slot of
+// the next-round match. Only updates if the next match is still scheduled and
+// the corresponding slot is still TBD — never overwrites manual edits.
+const propagateKnockoutWinner = async (nextMatchId, slot, winnerName) => {
+  if (!nextMatchId || !slot || !winnerName) return;
+  const next = await Match.findById(nextMatchId);
+  if (!next || next.status !== 'scheduled') return;
 
-    console.log(`Propagating team rename: "${oldName}" → "${newName}" in tournament ${tournamentId}`);
+  const teamObj = { name: winnerName, shortName: winnerName.substring(0, 3).toUpperCase() };
+  const sideKey = slot === 'A' ? 'teamA' : 'teamB';
+  if (next[sideKey]?.name && next[sideKey].name !== 'TBD') return; // already filled
 
-    // Update tournament.teamNames array
-    const tournament = await Tournament.findById(tournamentId);
-    if (tournament) {
-      const idx = tournament.teamNames.indexOf(oldName);
-      if (idx !== -1) {
-        tournament.teamNames[idx] = newName;
-        await tournament.save();
-        console.log('Updated tournament.teamNames');
-      }
+  next[sideKey] = teamObj;
+
+  // Keep innings1 placeholders in sync so the match is playable straight away.
+  if (next.innings1) {
+    if (slot === 'A') {
+      next.innings1.battingTeam = winnerName;
+      next.innings1.batting = Array.from({ length: next.playersPerTeam || 11 }, (_, i) => ({
+        name: `${winnerName} Player ${i + 1}`,
+        runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: 'Not Out',
+      }));
+    } else {
+      next.innings1.bowlingTeam = winnerName;
+      next.innings1.bowling = Array.from({ length: next.playersPerTeam || 11 }, (_, i) => ({
+        name: `${winnerName} Player ${i + 1}`,
+        runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: 'Not Out',
+      }));
     }
-
-    // Update sibling matches that reference the old team name
-    const siblingMatches = await Match.find({
-      tournament: tournamentId,
-      $or: [
-        { 'teamA.name': oldName },
-        { 'teamB.name': oldName },
-      ],
-    });
-
-    for (const sibling of siblingMatches) {
-      let changed = false;
-
-      if (sibling.teamA?.name === oldName) {
-        sibling.teamA.name = newName;
-        sibling.teamA.shortName = newName.substring(0, 3).toUpperCase();
-        changed = true;
-      }
-      if (sibling.teamB?.name === oldName) {
-        sibling.teamB.name = newName;
-        sibling.teamB.shortName = newName.substring(0, 3).toUpperCase();
-        changed = true;
-      }
-
-      // Update innings references
-      if (sibling.innings1) {
-        if (sibling.innings1.battingTeam === oldName) { sibling.innings1.battingTeam = newName; changed = true; }
-        if (sibling.innings1.bowlingTeam === oldName) { sibling.innings1.bowlingTeam = newName; changed = true; }
-      }
-      if (sibling.innings2) {
-        if (sibling.innings2.battingTeam === oldName) { sibling.innings2.battingTeam = newName; changed = true; }
-        if (sibling.innings2.bowlingTeam === oldName) { sibling.innings2.bowlingTeam = newName; changed = true; }
-      }
-
-      if (changed) {
-        await sibling.save();
-        console.log(`Updated sibling match ${sibling._id}`);
-      }
-    }
-  } catch (error) {
-    console.error('propagateTeamNameToTournament error:', error.message);
   }
+
+  await next.save();
 };
 
 // Add this new exported function

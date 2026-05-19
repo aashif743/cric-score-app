@@ -2,6 +2,26 @@ const Tournament = require("../models/Tournament");
 const Match = require("../models/Match");
 const mongoose = require("mongoose");
 const { nanoid } = require("nanoid");
+const { generateKnockoutBracket } = require("../utils/knockoutBracket");
+const { propagateTeamNameToTournament } = require("../utils/teamRename");
+
+const TBD = 'TBD';
+const teamObj = (name) => ({ name, shortName: (name || TBD).substring(0, 3).toUpperCase() });
+const defaultPlayers = (teamName, count) =>
+  Array.from({ length: count || 11 }, (_, i) => ({
+    name: `${teamName} Player ${i + 1}`,
+    runs: 0, balls: 0, fours: 0, sixes: 0,
+    isOut: false, outType: 'Not Out',
+  }));
+const buildInnings = (battingTeam, bowlingTeam, playersPerTeam) => ({
+  battingTeam, bowlingTeam,
+  runs: 0, wickets: 0, overs: '0.0', runRate: 0,
+  extras: { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
+  fallOfWickets: [],
+  batting: defaultPlayers(battingTeam, playersPerTeam),
+  bowling: defaultPlayers(bowlingTeam, playersPerTeam),
+  declared: false,
+});
 
 // Create tournament
 exports.createTournament = async (req, res) => {
@@ -10,7 +30,7 @@ exports.createTournament = async (req, res) => {
       return res.status(401).json({ success: false, error: "User not authenticated." });
     }
 
-    const { name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver, venue, description } = req.body;
+    const { name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver, venue, description, format } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: "Tournament name is required." });
@@ -18,6 +38,9 @@ exports.createTournament = async (req, res) => {
     if (!numberOfTeams || numberOfTeams < 2) {
       return res.status(400).json({ success: false, error: "At least 2 teams are required." });
     }
+
+    const validFormats = ["quick", "knockout", "league", "league_knockout"];
+    const tournamentFormat = validFormats.includes(format) ? format : "quick";
 
     const tournament = await Tournament.create({
       user: req.user.id,
@@ -29,7 +52,43 @@ exports.createTournament = async (req, res) => {
       ballsPerOver: ballsPerOver || 6,
       venue: venue || "",
       description: description || "",
+      format: tournamentFormat,
     });
+
+    // For knockout, pre-generate the full bracket so the schedule is ready immediately.
+    if (tournamentFormat === "knockout") {
+      const filledTeams = Array.from({ length: numberOfTeams }, (_, i) =>
+        (teamNames?.[i]?.trim()) || `Team ${String.fromCharCode(65 + i)}`
+      );
+      const { matches: defs } = generateKnockoutBracket(filledTeams);
+
+      // Create from final backwards so each child knows its parent's _id.
+      const sorted = [...defs].sort((a, b) => b.round - a.round);
+      const idMap = {};
+      for (const def of sorted) {
+        const aName = def.teamA || TBD;
+        const bName = def.teamB || TBD;
+        const created = await Match.create({
+          user: req.user.id,
+          tournament: tournament._id,
+          teamA: teamObj(aName),
+          teamB: teamObj(bName),
+          venue: tournament.venue || "Unknown Venue",
+          matchType: "T20",
+          totalOvers: tournament.totalOvers,
+          ballsPerOver: tournament.ballsPerOver,
+          playersPerTeam: tournament.playersPerTeam,
+          status: "scheduled",
+          round: def.round,
+          bracketSlot: def.bracketSlot,
+          nextMatchId: def.parentRound ? idMap[`${def.parentRound}_${def.parentSlot}`] : null,
+          nextMatchSlot: def.parentRound ? def.parentSide : null,
+          innings1: buildInnings(aName, bName, tournament.playersPerTeam),
+        });
+        idMap[`${def.round}_${def.bracketSlot}`] = created._id;
+      }
+      await Tournament.findByIdAndUpdate(tournament._id, { $inc: { matchCount: defs.length } });
+    }
 
     res.status(201).json({ success: true, data: tournament });
   } catch (error) {
@@ -74,17 +133,22 @@ exports.getTournamentById = async (req, res) => {
       return res.status(403).json({ success: false, error: "Not authorized" });
     }
 
-    // Fetch lightweight match list for display, and full data only for in-progress matches
+    // Fetch lightweight match list for display, and full data only for in-progress matches.
+    // Always include the knockout bracket fields (round/bracketSlot/nextMatch*) so the
+    // KnockoutScheduleScreen can group matches by round.
+    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot matchSummary';
     const [completedMatches, inProgressMatches] = await Promise.all([
       Match.find({ tournament: id, status: { $in: ["completed", "abandoned"] } })
-        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam')
+        .select(`teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam ${BRACKET_FIELDS}`)
         .sort({ updatedAt: -1 })
         .lean(),
       Match.find({ tournament: id, status: { $in: ["scheduled", "in_progress", "innings_break"] } })
-        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1 innings2 currentState innings target toss')
+        .select(`teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1 innings2 currentState innings target toss ${BRACKET_FIELDS}`)
         .sort({ updatedAt: -1 })
         .lean(),
     ]);
+    // Knockout schedules need to be ordered by round then slot, not by updatedAt.
+    // Use createdAt as a stable tie-breaker for non-bracket matches.
     const matches = [...inProgressMatches, ...completedMatches];
 
     res.json({ success: true, data: { ...tournament, matches } });
@@ -392,6 +456,47 @@ exports.getTournamentStats = async (req, res) => {
   } catch (error) {
     console.error("Get tournament stats error:", error);
     res.status(500).json({ success: false, error: "Failed to fetch tournament stats." });
+  }
+};
+
+// Rename a team across the whole tournament (teamNames + every linked match).
+// POST /api/tournaments/:id/rename-team   body: { oldName, newName }
+exports.renameTeam = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { oldName, newName } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
+    }
+    if (!oldName || !newName || !oldName.trim() || !newName.trim()) {
+      return res.status(400).json({ success: false, error: "oldName and newName are required" });
+    }
+    if (oldName === newName) {
+      return res.json({ success: true, data: { tournamentUpdated: false, matchesUpdated: 0 } });
+    }
+
+    const tournament = await Tournament.findById(id);
+    if (!tournament) {
+      return res.status(404).json({ success: false, error: "Tournament not found" });
+    }
+    if (tournament.user.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+
+    // Block renaming to a name another team in this tournament already uses.
+    const conflictingTeam = tournament.teamNames.some(
+      (n) => n && n !== oldName && n.trim().toLowerCase() === newName.trim().toLowerCase()
+    );
+    if (conflictingTeam) {
+      return res.status(409).json({ success: false, error: `Another team is already called "${newName}".` });
+    }
+
+    const result = await propagateTeamNameToTournament(id, oldName.trim(), newName.trim());
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error("Rename team error:", error);
+    res.status(500).json({ success: false, error: "Failed to rename team." });
   }
 };
 

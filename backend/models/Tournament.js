@@ -52,15 +52,17 @@ const TournamentSchema = new mongoose.Schema({
     enum: ["upcoming", "in_progress", "completed"],
     default: "upcoming"
   },
+  format: {
+    type: String,
+    enum: ["quick", "knockout", "league", "league_knockout"],
+    default: "quick"
+  },
   matchCount: {
     type: Number,
     default: 0
   },
   shareId: {
-    type: String,
-    unique: true,
-    sparse: true,
-    default: null
+    type: String
   }
 }, {
   timestamps: true,
@@ -76,5 +78,13 @@ TournamentSchema.virtual("matches", {
 
 // Indexes for query performance
 TournamentSchema.index({ user: 1, updatedAt: -1 });
+
+// Unique only when shareId is a string. partialFilterExpression is reliable
+// across nulls/missing values; plain `sparse + default: null` collides because
+// every doc literally stores null. Do NOT add `default: null` to shareId.
+TournamentSchema.index(
+  { shareId: 1 },
+  { unique: true, partialFilterExpression: { shareId: { $type: "string" } } }
+);
 
 module.exports = mongoose.model("Tournament", TournamentSchema);

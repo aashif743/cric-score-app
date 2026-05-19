@@ -31,10 +31,12 @@ const suggestionSchema = mongoose.Schema(
   }
 );
 
-// Create compound index for efficient searching
-// This index supports: type filter + normalizedName prefix search + usageCount sort
+// Compound index for efficient prefix search + popularity sort.
 suggestionSchema.index({ type: 1, normalizedName: 1, usageCount: -1 });
-suggestionSchema.index({ normalizedName: 1, type: 1 });
+// Uniqueness guard — one record per (normalizedName, type). Prevents duplicate
+// entries from racing inserts that previously caused the same name to appear
+// multiple times in the suggestion dropdown.
+suggestionSchema.index({ normalizedName: 1, type: 1 }, { unique: true });
 
 // Pre-save middleware to set normalizedName
 suggestionSchema.pre('save', function (next) {

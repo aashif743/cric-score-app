@@ -26,13 +26,25 @@ const getSuggestions = async (req, res) => {
     const suggestions = await Suggestion.find(searchCriteria)
       .sort({ usageCount: -1 })
       .limit(20)
-      .select('name usageCount')
+      .select('name usageCount normalizedName')
       .lean()
       .maxTimeMS(3000); // 3 second max query time
 
+    // Defensive dedupe: even though a unique index now prevents duplicate
+    // rows, keep this safety net so the API never returns the same name
+    // twice (e.g. case variants that share a normalizedName via stale data).
+    const seen = new Set();
+    const deduped = [];
+    for (const s of suggestions) {
+      const key = (s.normalizedName || s.name || '').toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push({ name: s.name, usageCount: s.usageCount });
+    }
+
     res.status(200).json({
       success: true,
-      data: suggestions,
+      data: deduped,
     });
   } catch (error) {
     // Check if it's a timeout error

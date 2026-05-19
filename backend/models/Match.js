@@ -307,6 +307,25 @@ const MatchSchema = new mongoose.Schema({
     type: String,
     enum: ["scheduled", "in_progress", "completed", "abandoned", "innings_break"],
     default: "scheduled"
+  },
+  // Knockout bracket fields (only set when tournament.format === 'knockout' or 'league_knockout')
+  round: {
+    type: Number,
+    default: null
+  },
+  bracketSlot: {
+    type: Number,
+    default: null
+  },
+  nextMatchId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Match',
+    default: null
+  },
+  nextMatchSlot: {
+    type: String,
+    enum: ['A', 'B', null],
+    default: null
   }
 }, {
   timestamps: true,
