@@ -9,12 +9,41 @@ const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
 };
 
+// Apple App Store review bypass. When a reviewer signs in we can't actually
+// send them an SMS, so we reserve one phone number whose OTP is hard-coded.
+// Configure these on Render so the value isn't visible in source:
+//   REVIEW_TEST_PHONE   (e.g. "+94770000000")
+//   REVIEW_TEST_OTP     (e.g. "123456")
+const REVIEW_TEST_PHONE = process.env.REVIEW_TEST_PHONE || '';
+const REVIEW_TEST_OTP = process.env.REVIEW_TEST_OTP || '';
+
 // @desc    Send OTP to a phone number via Textit.biz
 // @route   POST /api/users/send-otp
 const sendOtp = async (req, res) => {
   const { phoneNumber } = req.body;
   if (!phoneNumber) {
     return res.status(400).json({ message: 'Phone number is required' });
+  }
+
+  // Review-account bypass: skip the SMS entirely and set the OTP to the
+  // pre-shared value so Apple's reviewer can sign in.
+  if (REVIEW_TEST_PHONE && REVIEW_TEST_OTP && phoneNumber === REVIEW_TEST_PHONE) {
+    const otpExpires = new Date(Date.now() + 60 * 60 * 1000); // 1-hour window
+    try {
+      await User.findOneAndUpdate(
+        { phoneNumber },
+        {
+          $set: { otp: REVIEW_TEST_OTP, otpExpires },
+          $setOnInsert: { name: 'App Reviewer' },
+        },
+        { new: true, upsert: true }
+      );
+      console.log(`Review bypass: set OTP for ${phoneNumber}`);
+      return res.status(200).json({ success: true, message: 'OTP sent successfully.' });
+    } catch (e) {
+      console.error('Review bypass error:', e.message);
+      return res.status(500).json({ message: 'Failed to send OTP' });
+    }
   }
 
   const otp = Math.floor(1000 + Math.random() * 9000).toString();
@@ -30,7 +59,7 @@ const sendOtp = async (req, res) => {
     // --- Send the SMS using Textit.biz API ---
     const message = `Your Scorecard App verification code is: ${otp}`;
     const textitUrl = `https://textit.biz/sendmsg/index.php`;
-    
+
     const response = await axios.get(textitUrl, {
       params: {
         id: process.env.TEXTIT_BIZ_USERID,
