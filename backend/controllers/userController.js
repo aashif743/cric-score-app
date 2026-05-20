@@ -11,11 +11,20 @@ const generateToken = (id) => {
 
 // Apple App Store review bypass. When a reviewer signs in we can't actually
 // send them an SMS, so we reserve one phone number whose OTP is hard-coded.
-// Configure these on Render so the value isn't visible in source:
+// Configure both of these on Render — without either, the bypass is OFF.
 //   REVIEW_TEST_PHONE   (e.g. "+94770000000")
-//   REVIEW_TEST_OTP     (e.g. "123456")
-const REVIEW_TEST_PHONE = process.env.REVIEW_TEST_PHONE || '';
-const REVIEW_TEST_OTP = process.env.REVIEW_TEST_OTP || '';
+//   REVIEW_TEST_OTP     (e.g. "1234")
+// Trim to defend against accidental trailing whitespace in the env value.
+const REVIEW_TEST_PHONE = (process.env.REVIEW_TEST_PHONE || '').trim();
+const REVIEW_TEST_OTP = (process.env.REVIEW_TEST_OTP || '').trim();
+
+// Log once at boot so it's obvious in Render logs whether the bypass is
+// armed and what value it expects (without revealing the OTP itself).
+console.log(
+  `[review-bypass] phone="${REVIEW_TEST_PHONE}" ` +
+  `otp_set=${REVIEW_TEST_OTP ? 'yes' : 'NO'} ` +
+  `otp_length=${REVIEW_TEST_OTP.length}`
+);
 
 // @desc    Send OTP to a phone number via Textit.biz
 // @route   POST /api/users/send-otp
@@ -27,21 +36,22 @@ const sendOtp = async (req, res) => {
 
   // Review-account bypass: skip the SMS entirely and set the OTP to the
   // pre-shared value so Apple's reviewer can sign in.
-  if (REVIEW_TEST_PHONE && REVIEW_TEST_OTP && phoneNumber === REVIEW_TEST_PHONE) {
+  const incomingPhone = (phoneNumber || '').trim();
+  if (REVIEW_TEST_PHONE && REVIEW_TEST_OTP && incomingPhone === REVIEW_TEST_PHONE) {
     const otpExpires = new Date(Date.now() + 60 * 60 * 1000); // 1-hour window
     try {
       await User.findOneAndUpdate(
-        { phoneNumber },
+        { phoneNumber: incomingPhone },
         {
           $set: { otp: REVIEW_TEST_OTP, otpExpires },
           $setOnInsert: { name: 'App Reviewer' },
         },
         { new: true, upsert: true }
       );
-      console.log(`Review bypass: set OTP for ${phoneNumber}`);
+      console.log(`[review-bypass] applied for ${incomingPhone}`);
       return res.status(200).json({ success: true, message: 'OTP sent successfully.' });
     } catch (e) {
-      console.error('Review bypass error:', e.message);
+      console.error('[review-bypass] error:', e.message);
       return res.status(500).json({ message: 'Failed to send OTP' });
     }
   }
