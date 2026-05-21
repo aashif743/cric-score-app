@@ -37,6 +37,15 @@ const sendOtp = async (req, res) => {
   // Review-account bypass: skip the SMS entirely and set the OTP to the
   // pre-shared value so Apple's reviewer can sign in.
   const incomingPhone = (phoneNumber || '').trim();
+
+  // Diagnostic: see exactly what the server received versus what it expects.
+  console.log(
+    `[send-otp] req phone bytes=${Buffer.from(incomingPhone).toString('hex')} ` +
+    `(len=${incomingPhone.length}) | env phone bytes=` +
+    `${Buffer.from(REVIEW_TEST_PHONE).toString('hex')} ` +
+    `(len=${REVIEW_TEST_PHONE.length}) | match=${incomingPhone === REVIEW_TEST_PHONE}`
+  );
+
   if (REVIEW_TEST_PHONE && REVIEW_TEST_OTP && incomingPhone === REVIEW_TEST_PHONE) {
     const otpExpires = new Date(Date.now() + 60 * 60 * 1000); // 1-hour window
     try {
