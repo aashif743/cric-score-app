@@ -1,19 +1,20 @@
+// Load .env BEFORE any of our own modules are required — otherwise
+// constants those modules read from process.env at module-load time
+// (e.g. REVIEW_TEST_PHONE in userController.js) will be undefined.
+require("dotenv").config();
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
-const dotenv = require("dotenv");
 const http = require("http");
 const { Server } = require("socket.io");
 
-
-// Import your route files
+// Import your route files (now safe — env vars are populated).
 const matchRoutes = require("./routes/matchRoutes");
 const userRoutes = require("./routes/userRoutes");
 const suggestionRoutes = require("./routes/suggestionRoutes");
 const tournamentRoutes = require("./routes/tournamentRoutes");
 const publicRoutes = require("./routes/publicRoutes");
-
-dotenv.config();
 
 const app = express();
 
