@@ -136,7 +136,10 @@ exports.getTournamentById = async (req, res) => {
     // Fetch lightweight match list for display, and full data only for in-progress matches.
     // Always include the knockout bracket fields (round/bracketSlot/nextMatch*) so the
     // KnockoutScheduleScreen can group matches by round.
-    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot matchSummary';
+    // Include `tournament` so the FullScorecard "Next Match" button can
+    // route the user back into the tournament flow (otherwise the field is
+    // stripped and the button falls back to a Quick-match setup).
+    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot matchSummary tournament';
     const [completedMatches, inProgressMatches] = await Promise.all([
       Match.find({ tournament: id, status: { $in: ["completed", "abandoned"] } })
         .select(`teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam ${BRACKET_FIELDS}`)

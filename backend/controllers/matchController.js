@@ -181,12 +181,12 @@ exports.getMyMatches = async (req, res) => {
     const [completedMatches, inProgressMatches] = await Promise.all([
       // Completed/abandoned: only summary fields needed for list display
       Match.find({ user: req.user.id, status: { $in: ["completed", "abandoned"] } })
-        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam')
+        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam tournament')
         .sort({ updatedAt: -1 })
         .lean(),
       // In-progress/scheduled/innings_break: full data for resuming
       Match.find({ user: req.user.id, status: { $in: ["scheduled", "in_progress", "innings_break"] } })
-        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam toss innings1 innings2 currentState innings target')
+        .select('teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam toss innings1 innings2 currentState innings target tournament')
         .sort({ updatedAt: -1 })
         .lean(),
     ]);
