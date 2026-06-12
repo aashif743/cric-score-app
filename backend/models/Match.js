@@ -308,7 +308,8 @@ const MatchSchema = new mongoose.Schema({
     enum: ["scheduled", "in_progress", "completed", "abandoned", "innings_break"],
     default: "scheduled"
   },
-  // Knockout bracket fields (only set when tournament.format === 'knockout' or 'league_knockout')
+  // Knockout bracket fields (set for format === 'knockout', and for the
+  // knockout stage of format === 'league').
   round: {
     type: Number,
     default: null
@@ -325,6 +326,17 @@ const MatchSchema = new mongoose.Schema({
   nextMatchSlot: {
     type: String,
     enum: ['A', 'B', null],
+    default: null
+  },
+  // League-format only. `stage` distinguishes round-robin group matches from
+  // the knockout stage that follows; `group` is the group letter (A, B, ...).
+  stage: {
+    type: String,
+    enum: ['group', 'knockout', null],
+    default: null
+  },
+  group: {
+    type: String,
     default: null
   }
 }, {

@@ -54,8 +54,41 @@ const TournamentSchema = new mongoose.Schema({
   },
   format: {
     type: String,
-    enum: ["quick", "knockout", "league", "league_knockout"],
+    enum: ["quick", "knockout", "league"],
     default: "quick"
+  },
+  // Who can see this tournament in the live feed + public viewer screens.
+  // 'public' shows up for every signed-in user; 'private' is owner-only.
+  // Default 'public' so new tournaments populate the live strip by default;
+  // creators can opt out at creation or by editing.
+  visibility: {
+    type: String,
+    enum: ["public", "private"],
+    default: "public"
+  },
+  // League-format only. `numberOfGroups` divides teams into pools.
+  // `teamsAdvancePerGroup` controls how many top teams from each group advance
+  // into the knockout stage (0 = league only, no knockout).
+  // `matchesPerPair` is round-robin multiplier (1 = single, 2 = home/away).
+  numberOfGroups: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+  teamsAdvancePerGroup: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  matchesPerPair: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+  // Persisted snapshot of the snake-distributed groups. groups[0] = Group A, etc.
+  groups: {
+    type: [[String]],
+    default: []
   },
   matchCount: {
     type: Number,
@@ -78,6 +111,8 @@ TournamentSchema.virtual("matches", {
 
 // Indexes for query performance
 TournamentSchema.index({ user: 1, updatedAt: -1 });
+// Live-feed lookups query by visibility, so index it for cheap scans.
+TournamentSchema.index({ visibility: 1, updatedAt: -1 });
 
 // Unique only when shareId is a string. partialFilterExpression is reliable
 // across nulls/missing values; plain `sparse + default: null` collides because

@@ -3,6 +3,7 @@ const Match = require("../models/Match");
 const mongoose = require("mongoose");
 const { nanoid } = require("nanoid");
 const { generateKnockoutBracket } = require("../utils/knockoutBracket");
+const { generateLeagueBracket } = require("../utils/leagueBracket");
 const { propagateTeamNameToTournament } = require("../utils/teamRename");
 
 const TBD = 'TBD';
@@ -30,7 +31,12 @@ exports.createTournament = async (req, res) => {
       return res.status(401).json({ success: false, error: "User not authenticated." });
     }
 
-    const { name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver, venue, description, format } = req.body;
+    const {
+      name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
+      venue, description, format, visibility,
+      // League-only:
+      numberOfGroups, teamsAdvancePerGroup, matchesPerPair,
+    } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: "Tournament name is required." });
@@ -39,7 +45,7 @@ exports.createTournament = async (req, res) => {
       return res.status(400).json({ success: false, error: "At least 2 teams are required." });
     }
 
-    const validFormats = ["quick", "knockout", "league", "league_knockout"];
+    const validFormats = ["quick", "knockout", "league"];
     const tournamentFormat = validFormats.includes(format) ? format : "quick";
 
     const tournament = await Tournament.create({
@@ -53,6 +59,10 @@ exports.createTournament = async (req, res) => {
       venue: venue || "",
       description: description || "",
       format: tournamentFormat,
+      visibility: visibility === "private" ? "private" : "public",
+      numberOfGroups: tournamentFormat === "league" ? Math.max(1, numberOfGroups || 1) : 1,
+      teamsAdvancePerGroup: tournamentFormat === "league" ? Math.max(0, teamsAdvancePerGroup || 0) : 0,
+      matchesPerPair: tournamentFormat === "league" ? Math.max(1, matchesPerPair || 1) : 1,
     });
 
     // For knockout, pre-generate the full bracket so the schedule is ready immediately.
@@ -88,6 +98,77 @@ exports.createTournament = async (req, res) => {
         idMap[`${def.round}_${def.bracketSlot}`] = created._id;
       }
       await Tournament.findByIdAndUpdate(tournament._id, { $inc: { matchCount: defs.length } });
+    }
+
+    // League: snake-divide teams into groups, generate round-robin matches per
+    // group, and pre-create a cross-paired knockout bracket of TBD slots.
+    if (tournamentFormat === "league") {
+      const filledTeams = Array.from({ length: numberOfTeams }, (_, i) =>
+        (teamNames?.[i]?.trim()) || `Team ${String.fromCharCode(65 + i)}`
+      );
+      const { groups, groupMatches, knockoutMatches } = generateLeagueBracket(
+        filledTeams,
+        tournament.numberOfGroups,
+        tournament.teamsAdvancePerGroup,
+        tournament.matchesPerPair,
+      );
+
+      // Persist the group layout on the tournament so the schedule screen can
+      // render groups even before any matches are played.
+      await Tournament.findByIdAndUpdate(tournament._id, { $set: { groups } });
+
+      // Create group-stage matches. These have real team names from the start.
+      for (const gm of groupMatches) {
+        await Match.create({
+          user: req.user.id,
+          tournament: tournament._id,
+          teamA: teamObj(gm.teamA),
+          teamB: teamObj(gm.teamB),
+          venue: tournament.venue || "Unknown Venue",
+          matchType: "T20",
+          totalOvers: tournament.totalOvers,
+          ballsPerOver: tournament.ballsPerOver,
+          playersPerTeam: tournament.playersPerTeam,
+          status: "scheduled",
+          stage: "group",
+          group: gm.group,
+          round: gm.roundInGroup,
+          innings1: buildInnings(gm.teamA, gm.teamB, tournament.playersPerTeam),
+        });
+      }
+
+      // Create knockout-stage matches with TBD slots. Build final-first so
+      // each child knows its parent's _id (same trick as knockout-only).
+      const koSorted = [...knockoutMatches].sort((a, b) => b.round - a.round);
+      const idMap = {};
+      for (const def of koSorted) {
+        const created = await Match.create({
+          user: req.user.id,
+          tournament: tournament._id,
+          teamA: teamObj(TBD),
+          teamB: teamObj(TBD),
+          venue: tournament.venue || "Unknown Venue",
+          matchType: "T20",
+          totalOvers: tournament.totalOvers,
+          ballsPerOver: tournament.ballsPerOver,
+          playersPerTeam: tournament.playersPerTeam,
+          status: "scheduled",
+          stage: "knockout",
+          round: def.round,
+          bracketSlot: def.bracketSlot,
+          nextMatchId: def.parentRound ? idMap[`${def.parentRound}_${def.parentSlot}`] : null,
+          nextMatchSlot: def.parentRound ? def.parentSide : null,
+          // Source labels ("A1", "B2", …) are stashed in liveState so the
+          // group-stage-complete hook knows which slot to fill.
+          liveState: { sourceA: def.sourceA || null, sourceB: def.sourceB || null },
+          innings1: buildInnings(TBD, TBD, tournament.playersPerTeam),
+        });
+        idMap[`${def.round}_${def.bracketSlot}`] = created._id;
+      }
+
+      await Tournament.findByIdAndUpdate(tournament._id, {
+        $inc: { matchCount: groupMatches.length + knockoutMatches.length },
+      });
     }
 
     res.status(201).json({ success: true, data: tournament });
@@ -129,7 +210,13 @@ exports.getTournamentById = async (req, res) => {
       return res.status(404).json({ success: false, error: "Tournament not found" });
     }
 
-    if (tournament.user.toString() !== req.user.id) {
+    // Owner always sees their own tournament. Other signed-in users can see
+    // it too as long as it's marked public — that's how the live feed +
+    // public viewer screens work.
+    const isOwner = tournament.user.toString() === req.user.id;
+    // Block only tournaments explicitly marked private. Legacy tournaments have
+    // no visibility field stored (undefined) and default to public.
+    if (!isOwner && tournament.visibility === "private") {
       return res.status(403).json({ success: false, error: "Not authorized" });
     }
 
@@ -139,7 +226,7 @@ exports.getTournamentById = async (req, res) => {
     // Include `tournament` so the FullScorecard "Next Match" button can
     // route the user back into the tournament flow (otherwise the field is
     // stripped and the button falls back to a Quick-match setup).
-    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot matchSummary tournament';
+    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot matchSummary tournament stage group';
     const [completedMatches, inProgressMatches] = await Promise.all([
       Match.find({ tournament: id, status: { $in: ["completed", "abandoned"] } })
         .select(`teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam ${BRACKET_FIELDS}`)
@@ -180,7 +267,17 @@ exports.updateTournament = async (req, res) => {
       return res.status(403).json({ success: false, error: "Not authorized" });
     }
 
-    const { name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver, venue, description, status } = req.body;
+    const { name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver, venue, description, status, visibility } = req.body;
+
+    // Capture the current values so we can compare and only propagate fields
+    // the user actually changed. This avoids touching a match's innings1
+    // roster when the user merely renames the tournament.
+    const before = {
+      playersPerTeam: tournament.playersPerTeam,
+      totalOvers: tournament.totalOvers,
+      ballsPerOver: tournament.ballsPerOver,
+      venue: tournament.venue,
+    };
 
     if (name !== undefined) tournament.name = name.trim();
     if (numberOfTeams !== undefined) tournament.numberOfTeams = numberOfTeams;
@@ -191,8 +288,50 @@ exports.updateTournament = async (req, res) => {
     if (venue !== undefined) tournament.venue = venue;
     if (description !== undefined) tournament.description = description;
     if (status !== undefined) tournament.status = status;
+    if (visibility !== undefined && (visibility === "public" || visibility === "private")) {
+      tournament.visibility = visibility;
+    }
 
     const updated = await tournament.save();
+
+    // Push match-level setting changes into every scheduled match in this
+    // tournament. We intentionally skip in_progress / completed matches so a
+    // mid-tournament tweak can't rewrite a finished match's overs.
+    const matchUpdate = {};
+    if (totalOvers !== undefined && totalOvers !== before.totalOvers)
+      matchUpdate.totalOvers = totalOvers;
+    if (ballsPerOver !== undefined && ballsPerOver !== before.ballsPerOver)
+      matchUpdate.ballsPerOver = ballsPerOver;
+    if (venue !== undefined && venue !== before.venue)
+      matchUpdate.venue = venue || "Unknown Venue";
+
+    if (playersPerTeam !== undefined && playersPerTeam !== before.playersPerTeam) {
+      // playersPerTeam also resizes the innings1 batting/bowling placeholders.
+      // Handle that in a per-match loop rather than a single updateMany.
+      matchUpdate.playersPerTeam = playersPerTeam;
+      const scheduled = await Match.find({ tournament: id, status: 'scheduled' });
+      for (const m of scheduled) {
+        Object.assign(m, matchUpdate);
+        if (m.innings1) {
+          const a = m.innings1.battingTeam;
+          const b = m.innings1.bowlingTeam;
+          m.innings1.batting = Array.from({ length: playersPerTeam }, (_, i) => ({
+            name: `${a} Player ${i + 1}`,
+            runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: 'Not Out',
+          }));
+          m.innings1.bowling = Array.from({ length: playersPerTeam }, (_, i) => ({
+            name: `${b} Player ${i + 1}`,
+            runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: 'Not Out',
+          }));
+        }
+        await m.save();
+      }
+    } else if (Object.keys(matchUpdate).length > 0) {
+      await Match.updateMany(
+        { tournament: id, status: 'scheduled' },
+        { $set: matchUpdate },
+      );
+    }
 
     res.json({ success: true, data: updated });
   } catch (error) {

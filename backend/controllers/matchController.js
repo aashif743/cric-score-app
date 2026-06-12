@@ -220,8 +220,18 @@ exports.getMatchById = async (req, res) => {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
 
+    // Owner can always view. Other signed-in users can view if the match
+    // belongs to a public tournament — supports the live feed viewers.
     if (match.user.toString() !== req.user.id) {
+      let allowed = false;
+      if (match.tournament) {
+        const Tournament = require('../models/Tournament');
+        const t = await Tournament.findById(match.tournament).select('visibility').lean();
+        if (t && t.visibility === 'public') allowed = true;
+      }
+      if (!allowed) {
         return res.status(401).json({ success: false, error: "Not authorized to view this match" });
+      }
     }
 
     // **KEY LOGIC**: If the match is in progress and has a saved liveState, return that.
@@ -623,6 +633,13 @@ exports.endMatch = async (req, res) => {
         .catch(e => console.error('Knockout propagation error:', e.message));
     }
 
+    // League group stage: if this match was a group match and its group is now
+    // fully complete, rank the group and populate the knockout TBD slots.
+    if (match.tournament && match.stage === 'group') {
+      tryAdvanceLeagueGroup(match.tournament, match.group)
+        .catch(e => console.error('League group-advance error:', e.message));
+    }
+
     res.json({
       success: true,
       message: "Match ended successfully",
@@ -677,6 +694,150 @@ const propagateKnockoutWinner = async (nextMatchId, slot, winnerName) => {
   }
 
   await next.save();
+};
+
+// --- League group-stage helpers ---------------------------------------------
+
+// Convert "12.3" → 12.5 (3 balls = 0.5 of an over).
+const oversToDecimal = (overs) => {
+  if (!overs && overs !== 0) return 0;
+  const [whole, balls] = overs.toString().split('.');
+  return (parseInt(whole, 10) || 0) + (parseInt(balls, 10) || 0) / 6;
+};
+
+// Build a points-table row per team for a group from all its completed matches.
+// Cricket league points (CPL/IPL convention): win=2, tie/no-result=1, loss=0.
+// Tie-break: NRR descending, then head-to-head (if exactly two teams tied).
+const computeGroupStandings = (matches, teamNames) => {
+  const row = (team) => ({
+    team, played: 0, won: 0, lost: 0, tied: 0, points: 0,
+    runsFor: 0, oversFor: 0, runsAgainst: 0, oversAgainst: 0,
+    h2h: {}, // opponent → 'won'|'lost'|'tied'
+  });
+  const table = Object.fromEntries(teamNames.map((t) => [t, row(t)]));
+
+  matches.forEach((m) => {
+    if (m.status !== 'completed') return;
+    const a = m.teamA?.name; const b = m.teamB?.name;
+    if (!a || !b || !table[a] || !table[b]) return;
+    const i1 = m.innings1 || {}; const i2 = m.innings2 || {};
+
+    // Identify which innings each team batted in.
+    const aFirst = i1.battingTeam === a;
+    const aBat = aFirst ? i1 : i2;
+    const bBat = aFirst ? i2 : i1;
+    const aRuns = aBat.runs || 0;
+    const aOv = oversToDecimal(aBat.overs);
+    const bRuns = bBat.runs || 0;
+    const bOv = oversToDecimal(bBat.overs);
+
+    table[a].played++; table[b].played++;
+    table[a].runsFor += aRuns; table[a].runsAgainst += bRuns;
+    table[a].oversFor += aOv;   table[a].oversAgainst += bOv;
+    table[b].runsFor += bRuns; table[b].runsAgainst += aRuns;
+    table[b].oversFor += bOv;   table[b].oversAgainst += aOv;
+
+    const winner = m.matchSummary?.winner || (() => {
+      const idx = m.result?.indexOf(' won by ') ?? -1;
+      return idx > 0 ? m.result.slice(0, idx) : '';
+    })();
+    if (winner === a) {
+      table[a].won++; table[b].lost++;
+      table[a].points += 2;
+      table[a].h2h[b] = 'won'; table[b].h2h[a] = 'lost';
+    } else if (winner === b) {
+      table[b].won++; table[a].lost++;
+      table[b].points += 2;
+      table[b].h2h[a] = 'won'; table[a].h2h[b] = 'lost';
+    } else {
+      // Tied or no-result.
+      table[a].tied++; table[b].tied++;
+      table[a].points += 1; table[b].points += 1;
+      table[a].h2h[b] = 'tied'; table[b].h2h[a] = 'tied';
+    }
+  });
+
+  // NRR = (totalRuns/totalOvers) − (totalRunsAgainst/totalOversAgainst).
+  Object.values(table).forEach((r) => {
+    const rrFor = r.oversFor > 0 ? r.runsFor / r.oversFor : 0;
+    const rrAgainst = r.oversAgainst > 0 ? r.runsAgainst / r.oversAgainst : 0;
+    r.nrr = +(rrFor - rrAgainst).toFixed(3);
+  });
+
+  // Sort: points DESC → NRR DESC → head-to-head (only when two-way tie).
+  return Object.values(table).sort((x, y) => {
+    if (y.points !== x.points) return y.points - x.points;
+    if (y.nrr !== x.nrr) return y.nrr - x.nrr;
+    if (x.h2h[y.team] === 'won') return -1;
+    if (y.h2h[x.team] === 'won') return 1;
+    return 0;
+  });
+};
+
+// Place winner into a TBD slot of a knockout match. Mirrors propagateKnockoutWinner
+// but operates on stage='knockout' league matches looked up by source label.
+const fillKnockoutSlot = async (knockoutMatch, slotKey /* 'A' | 'B' */, teamName) => {
+  if (!teamName) return;
+  const sideKey = slotKey === 'A' ? 'teamA' : 'teamB';
+  if (knockoutMatch[sideKey]?.name && knockoutMatch[sideKey].name !== 'TBD') return;
+  knockoutMatch[sideKey] = { name: teamName, shortName: teamName.substring(0, 3).toUpperCase() };
+  if (knockoutMatch.innings1) {
+    if (slotKey === 'A') {
+      knockoutMatch.innings1.battingTeam = teamName;
+      knockoutMatch.innings1.batting = Array.from({ length: knockoutMatch.playersPerTeam || 11 }, (_, i) => ({
+        name: `${teamName} Player ${i + 1}`,
+        runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: 'Not Out',
+      }));
+    } else {
+      knockoutMatch.innings1.bowlingTeam = teamName;
+      knockoutMatch.innings1.bowling = Array.from({ length: knockoutMatch.playersPerTeam || 11 }, (_, i) => ({
+        name: `${teamName} Player ${i + 1}`,
+        runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: 'Not Out',
+      }));
+    }
+  }
+};
+
+// When a league group's matches are all complete, rank the group and fill the
+// matching knockout TBD slots (sources are labelled "A1", "B2", … in liveState).
+const tryAdvanceLeagueGroup = async (tournamentId, groupLetter) => {
+  if (!tournamentId || !groupLetter) return;
+  const Tournament = require('../models/Tournament');
+  const tournament = await Tournament.findById(tournamentId).lean();
+  if (!tournament || tournament.format !== 'league') return;
+  if (!tournament.teamsAdvancePerGroup) return; // league-only, no knockout
+
+  const groupIdx = groupLetter.charCodeAt(0) - 65;
+  const groupTeams = (tournament.groups || [])[groupIdx];
+  if (!groupTeams || groupTeams.length < 2) return;
+
+  const groupMatches = await Match.find({
+    tournament: tournamentId, stage: 'group', group: groupLetter,
+  }).lean();
+  if (groupMatches.length === 0) return;
+  const allDone = groupMatches.every((m) => m.status === 'completed' || m.status === 'abandoned');
+  if (!allDone) return;
+
+  const standings = computeGroupStandings(groupMatches, groupTeams);
+  // Map "A1", "A2" → team name for this group.
+  const placement = {};
+  standings.forEach((r, i) => { placement[`${groupLetter}${i + 1}`] = r.team; });
+
+  // Fill every knockout match whose source label references this group.
+  const knockouts = await Match.find({
+    tournament: tournamentId, stage: 'knockout', status: 'scheduled',
+  });
+  for (const ko of knockouts) {
+    const src = ko.liveState || {};
+    let dirty = false;
+    if (src.sourceA && placement[src.sourceA] && (!ko.teamA?.name || ko.teamA.name === 'TBD')) {
+      await fillKnockoutSlot(ko, 'A', placement[src.sourceA]); dirty = true;
+    }
+    if (src.sourceB && placement[src.sourceB] && (!ko.teamB?.name || ko.teamB.name === 'TBD')) {
+      await fillKnockoutSlot(ko, 'B', placement[src.sourceB]); dirty = true;
+    }
+    if (dirty) await ko.save();
+  }
 };
 
 // Add this new exported function

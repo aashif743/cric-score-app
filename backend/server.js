@@ -15,6 +15,7 @@ const userRoutes = require("./routes/userRoutes");
 const suggestionRoutes = require("./routes/suggestionRoutes");
 const tournamentRoutes = require("./routes/tournamentRoutes");
 const publicRoutes = require("./routes/publicRoutes");
+const liveRoutes = require("./routes/liveRoutes");
 
 const app = express();
 
@@ -69,12 +70,42 @@ app.use("/api/users", userRoutes);
 app.use("/api/suggestions", suggestionRoutes);
 app.use("/api/tournaments", tournamentRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/live", liveRoutes);
 
 // MongoDB Connection
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
+
+// In-memory cache of "is this match's tournament public?" so the fan-out
+// hot path doesn't hit MongoDB on every ball. Entries expire after 5 minutes
+// so visibility toggles eventually propagate without a server restart.
+const Match = require("./models/Match");
+const Tournament = require("./models/Tournament");
+const publicMatchCache = new Map(); // matchId -> { isPublic: bool, exp: ms }
+const PUBLIC_CACHE_TTL = 5 * 60 * 1000;
+
+async function isMatchPublic(matchId) {
+  const now = Date.now();
+  const cached = publicMatchCache.get(matchId);
+  if (cached && cached.exp > now) return cached.isPublic;
+
+  let isPublic = false;
+  try {
+    const match = await Match.findById(matchId).select("tournament").lean();
+    if (match?.tournament) {
+      const t = await Tournament.findById(match.tournament).select("visibility").lean();
+      // Anything not explicitly "private" counts as public (schema default is
+      // "public"; legacy tournaments have no visibility field stored).
+      isPublic = !!t && t.visibility !== "private";
+    }
+  } catch (err) {
+    console.error("isMatchPublic lookup failed:", err.message);
+  }
+  publicMatchCache.set(matchId, { isPublic, exp: now + PUBLIC_CACHE_TTL });
+  return isPublic;
+}
 
 // Socket.io Events
 io.on("connection", (socket) => {
@@ -85,10 +116,30 @@ io.on("connection", (socket) => {
     console.log(`User ${socket.id} joined room: ${matchId}`);
   });
 
-  socket.on("live-score-update", ({ matchId, payload }) => {
-    if (matchId && payload) {
-      console.log(`Relaying score update to room: ${matchId}`);
-      socket.to(matchId).emit("score-updated", payload);
+  // Dashboard live strip subscribes to this global room. Any score update on
+  // any public match results in a 'public-live-update' broadcast carrying the
+  // matchId so the strip can refetch / patch just that card.
+  socket.on("join-public-live", () => {
+    socket.join("public-live");
+  });
+  socket.on("leave-public-live", () => {
+    socket.leave("public-live");
+  });
+
+  socket.on("live-score-update", async ({ matchId, payload }) => {
+    if (!matchId || !payload) return;
+    // 1) Per-match room — viewers of the specific match (existing behavior).
+    socket.to(matchId).emit("score-updated", payload);
+    // 2) Global public-live room — only if the match belongs to a public
+    //    tournament. Sent to everyone in the room *including* the scorer's
+    //    own connection, so any dashboard the scorer also has open updates.
+    try {
+      if (await isMatchPublic(matchId)) {
+        io.to("public-live").emit("public-live-update", { matchId, ts: Date.now() });
+      }
+    } catch (err) {
+      // Don't let the fan-out break score relaying.
+      console.error("public-live fan-out failed:", err.message);
     }
   });
 
