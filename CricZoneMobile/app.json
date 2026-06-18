@@ -2,27 +2,29 @@
   "expo": {
     "name": "CricZone",
     "slug": "CricZoneMobile",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
-    "icon": "./assets/logo/criczone_icon.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/logo/criczone_logo.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "9",
+      "buildNumber": "11",
       "infoPlist": {
         "NSCameraUsageDescription": "CricZone needs camera access to capture and share scorecard images.",
         "NSPhotoLibraryUsageDescription": "CricZone needs photo library access to save and share scorecard images.",
         "NSPhotoLibraryAddUsageDescription": "CricZone needs permission to save scorecard images to your photo library.",
         "CFBundleDisplayName": "CricZone",
         "ITSAppUsesNonExemptEncryption": false,
-        "LSApplicationQueriesSchemes": ["mailto"]
+        "LSApplicationQueriesSchemes": [
+          "mailto"
+        ]
       },
       "config": {
         "usesNonExemptEncryption": false
@@ -33,7 +35,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo/criczone_icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "package": "com.criczone.mobile",
@@ -65,7 +67,10 @@
     },
     "owner": "aashif",
     "privacy": "public",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "githubUrl": "https://github.com/aashif743/cric-score-app",
     "primaryColor": "#d97706"
   }

@@ -31,7 +31,6 @@ const StrikerSelectModal = ({
           {/* Header */}
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
-            <Text style={styles.subtitle}>Who will face the next ball?</Text>
           </View>
 
           {/* Batsman Options */}
@@ -59,7 +58,7 @@ const StrikerSelectModal = ({
                   </Text>
                 </View>
 
-                {/* Name and Stats */}
+                {/* Name */}
                 <View style={styles.optionInfo}>
                   <Text style={[
                     styles.optionName,
@@ -67,9 +66,9 @@ const StrikerSelectModal = ({
                   ]} numberOfLines={2}>
                     {batsman.name}
                   </Text>
-                  <Text style={styles.optionStats}>
-                    {batsman.isNew ? 'Coming in to bat' : `${batsman.runs} runs (${batsman.balls} balls)`}
-                  </Text>
+                  {batsman.isNew ? (
+                    <Text style={styles.newTag}>New batsman</Text>
+                  ) : null}
                 </View>
 
                 {/* Checkmark for suggested */}
@@ -81,11 +80,6 @@ const StrikerSelectModal = ({
               </TouchableOpacity>
             ))}
           </View>
-
-          {/* Info text */}
-          <Text style={styles.infoText}>
-            Tap to select the next striker
-          </Text>
         </View>
       </View>
     </Modal>
@@ -178,7 +172,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#334155',
-    marginBottom: 2,
+  },
+  newTag: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#64748b',
+    marginTop: 2,
   },
   optionNameSuggested: {
     color: '#1e293b',

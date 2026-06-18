@@ -21,6 +21,7 @@ import matchService from '../utils/matchService';
 import tournamentService from '../utils/tournamentService';
 import suggestionService from '../utils/suggestionService';
 import AutocompleteInput from '../components/AutocompleteInput';
+import GradientHeader from '../components/GradientHeader';
 import { colors, spacing, borderRadius, fontSizes, fontWeights, shadows } from '../utils/theme';
 
 const { width } = Dimensions.get('window');
@@ -154,6 +155,10 @@ const MatchSetupScreen = ({ navigation, route }) => {
   // Tournament params
   const tournamentId = route.params?.tournamentId || null;
   const initialTournamentDefaults = route.params?.tournamentDefaults || null;
+  // For knockout, the match record already exists (pre-generated bracket).
+  // matchId tells us to update that match instead of creating a new one,
+  // and to lock the team pair to the bracket slot.
+  const existingMatchId = route.params?.matchId || null;
 
   // Tournament data (can be fetched if not provided)
   const [tournamentData, setTournamentData] = useState(initialTournamentDefaults);
@@ -220,6 +225,66 @@ const MatchSetupScreen = ({ navigation, route }) => {
   const [isEditingTournamentBowling, setIsEditingTournamentBowling] = useState(false);
   const tournamentBattingInputRef = useRef(null);
   const tournamentBowlingInputRef = useRef(null);
+  // The team name *before* the user started editing. If they commit a change,
+  // we propagate it across the whole tournament (teamNames + every match).
+  const battingOriginalRef = useRef(null);
+  const bowlingOriginalRef = useRef(null);
+
+  // Persist a tournament-wide team rename. Updates the in-memory team list
+  // so the dropdown options refresh, and silently rolls back the field on
+  // failure (e.g. name conflict) without disrupting the user.
+  const propagateRename = async (oldName, newName, side) => {
+    if (!tournamentId || !user?.token) return;
+    const oldTrim = (oldName || '').trim();
+    const newTrim = (newName || '').trim();
+    if (!oldTrim || !newTrim || oldTrim === newTrim) return;
+    try {
+      await tournamentService.renameTeam(tournamentId, oldTrim, newTrim, user.token);
+      setTournamentData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          teamNames: (prev.teamNames || []).map((n) => (n === oldTrim ? newTrim : n)),
+        };
+      });
+      // Keep sibling slot in sync if it was showing the old name too.
+      if (side === 'batting' && bowlingTeam === oldTrim) setBowlingTeam(newTrim);
+      if (side === 'bowling' && battingTeam === oldTrim) setBattingTeam(newTrim);
+    } catch (err) {
+      const message = err?.error || err?.response?.data?.error || 'Could not rename team.';
+      Alert.alert('Rename failed', message);
+      // Revert the local field to the old name so what the user sees is honest.
+      if (side === 'batting') setBattingTeam(oldTrim);
+      else if (side === 'bowling') setBowlingTeam(oldTrim);
+    }
+  };
+
+  const commitTournamentBattingRename = () => {
+    setIsEditingTournamentBatting(false);
+    const original = battingOriginalRef.current;
+    battingOriginalRef.current = null;
+    if (original != null) propagateRename(original, battingTeam, 'batting');
+  };
+  const commitTournamentBowlingRename = () => {
+    setIsEditingTournamentBowling(false);
+    const original = bowlingOriginalRef.current;
+    bowlingOriginalRef.current = null;
+    if (original != null) propagateRename(original, bowlingTeam, 'bowling');
+  };
+
+  const startTournamentBattingRename = () => {
+    // Knockout: team names are locked to the bracket — rename is a no-op.
+    if (existingMatchId) return;
+    battingOriginalRef.current = battingTeam;
+    setIsEditingTournamentBatting(true);
+    setTimeout(() => tournamentBattingInputRef.current?.focus(), 80);
+  };
+  const startTournamentBowlingRename = () => {
+    if (existingMatchId) return;
+    bowlingOriginalRef.current = bowlingTeam;
+    setIsEditingTournamentBowling(true);
+    setTimeout(() => tournamentBowlingInputRef.current?.focus(), 80);
+  };
 
   // Tournament team selection
   const [showBattingDropdown, setShowBattingDropdown] = useState(false);
@@ -268,12 +333,19 @@ const MatchSetupScreen = ({ navigation, route }) => {
     fetchTournamentData();
   }, [tournamentId, initialTournamentDefaults, user?.token]);
 
-  // Update team names when tournament data is available
+  // Auto-select the next un-played pair, but ONLY ONCE — the first time
+  // tournament data becomes available. Re-running on later `tournamentData`
+  // changes was wiping user actions: e.g. after a rename API call
+  // (`propagateRename` → `setTournamentData`) this effect re-fired and
+  // resetting battingTeam/bowlingTeam to the default un-played pair
+  // overwrote the user's renamed selection.
+  const hasInitializedPairRef = useRef(false);
   useEffect(() => {
-    if (hasTournamentTeams) {
+    if (hasTournamentTeams && !hasInitializedPairRef.current) {
       const { team1, team2 } = getNextTeamPair();
       setBattingTeam(team1);
       setBowlingTeam(team2);
+      hasInitializedPairRef.current = true;
     }
   }, [tournamentData, completedMatches]);
 
@@ -337,11 +409,22 @@ const MatchSetupScreen = ({ navigation, route }) => {
 
     try {
       if (user?.token) {
-        const response = await matchService.createMatch(matchData, user.token);
-        navigation.replace('ScoreCard', {
-          matchData: response.data || response,
-          matchSettings: matchData,
-        });
+        // Knockout: a placeholder match was generated when the bracket was
+        // created — update it in place instead of creating a duplicate.
+        if (existingMatchId) {
+          await matchService.updateMatch(existingMatchId, matchData, user.token);
+          const fresh = await matchService.getMatch(existingMatchId, user.token);
+          navigation.replace('ScoreCard', {
+            matchData: fresh.data || fresh,
+            matchSettings: matchData,
+          });
+        } else {
+          const response = await matchService.createMatch(matchData, user.token);
+          navigation.replace('ScoreCard', {
+            matchData: response.data || response,
+            matchSettings: matchData,
+          });
+        }
       } else {
         const guestMatch = {
           _id: `guest_${Date.now()}`,
@@ -365,19 +448,11 @@ const MatchSetupScreen = ({ navigation, route }) => {
   if (fetchingTournament) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-            activeOpacity={0.7}
-          >
-            <View style={styles.backIcon}>
-              <View style={styles.backArrow} />
-            </View>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Tournament Match</Text>
-          <View style={styles.headerSpacer} />
-        </View>
+        <GradientHeader
+          title="Tournament Match"
+          subtitle="Loading…"
+          onBack={() => navigation.goBack()}
+        />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Loading tournament...</Text>
@@ -388,20 +463,11 @@ const MatchSetupScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <View style={styles.backIcon}>
-            <View style={styles.backArrow} />
-          </View>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{tournamentId ? 'Tournament Match' : 'New Match'}</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <GradientHeader
+        title={tournamentId ? 'Tournament Match' : 'New Match'}
+        subtitle="Configure teams and rules"
+        onBack={() => navigation.goBack()}
+      />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -434,7 +500,7 @@ const MatchSetupScreen = ({ navigation, route }) => {
 
           {/* Team Setup Section */}
           <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
-          <View style={styles.section}>
+          <View style={styles.teamSetupSection}>
             <Text style={styles.sectionTitle}>Team Setup</Text>
 
             {/* Tournament Team Dropdowns */}
@@ -450,38 +516,65 @@ const MatchSetupScreen = ({ navigation, route }) => {
                       </View>
                       <Text style={styles.teamLabel}>Batting First</Text>
                     </View>
-                    <TouchableOpacity
+                    <View
                       style={[
                         styles.tournamentDropdownTrigger,
                         showBattingDropdown && styles.tournamentDropdownTriggerOpen,
                       ]}
-                      onPress={() => {
-                        const opening = !showBattingDropdown;
-                        setShowBattingDropdown(opening);
-                        setShowBowlingDropdown(false);
-                        Animated.spring(battingDropdownAnim, {
-                          toValue: opening ? 1 : 0,
-                          friction: 8,
-                          tension: 100,
-                          useNativeDriver: false,
-                        }).start();
-                        Animated.spring(bowlingDropdownAnim, {
-                          toValue: 0,
-                          friction: 8,
-                          tension: 100,
-                          useNativeDriver: false,
-                        }).start();
-                      }}
-                      activeOpacity={0.7}
                     >
-                      <Text style={styles.tournamentDropdownText} numberOfLines={1}>
-                        {battingTeam}
-                      </Text>
-                      <View style={[
-                        styles.tournamentChevron,
-                        showBattingDropdown && styles.tournamentChevronOpen,
-                      ]} />
-                    </TouchableOpacity>
+                      {isEditingTournamentBatting ? (
+                        <AutocompleteInput
+                          value={battingTeam}
+                          onChangeText={setBattingTeam}
+                          type="team"
+                          placeholder={battingTeam}
+                          style={styles.tournamentDropdownAutocomplete}
+                          inputStyle={styles.tournamentDropdownTextInput}
+                          onBlur={commitTournamentBattingRename}
+                          maxLength={20}
+                          autoFocus
+                          selectTextOnFocus
+                          returnKeyType="done"
+                        />
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.tournamentDropdownNameTap}
+                          onPress={startTournamentBattingRename}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.tournamentDropdownText} numberOfLines={1}>
+                            {battingTeam}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={styles.tournamentDropdownChevronTap}
+                        onPress={() => {
+                          const opening = !showBattingDropdown;
+                          setShowBattingDropdown(opening);
+                          setShowBowlingDropdown(false);
+                          Animated.spring(battingDropdownAnim, {
+                            toValue: opening ? 1 : 0,
+                            friction: 8,
+                            tension: 100,
+                            useNativeDriver: false,
+                          }).start();
+                          Animated.spring(bowlingDropdownAnim, {
+                            toValue: 0,
+                            friction: 8,
+                            tension: 100,
+                            useNativeDriver: false,
+                          }).start();
+                        }}
+                        activeOpacity={0.6}
+                        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      >
+                        <View style={[
+                          styles.tournamentChevron,
+                          showBattingDropdown && styles.tournamentChevronOpen,
+                        ]} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   <Animated.View style={{
                     maxHeight: battingDropdownAnim.interpolate({
@@ -533,31 +626,6 @@ const MatchSetupScreen = ({ navigation, route }) => {
                       ))}
                     </View>
                   </Animated.View>
-                  {/* Rename batting team */}
-                  {isEditingTournamentBatting ? (
-                    <TextInput
-                      ref={tournamentBattingInputRef}
-                      style={styles.tournamentRenameInput}
-                      value={battingTeam}
-                      onChangeText={setBattingTeam}
-                      onBlur={() => setIsEditingTournamentBatting(false)}
-                      onSubmitEditing={() => setIsEditingTournamentBatting(false)}
-                      maxLength={20}
-                      autoFocus
-                      selectTextOnFocus
-                      returnKeyType="done"
-                    />
-                  ) : (
-                    <TouchableOpacity
-                      onPress={() => {
-                        setIsEditingTournamentBatting(true);
-                        setTimeout(() => tournamentBattingInputRef.current?.focus(), 100);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.tournamentRenameHint}>Tap to rename</Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
 
                 <View style={styles.tournamentVsDivider}>
@@ -575,38 +643,65 @@ const MatchSetupScreen = ({ navigation, route }) => {
                       <View style={styles.ballIconSmall} />
                       <Text style={styles.teamLabel}>Bowling First</Text>
                     </View>
-                    <TouchableOpacity
+                    <View
                       style={[
                         styles.tournamentDropdownTrigger,
                         showBowlingDropdown && styles.tournamentDropdownTriggerOpen,
                       ]}
-                      onPress={() => {
-                        const opening = !showBowlingDropdown;
-                        setShowBowlingDropdown(opening);
-                        setShowBattingDropdown(false);
-                        Animated.spring(bowlingDropdownAnim, {
-                          toValue: opening ? 1 : 0,
-                          friction: 8,
-                          tension: 100,
-                          useNativeDriver: false,
-                        }).start();
-                        Animated.spring(battingDropdownAnim, {
-                          toValue: 0,
-                          friction: 8,
-                          tension: 100,
-                          useNativeDriver: false,
-                        }).start();
-                      }}
-                      activeOpacity={0.7}
                     >
-                      <Text style={styles.tournamentDropdownText} numberOfLines={1}>
-                        {bowlingTeam}
-                      </Text>
-                      <View style={[
-                        styles.tournamentChevron,
-                        showBowlingDropdown && styles.tournamentChevronOpen,
-                      ]} />
-                    </TouchableOpacity>
+                      {isEditingTournamentBowling ? (
+                        <AutocompleteInput
+                          value={bowlingTeam}
+                          onChangeText={setBowlingTeam}
+                          type="team"
+                          placeholder={bowlingTeam}
+                          style={styles.tournamentDropdownAutocomplete}
+                          inputStyle={styles.tournamentDropdownTextInput}
+                          onBlur={commitTournamentBowlingRename}
+                          maxLength={20}
+                          autoFocus
+                          selectTextOnFocus
+                          returnKeyType="done"
+                        />
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.tournamentDropdownNameTap}
+                          onPress={startTournamentBowlingRename}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.tournamentDropdownText} numberOfLines={1}>
+                            {bowlingTeam}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={styles.tournamentDropdownChevronTap}
+                        onPress={() => {
+                          const opening = !showBowlingDropdown;
+                          setShowBowlingDropdown(opening);
+                          setShowBattingDropdown(false);
+                          Animated.spring(bowlingDropdownAnim, {
+                            toValue: opening ? 1 : 0,
+                            friction: 8,
+                            tension: 100,
+                            useNativeDriver: false,
+                          }).start();
+                          Animated.spring(battingDropdownAnim, {
+                            toValue: 0,
+                            friction: 8,
+                            tension: 100,
+                            useNativeDriver: false,
+                          }).start();
+                        }}
+                        activeOpacity={0.6}
+                        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      >
+                        <View style={[
+                          styles.tournamentChevron,
+                          showBowlingDropdown && styles.tournamentChevronOpen,
+                        ]} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   <Animated.View style={{
                     maxHeight: bowlingDropdownAnim.interpolate({
@@ -658,31 +753,6 @@ const MatchSetupScreen = ({ navigation, route }) => {
                       ))}
                     </View>
                   </Animated.View>
-                  {/* Rename bowling team */}
-                  {isEditingTournamentBowling ? (
-                    <TextInput
-                      ref={tournamentBowlingInputRef}
-                      style={styles.tournamentRenameInput}
-                      value={bowlingTeam}
-                      onChangeText={setBowlingTeam}
-                      onBlur={() => setIsEditingTournamentBowling(false)}
-                      onSubmitEditing={() => setIsEditingTournamentBowling(false)}
-                      maxLength={20}
-                      autoFocus
-                      selectTextOnFocus
-                      returnKeyType="done"
-                    />
-                  ) : (
-                    <TouchableOpacity
-                      onPress={() => {
-                        setIsEditingTournamentBowling(true);
-                        setTimeout(() => tournamentBowlingInputRef.current?.focus(), 100);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.tournamentRenameHint}>Tap to rename</Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
               </View>
             ) : (
@@ -1365,11 +1435,48 @@ const styles = StyleSheet.create({
     backgroundColor: '#fef3c7',
   },
   tournamentDropdownText: {
-    flex: 1,
     fontSize: 15,
     fontWeight: fontWeights.bold,
     color: '#0f172a',
-    marginRight: 8,
+  },
+  // Split-tap zones: name tap → rename; chevron tap → dropdown.
+  tournamentDropdownNameTap: {
+    flex: 1,
+    paddingVertical: 2,
+    paddingRight: 6,
+  },
+  tournamentDropdownChevronTap: {
+    paddingLeft: 6,
+    paddingVertical: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(15,23,42,0.08)',
+  },
+  // Used as the `inputStyle` prop on AutocompleteInput inside the
+  // tournament rename slot — strip the AutocompleteInput's default
+  // border/background/padding so it sits flush in the row.
+  tournamentDropdownTextInput: {
+    fontSize: 15,
+    fontWeight: fontWeights.bold,
+    color: '#0f172a',
+    paddingVertical: 2,
+    paddingRight: 6,
+    paddingHorizontal: 0,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderRadius: 0,
+  },
+  // Wrapper for the AutocompleteInput so it takes the available row width.
+  tournamentDropdownAutocomplete: {
+    flex: 1,
+  },
+  // Lift the Team Setup section above subsequent sections so its inline
+  // suggestion dropdown can overflow on top of Match Options below.
+  teamSetupSection: {
+    marginBottom: spacing.xl,
+    zIndex: 1000,
+    elevation: 1000,
   },
   tournamentChevron: {
     width: 8,

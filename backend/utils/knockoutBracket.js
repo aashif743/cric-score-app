@@ -1,11 +1,32 @@
-// Single-elimination bracket generator.
-// Input:  array of team names
-// Output: { matches, numRounds }
+// Single-elimination bracket generator using standard tournament seeding.
+// Input:  array of team names (entry order = seed order, seed 1 first)
+// Output: { matches, numRounds, slots, byes }
 //
-// Strategy: pad the team list with `null` for byes (placed at the end of round 1).
-// Round-1 bye positions don't get a match created; instead the bye team is
-// promoted directly into the corresponding round-2 slot. This keeps the schedule
-// clean (no useless "bye" rows) and works for any N >= 2.
+// For N teams the bracket size is the next power of two >= N, giving
+// (size - N) byes. Byes are awarded to the TOP seeds and distributed with the
+// canonical seeding order, so the strongest teams skip round 1 and two byes
+// never meet — exactly how professional knockout draws are seeded.
+//
+// A round-1 bye slot creates no match; its team is promoted straight into the
+// round-2 slot. Match defs carry { round, bracketSlot, teamA, teamB,
+// parentRound, parentSlot, parentSide }. Works for any N >= 2.
+
+// Canonical seed order for a power-of-two bracket. Returns seed numbers
+// (1-based) in slot order, e.g. size 8 -> [1,8,4,5,2,7,3,6]. This guarantees
+// seed 1 and seed 2 can only meet in the final, 1 v 4 / 2 v 3 in the semis, etc.
+function seedOrder(size) {
+  let order = [1];
+  while (order.length < size) {
+    const n = order.length * 2;
+    const next = [];
+    for (const s of order) {
+      next.push(s);
+      next.push(n + 1 - s); // pair each seed with its mirror
+    }
+    order = next;
+  }
+  return order;
+}
 
 function generateKnockoutBracket(teamNames) {
   const N = teamNames.length;
@@ -15,18 +36,24 @@ function generateKnockoutBracket(teamNames) {
   const slots = 2 ** numRounds;
   const byes = slots - N;
 
-  // Round-1 layout: first (slots/2 - byes) pairs are real (two teams).
-  // The remaining `byes` pairs each have one team (side A) plus a bye (side B).
-  // This guarantees no pair contains two byes for any N >= 2.
+  // Lay round 1 out in canonical seed order. Seeds 1..N are the entered teams;
+  // seeds > N are byes. Because byes are the highest seed numbers, they fall on
+  // the slots opposite the strongest teams — so the top `byes` seeds advance for
+  // free, and (since size > N > size/2) no pair is ever bye-vs-bye.
+  const order = seedOrder(slots);
+  const teamForSeed = (s) => (s <= N ? teamNames[s - 1] : null);
+
   const r1Count = slots / 2;
-  const realPairs = r1Count - byes;
   const slotInfo = { 1: [] };
-  let teamIdx = 0;
   for (let i = 0; i < r1Count; i++) {
-    if (i < realPairs) {
-      slotInfo[1].push({ teamA: teamNames[teamIdx++], teamB: teamNames[teamIdx++], isBye: false });
+    const a = teamForSeed(order[2 * i]);
+    const b = teamForSeed(order[2 * i + 1]);
+    if (a !== null && b !== null) {
+      slotInfo[1].push({ teamA: a, teamB: b, isBye: false });
     } else {
-      slotInfo[1].push({ teamA: teamNames[teamIdx++], teamB: null, isBye: true });
+      // Exactly one side is a bye — store the real team in teamA so the
+      // promotion step (teamA || teamB) carries it into round 2.
+      slotInfo[1].push({ teamA: a || b, teamB: null, isBye: true });
     }
   }
 

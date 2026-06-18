@@ -51,13 +51,23 @@ exports.getLiveMatches = async (req, res) => {
       .sort({ updatedAt: -1 })
       .lean();
 
-    const data = matches.map((m) => {
+    // Match number within its tournament — the position in creation order
+    // (ObjectIds are monotonic, so _id order ≈ fixture/schedule order). Shown
+    // on the card as "1st match", "2nd match", etc.
+    const matchNumbers = await Promise.all(
+      matches.map((m) =>
+        Match.countDocuments({ tournament: m.tournament, _id: { $lt: m._id } }).then((n) => n + 1),
+      ),
+    );
+
+    const data = matches.map((m, i) => {
       const t = tournamentById.get(String(m.tournament));
       return {
         _id: m._id,
         tournament: m.tournament,
         tournamentName: t?.name || "",
         tournamentFormat: t?.format || "quick",
+        matchNumber: matchNumbers[i],
         teamA: m.teamA,
         teamB: m.teamB,
         status: m.status,

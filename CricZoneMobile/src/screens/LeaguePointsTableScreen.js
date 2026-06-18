@@ -1,0 +1,351 @@
+import React, { useState, useContext, useCallback, useMemo, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  TouchableOpacity,
+  Animated,
+  Easing,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { AuthContext } from '../context/AuthContext';
+import tournamentService from '../utils/tournamentService';
+import GradientHeader from '../components/GradientHeader';
+import { computeGroupStandings, formatNRR, shortCode } from '../utils/leagueStandings';
+
+const groupLetter = (i) => String.fromCharCode(65 + i);
+
+// Column flex weights. Mirrors the screenshot proportions: wide Team col,
+// compact numeric cols, slightly wider NRR col for the signed value.
+const COL = {
+  rank: 32,        // fixed px
+  team: 2.4,       // flex
+  num: 0.75,       // flex
+  nrr: 1.2,        // flex
+};
+
+const HeaderRow = () => (
+  <View style={styles.headerRow}>
+    <View style={{ width: COL.rank }} />
+    <Text style={[styles.headerCell, { flex: COL.team, textAlign: 'left' }]}>Team</Text>
+    <Text style={[styles.headerCell, { flex: COL.num }]}>P</Text>
+    <Text style={[styles.headerCell, { flex: COL.num }]}>W</Text>
+    <Text style={[styles.headerCell, { flex: COL.num }]}>L</Text>
+    <Text style={[styles.headerCell, { flex: COL.num }]}>NR</Text>
+    <Text style={[styles.headerCell, { flex: COL.num }]}>Pts</Text>
+    <Text style={[styles.headerCell, { flex: COL.nrr }]}>NRR</Text>
+  </View>
+);
+
+const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQualifyingSlot, index }) => {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(8)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1, duration: 240, delay: index * 35,
+        easing: Easing.out(Easing.cubic), useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0, duration: 240, delay: index * 35,
+        easing: Easing.out(Easing.cubic), useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[
+        styles.row,
+        isQualifyingSlot && styles.rowQualifying,
+        // Divider below the last qualifying row marks the cut-off line
+        // between teams that would advance and those that wouldn't.
+        isLastQualifyingSlot && styles.rowQualifyingCutoff,
+        { opacity, transform: [{ translateY }] },
+      ]}
+    >
+      <View style={[styles.rankCol, { width: COL.rank }]}>
+        <Text style={styles.rankText}>{rank}</Text>
+      </View>
+
+      <View style={[styles.teamCol, { flex: COL.team }]}>
+        <View style={styles.teamLogo}>
+          <Text style={styles.teamLogoText}>{shortCode(row.team).charAt(0)}</Text>
+        </View>
+        <Text style={styles.teamCode} numberOfLines={1}>{shortCode(row.team)}</Text>
+        {qualified && <Text style={styles.qSuffix}>(Q)</Text>}
+        {eliminated && <Text style={styles.eSuffix}>(E)</Text>}
+      </View>
+
+      <Text style={[styles.numCell, { flex: COL.num }]}>{row.played}</Text>
+      <Text style={[styles.numCell, { flex: COL.num }]}>{row.won}</Text>
+      <Text style={[styles.numCell, { flex: COL.num }]}>{row.lost}</Text>
+      <Text style={[styles.numCell, { flex: COL.num }]}>{row.tied}</Text>
+      <Text style={[styles.numCell, styles.ptsCell, { flex: COL.num }]}>{row.points}</Text>
+      <Text
+        style={[
+          styles.numCell, { flex: COL.nrr },
+          row.nrr > 0 && styles.nrrPositive,
+          row.nrr < 0 && styles.nrrNegative,
+        ]}
+      >
+        {formatNRR(row.nrr)}
+      </Text>
+    </Animated.View>
+  );
+};
+
+const LeaguePointsTableScreen = ({ navigation, route }) => {
+  const { user } = useContext(AuthContext);
+  const { tournamentId } = route.params || {};
+
+  const [tournament, setTournament] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [activeGroup, setActiveGroup] = useState(0);
+
+  const fetchData = useCallback(async () => {
+    if (!user?.token || !tournamentId) return;
+    try {
+      setLoading(true); setError('');
+      const res = await tournamentService.getTournament(tournamentId, user.token);
+      setTournament(res.data);
+    } catch (err) {
+      console.warn('Fetch standings error:', err);
+      setError('Failed to load points table.');
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.token, tournamentId]);
+
+  useFocusEffect(useCallback(() => { fetchData(); }, [fetchData]));
+
+  const groups = tournament?.groups || [];
+  const matches = tournament?.matches || [];
+  const advance = tournament?.teamsAdvancePerGroup || 0;
+
+  const standingsByGroup = useMemo(
+    () => groups.map((teams, gIdx) => {
+      const letter = groupLetter(gIdx);
+      const gm = matches.filter((m) => m.stage === 'group' && m.group === letter);
+      return computeGroupStandings(gm, teams);
+    }),
+    [groups, matches],
+  );
+
+  // Whether the active group's matches are all played — drives the (Q)/(E)
+  // suffix beside team names. Without it, we don't presume to qualify anyone.
+  const activeGroupComplete = useMemo(() => {
+    const letter = groupLetter(activeGroup);
+    const gm = matches.filter((m) => m.stage === 'group' && m.group === letter);
+    return gm.length > 0 && gm.every((m) => m.status === 'completed' || m.status === 'abandoned');
+  }, [matches, activeGroup]);
+
+  const activeStandings = standingsByGroup[activeGroup] || [];
+  const showQE = advance > 0 && activeGroupComplete;
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <GradientHeader
+        title="Points Table"
+        subtitle={tournament?.name || ''}
+        onBack={() => navigation.goBack()}
+      />
+
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2563eb" />
+          <Text style={styles.loadingText}>Loading standings…</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          {/* Group tabs */}
+          {groups.length > 1 && (
+            <View style={styles.tabStripWrap}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.tabStrip}
+              >
+                {groups.map((_, i) => {
+                  const isActive = activeGroup === i;
+                  return (
+                    <TouchableOpacity
+                      key={i}
+                      activeOpacity={0.7}
+                      onPress={() => setActiveGroup(i)}
+                      style={[styles.tab, isActive && styles.tabActive]}
+                    >
+                      <Text style={[styles.tabText, isActive && styles.tabTextActive]} numberOfLines={1}>
+                        Group {groupLetter(i)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* The table itself — column header + rows in a card */}
+          <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.tableCard}>
+              <HeaderRow />
+              {activeStandings.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyTitle}>No standings yet</Text>
+                  <Text style={styles.emptyText}>Play some group matches to populate the table.</Text>
+                </View>
+              ) : (
+                activeStandings.map((row, idx) => {
+                  const rank = idx + 1;
+                  // Highlight every row in the "qualifying" slot so the user
+                  // can see at a glance who would advance right now.
+                  const isQualifyingSlot = advance > 0 && rank <= advance;
+                  const isLastQualifyingSlot = advance > 0 && rank === advance;
+                  return (
+                    <TableRow
+                      key={row.team}
+                      row={row}
+                      rank={rank}
+                      index={idx}
+                      qualified={showQE && rank <= advance}
+                      eliminated={showQE && rank > advance}
+                      isQualifyingSlot={isQualifyingSlot}
+                      isLastQualifyingSlot={isLastQualifyingSlot}
+                    />
+                  );
+                })
+              )}
+            </View>
+
+            {advance > 0 && (
+              <View style={styles.qualifyNote}>
+                <View style={styles.qualifyDot} />
+                <Text style={styles.qualifyText}>
+                  Top {advance} {advance === 1 ? 'team' : 'teams'} will qualify for next round
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </>
+      )}
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 12, fontSize: 15, color: '#94a3b8' },
+  errorText: { fontSize: 15, color: '#ef4444', marginBottom: 16 },
+  retryButton: { backgroundColor: '#2563eb', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 },
+  retryButtonText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+
+  // Tabs — wrap has top padding so there's breathing room between the
+  // gradient header and the first pill row.
+  tabStripWrap: { height: 72, paddingTop: 20 },
+  tabStrip: {
+    paddingHorizontal: 16, paddingVertical: 6,
+    gap: 8, alignItems: 'center',
+  },
+  tab: {
+    minWidth: 92, height: 40,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1.5, borderColor: '#e2e8f0',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  tabActive: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  tabText: { fontSize: 14, fontWeight: '700', color: '#64748b' },
+  tabTextActive: { color: '#2563eb', fontWeight: '800' },
+
+  listContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+
+  // Table card (single rounded container holding header + all rows)
+  tableCard: {
+    backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06, shadowRadius: 10, elevation: 2,
+  },
+
+  // Header
+  headerRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    paddingVertical: 10, paddingHorizontal: 12,
+  },
+  headerCell: {
+    fontSize: 11, fontWeight: '800', color: '#64748b',
+    letterSpacing: 0.5, textTransform: 'uppercase',
+    textAlign: 'center',
+  },
+
+  // Row
+  row: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 14, paddingHorizontal: 12,
+    borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
+    backgroundColor: '#fff',
+  },
+  rowQualifying: { backgroundColor: '#eff6ff' },
+  // Hairline below the last qualifying row — separates the "would qualify"
+  // block from the rest without shouting.
+  rowQualifyingCutoff: { borderBottomWidth: 1, borderBottomColor: '#93c5fd' },
+
+  // Rank column — plain number, no podium colors
+  rankCol: { alignItems: 'center', justifyContent: 'center' },
+  rankText: { fontSize: 13, fontWeight: '700', color: '#475569', fontVariant: ['tabular-nums'] },
+
+  // Team column
+  teamCol: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  teamLogo: {
+    width: 28, height: 28, borderRadius: 8,
+    backgroundColor: '#0d3b66',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  teamLogoText: { color: '#fff', fontSize: 13, fontWeight: '900' },
+  teamCode: { fontSize: 14, fontWeight: '800', color: '#0f172a', letterSpacing: 0.3 },
+  qSuffix: { fontSize: 11, fontWeight: '700', color: '#059669', marginLeft: 2 },
+  eSuffix: { fontSize: 11, fontWeight: '700', color: '#94a3b8', marginLeft: 2 },
+
+  // Numeric cells
+  numCell: {
+    fontSize: 13, fontWeight: '600', color: '#0f172a',
+    textAlign: 'center', fontVariant: ['tabular-nums'],
+  },
+  ptsCell: { fontWeight: '900' },
+  nrrPositive: { color: '#059669', fontWeight: '700' },
+  nrrNegative: { color: '#dc2626', fontWeight: '700' },
+
+  // Bottom qualify note
+  qualifyNote: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginTop: 14,
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1, borderColor: '#bfdbfe',
+  },
+  qualifyDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2563eb' },
+  qualifyText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#1e40af' },
+
+  emptyState: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#94a3b8', marginBottom: 6 },
+  emptyText: { fontSize: 12, color: '#cbd5e1', textAlign: 'center' },
+});
+
+export default LeaguePointsTableScreen;

@@ -27,6 +27,8 @@ import TVScoreboard from './pages/TVScoreboard';
 import TournamentTVScoreboard from './pages/TournamentTVScoreboard';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
+import Support from './pages/Support';
+import AccountDeletion from './pages/AccountDeletion';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
 
 // --- Placeholder Components for Future Features ---
@@ -69,8 +71,17 @@ function AppContent() {
 
 
   useEffect(() => {
+    // Static legal / info pages should never trigger a match-resume; they
+    // are commonly opened from the App Store listing or shared links, and
+    // forcing a navigation away from them was sending visitors back to the
+    // dashboard.
+    const staticInfoPaths = ['/privacy', '/terms', '/support', '/account-deletion'];
+    const onStaticInfoPage = staticInfoPaths.some(
+      (p) => location.pathname === p || location.pathname.startsWith(`${p}/`)
+    );
+
     // If a user is logged in, check if they have a match to resume.
-    if (user) {
+    if (user && !onStaticInfoPage) {
       const savedMatch = localStorage.getItem("currentMatch");
       if (savedMatch) {
         try {
@@ -94,7 +105,7 @@ function AppContent() {
     }
     // Update the ref for the next render.
     prevUser.current = user;
-  }, [user, navigate]);
+  }, [user, navigate, location.pathname]);
 
 
 
@@ -222,6 +233,8 @@ const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will
           <Route path="/tv/:matchId" element={<TVScoreboard />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<TermsOfService />} />
+          <Route path="/support" element={<Support />} />
+          <Route path="/account-deletion" element={<AccountDeletion />} />
 
           {/* --- Protected Routes (Require Login) --- */}
           <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/auth" />} />

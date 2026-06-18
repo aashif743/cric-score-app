@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import StatsTable from '../components/StatsTable';
+import GradientHeader from '../components/GradientHeader';
 import { shadows } from '../utils/theme';
 
 const statusConfig = {
@@ -264,19 +265,31 @@ const TournamentDetailScreen = ({ navigation, route }) => {
     setRefreshing(false);
   }, [fetchTournament, fetchStats, showStats]);
 
+  // Owner-only actions (start/resume scoring, create match, edit). Visitors
+  // who open this from a live card can view but not score.
+  const myId = user?.id || user?._id;
+  const isOwner = !!(tournament?.user && myId && String(tournament.user) === String(myId));
+
   const handleMatchPress = (match) => {
     if (match.status === 'completed') {
       navigation.navigate('FullScorecard', { matchId: match._id });
-    } else {
-      navigation.navigate('ScoreCard', {
-        matchData: match,
-        matchSettings: {
-          totalOvers: match.totalOvers,
-          ballsPerOver: match.ballsPerOver,
-          playersPerTeam: match.playersPerTeam,
-        },
-      });
+      return;
     }
+    if (!isOwner) {
+      // Watch a live match; do nothing for an upcoming one.
+      if (match.status === 'in_progress' || match.status === 'innings_break') {
+        navigation.navigate('PublicLiveMatch', { matchId: match._id });
+      }
+      return;
+    }
+    navigation.navigate('ScoreCard', {
+      matchData: match,
+      matchSettings: {
+        totalOvers: match.totalOvers,
+        ballsPerOver: match.ballsPerOver,
+        playersPerTeam: match.playersPerTeam,
+      },
+    });
   };
 
   const handleNewMatch = () => {
@@ -572,46 +585,42 @@ const TournamentDetailScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <View style={styles.backArrow} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>{tournament.name}</Text>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity
-            style={styles.shareButton}
-            onPress={handleShare}
-            activeOpacity={0.7}
-            disabled={sharing}
-          >
-            {sharing ? (
-              <ActivityIndicator size="small" color="#2563eb" />
-            ) : (
-              <View style={styles.shareIcon}>
-                <View style={styles.shareArrow} />
-                <View style={styles.shareBase} />
-              </View>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={handleEdit}
-            activeOpacity={0.7}
-          >
-            <View style={styles.pencilIcon}>
-              <View style={styles.pencilBody} />
-              <View style={styles.pencilTip} />
-            </View>
-          </TouchableOpacity>
-        </View>
-      </View>
+      <GradientHeader
+        title={tournament.name}
+        subtitle={`${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`}
+        onBack={() => navigation.goBack()}
+        rightSlot={
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity
+              style={styles.headerActionButton}
+              onPress={handleShare}
+              activeOpacity={0.7}
+              disabled={sharing}
+            >
+              {sharing ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <View style={styles.shareIcon}>
+                  <View style={styles.shareArrow} />
+                  <View style={styles.shareBase} />
+                </View>
+              )}
+            </TouchableOpacity>
+            {isOwner ? (
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={handleEdit}
+                activeOpacity={0.7}
+              >
+                <View style={styles.pencilIcon}>
+                  <View style={styles.pencilBody} />
+                  <View style={styles.pencilTip} />
+                </View>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        }
+      />
 
       <FlatList
         data={matches}
@@ -637,14 +646,16 @@ const TournamentDetailScreen = ({ navigation, route }) => {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* New Match FAB */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={handleNewMatch}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.fabText}>New Match</Text>
-      </TouchableOpacity>
+      {/* New Match FAB — owner only */}
+      {isOwner ? (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={handleNewMatch}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.fabText}>New Match</Text>
+        </TouchableOpacity>
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -690,17 +701,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f172a',
   },
-  shareButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#dbeafe',
+  headerActionButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   shareIcon: {
-    width: 20,
-    height: 20,
+    width: 18,
+    height: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -709,36 +720,28 @@ const styles = StyleSheet.create({
     height: 0,
     borderLeftWidth: 5,
     borderRightWidth: 5,
-    borderBottomWidth: 8,
+    borderBottomWidth: 7,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderBottomColor: '#2563eb',
+    borderBottomColor: '#fff',
     marginBottom: 1,
   },
   shareBase: {
     width: 2,
-    height: 8,
-    backgroundColor: '#2563eb',
+    height: 7,
+    backgroundColor: '#fff',
     borderRadius: 1,
   },
-  editButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#fef3c7',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   pencilIcon: {
-    width: 20,
-    height: 20,
+    width: 18,
+    height: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
   pencilBody: {
     width: 4,
-    height: 14,
-    backgroundColor: '#d97706',
+    height: 13,
+    backgroundColor: '#fff',
     borderRadius: 1,
     transform: [{ rotate: '-45deg' }],
   },

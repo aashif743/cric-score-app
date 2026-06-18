@@ -15,7 +15,7 @@ import {
   Share,
   Clipboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
@@ -23,6 +23,37 @@ import suggestionService from '../utils/suggestionService';
 import AutocompleteInput from '../components/AutocompleteInput';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import StrikerSelectModal from '../components/StrikerSelectModal';
+import Svg, { Path } from 'react-native-svg';
+
+// Curved-arrow undo glyph. Cleaner and more recognizable than the Unicode
+// "anticlockwise top semicircle arrow" character (which renders unreliably
+// across phone fonts).
+const UndoArrowIcon = ({ size = 18, color = '#b91c1c' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M9 14L4 9L9 4"
+      stroke={color}
+      strokeWidth={2.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Path
+      d="M4 9H14C17.866 9 21 12.134 21 16C21 19.866 17.866 23 14 23H11"
+      stroke={color}
+      strokeWidth={2.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+import {
+  BowledIcon,
+  CaughtIcon,
+  LBWIcon,
+  StumpedIcon,
+  HitWicketIcon,
+  RunOutIcon,
+} from '../components/WicketIcons';
 import { colors, spacing, borderRadius, fontSizes, fontWeights, shadows } from '../utils/theme';
 import io from 'socket.io-client';
 import { SOCKET_URL } from '../api/config';
@@ -77,6 +108,10 @@ const responsiveSize = {
 const ScoreCardScreen = ({ navigation, route }) => {
   const { user } = useContext(AuthContext);
   const { matchData, matchSettings } = route.params || {};
+  // Bottom safe-area inset — needed on Android phones with on-screen nav
+  // buttons (or gesture pill) so the scoring buttons don't sit underneath
+  // them and trigger system gestures on tap.
+  const insets = useSafeAreaInsets();
 
   // Match state
   const [match, setMatch] = useState({
@@ -149,6 +184,29 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [overHistory, setOverHistory] = useState([]);
   const [currentOverRuns, setCurrentOverRuns] = useState(0);
   const [currentOverWickets, setCurrentOverWickets] = useState(0);
+  // Synchronous mirror of the most recently completed over.
+  // setOverHistory is async, so when handleEndOfOver runs immediately before
+  // checkMatchEndConditions on the very last ball, buildMatchSnapshot reads a
+  // stale `overHistory` and the final over is missing from the saved match.
+  // This ref lets the snapshot pick up that over even before React flushes.
+  const lastCompletedOverRef = useRef(null);
+
+  // Synchronous mirror of the IN-PROGRESS over (balls accumulated since the
+  // last over end). When the match ends mid-over — e.g. the chasing team
+  // reaches the target before completing the over — the partial over has no
+  // entry in `overHistory` and the user would never see those last balls in
+  // the over-by-over view. We rebuild it from this ref inside the snapshot.
+  const partialOverRef = useRef({ balls: [], runs: 0, wickets: 0 });
+
+  // Single point that every scoring path calls right after setCurrentOverBalls
+  // so the mirror always reflects the latest ball without waiting for React.
+  const recordBallInCurrentOver = (ballDisplay, runDelta = 0, isWicket = false) => {
+    partialOverRef.current = {
+      balls: [...partialOverRef.current.balls, ballDisplay],
+      runs: partialOverRef.current.runs + (runDelta || 0),
+      wickets: partialOverRef.current.wickets + (isWicket ? 1 : 0),
+    };
+  };
 
   // Extras
   const [extras, setExtras] = useState({ wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 });
@@ -200,6 +258,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [selectedWicketType, setSelectedWicketType] = useState('');
   const [selectedExtraType, setSelectedExtraType] = useState('');
   const [runOutBatsman, setRunOutBatsman] = useState(null);
+  // Run-out delivery type: 'legal' | 'WD' | 'NB' | 'LB' | 'BYE'
+  // 'legal' = normal delivery (default). WD/NB = illegal delivery (no ball faced
+  // for WD, no over ball for both). LB/BYE = legal delivery, runs to extras.
+  const [runOutDeliveryType, setRunOutDeliveryType] = useState('legal');
   const [newBatsmanName, setNewBatsmanName] = useState('');
 
   // Wide/No Ball modal state
@@ -236,6 +298,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
   // Socket.io
   const socketRef = useRef(null);
+  const liveSyncTimeoutRef = useRef(null);
 
   // View mode toggle - 'live' for live scoring, 'scorecard' for full scorecard view
   const [viewMode, setViewMode] = useState('live');
@@ -356,12 +419,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     };
   }, [matchData?._id]);
 
-  // Emit score update to TV viewers
-  const emitScoreUpdate = () => {
-    const matchId = matchData?._id;
-    if (!socketRef.current || !matchId || matchId.startsWith('guest_')) return;
-    socketRef.current.emit('live-score-update', { matchId, payload: { timestamp: Date.now() } });
-  };
+  // Live sync helpers are defined later, after saveMatchProgress
 
   // Get batting team key (teamA or teamB)
   const getBattingTeamKey = () => {
@@ -625,6 +683,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Update current over
     setCurrentOverBalls(prev => [...prev, ballDisplay]);
     setCurrentOverRuns(prev => prev + totalRuns);
+    recordBallInCurrentOver(ballDisplay, totalRuns, false);
 
     // Update bowler stats
     if (ballCounted) {
@@ -861,6 +920,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
         runs: allRuns,
         wickets: allWickets,
       };
+      // Mirror synchronously so checkMatchEndConditions, which fires right
+      // after this in the same call frame, can include this over in the
+      // snapshot before React has flushed setOverHistory.
+      lastCompletedOverRef.current = overData;
       setOverHistory(prev => [...prev, overData]);
 
       // Check for maiden
@@ -882,6 +945,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       setCurrentOverBalls([]);
       setCurrentOverRuns(0);
       setCurrentOverWickets(0);
+      partialOverRef.current = { balls: [], runs: 0, wickets: 0 };
 
       // Rotate strike at end of over
       rotateStrike();
@@ -920,8 +984,227 @@ const ScoreCardScreen = ({ navigation, route }) => {
   };
 
   // Handle wicket
+  // Run Out on a non-legal delivery (Wide / No Ball / Leg Bye / Bye).
+  // Distinct from the existing legal Run Out: extras are credited correctly,
+  // ball-faced and over-ball counts depend on the delivery type, and the
+  // bowler is never credited with the wicket.
+  //   WD  → all runs to extras.wides, no ball faced, no over ball
+  //   NB  → NB penalty to extras.noBalls; running runs go to striker as
+  //         batsman runs; striker faces a ball; no over ball
+  //   LB  → runs to extras.legByes; striker faces a ball; counts in over;
+  //         bowler not charged the runs
+  //   BYE → runs to extras.byes; striker faces a ball; counts in over;
+  //         bowler not charged the runs
+  const handleRunOutOnExtra = (deliveryType) => {
+    try {
+      saveToHistory(`Run Out (${deliveryType})${selectedRuns > 0 ? ` +${selectedRuns}` : ''}`);
+
+      const outBatsman = runOutBatsman === 'nonStriker' ? nonStriker : striker;
+      const runsScored = selectedRuns || 0;
+      const shouldRotate = runsScored % 2 === 1;
+
+      const isLegalBall = deliveryType === 'LB' || deliveryType === 'BYE';
+      const strikerFacesBall = deliveryType !== 'WD';
+      const runsToBatsman = deliveryType === 'NB' ? runsScored : 0;
+
+      const widePen = deliveryType === 'WD' ? settings.wideRuns : 0;
+      const nbPen = deliveryType === 'NB' ? settings.noBallRuns : 0;
+
+      let totalRuns;
+      if (deliveryType === 'WD') totalRuns = widePen + runsScored;
+      else if (deliveryType === 'NB') totalRuns = nbPen + runsScored;
+      else totalRuns = runsScored;
+
+      // Bowler is not charged byes/leg-byes.
+      const bowlerRuns = (deliveryType === 'LB' || deliveryType === 'BYE') ? 0 : totalRuns;
+
+      // Ball display, e.g. "WD+2+W", "NB+1+W", "LB1+W", "B2+W".
+      let ballDisplay;
+      if (deliveryType === 'WD') {
+        ballDisplay = (widePen > 1 ? `WD${widePen}` : 'WD') +
+                      (runsScored > 0 ? `+${runsScored}` : '') + '+W';
+      } else if (deliveryType === 'NB') {
+        ballDisplay = (nbPen > 1 ? `NB${nbPen}` : 'NB') +
+                      (runsScored > 0 ? `+${runsScored}` : '') + '+W';
+      } else if (deliveryType === 'LB') {
+        ballDisplay = `LB${runsScored}+W`;
+      } else { // BYE
+        ballDisplay = `B${runsScored}+W`;
+      }
+
+      // Extras
+      if (deliveryType === 'WD') {
+        setExtras(prev => ({ ...prev, wides: prev.wides + totalRuns, total: prev.total + totalRuns }));
+      } else if (deliveryType === 'NB') {
+        setExtras(prev => ({ ...prev, noBalls: prev.noBalls + nbPen, total: prev.total + nbPen }));
+      } else if (deliveryType === 'LB') {
+        setExtras(prev => ({ ...prev, legByes: prev.legByes + runsScored, total: prev.total + runsScored }));
+      } else if (deliveryType === 'BYE') {
+        setExtras(prev => ({ ...prev, byes: prev.byes + runsScored, total: prev.total + runsScored }));
+      }
+
+      // Batsmen stats update (striker only; outBatsman marked out)
+      const strikerId = striker.id;
+      const outId = outBatsman.id;
+      setAllBatsmen(prev => prev.map(b => {
+        let newB = b;
+        if (b.id === strikerId) {
+          newB = {
+            ...newB,
+            runs: newB.runs + runsToBatsman,
+            balls: newB.balls + (strikerFacesBall ? 1 : 0),
+            fours: deliveryType === 'NB' && runsScored === 4 ? newB.fours + 1 : newB.fours,
+            sixes: deliveryType === 'NB' && runsScored === 6 ? newB.sixes + 1 : newB.sixes,
+          };
+        }
+        if (b.id === outId) {
+          newB = { ...newB, isOut: true, outType: 'Run Out' };
+        }
+        return newB;
+      }));
+
+      // Match state
+      setMatch(prev => ({
+        ...prev,
+        runs: prev.runs + totalRuns,
+        wickets: prev.wickets + 1,
+        balls: prev.balls + (isLegalBall ? 1 : 0),
+      }));
+
+      // Current over display
+      setCurrentOverBalls(prev => [...prev, ballDisplay]);
+      setCurrentOverRuns(prev => prev + totalRuns);
+      setCurrentOverWickets(prev => prev + 1);
+      recordBallInCurrentOver(ballDisplay, totalRuns, true);
+
+      // Bowler stats
+      if (isLegalBall) {
+        const [overs, balls] = currentBowler.overs.split('.').map(Number);
+        const newBalls = balls + 1;
+        const newOvers = newBalls === settings.ballsPerOver ? overs + 1 : overs;
+        const finalBalls = newBalls === settings.ballsPerOver ? 0 : newBalls;
+        const updatedBowler = {
+          ...currentBowler,
+          overs: `${newOvers}.${finalBalls}`,
+          runs: currentBowler.runs + bowlerRuns,
+        };
+        setCurrentBowler(updatedBowler);
+        setAllBowlers(prev => prev.map(b =>
+          b.id === currentBowler.id ? { ...b, overs: updatedBowler.overs, runs: b.runs + bowlerRuns } : b
+        ));
+      } else {
+        setCurrentBowler(prev => ({ ...prev, runs: prev.runs + bowlerRuns }));
+        setAllBowlers(prev => prev.map(b =>
+          b.id === currentBowler.id ? { ...b, runs: b.runs + bowlerRuns } : b
+        ));
+      }
+
+      // Fall of wicket
+      setFallOfWickets(prev => [...prev, {
+        batsman_name: outBatsman.name,
+        score: match.runs + totalRuns,
+        wicket: match.wickets + 1,
+        over: getCurrentOver(),
+      }]);
+
+      // Determine next batsman
+      let nextBatsman = allBatsmen.find(b => !b.isOut && !b.isRetired && b.id !== striker.id && b.id !== nonStriker.id);
+      if (!nextBatsman) {
+        nextBatsman = allBatsmen.find(b => b.isRetired && !b.isOut && b.id !== striker.id && b.id !== nonStriker.id);
+        if (nextBatsman) {
+          setAllBatsmen(prev => prev.map(b => b.id === nextBatsman.id ? { ...b, isRetired: false } : b));
+        }
+      }
+      const newBatsman = nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 };
+
+      // Updated striker with applied stats (for striker-select modal display)
+      const updatedStriker = {
+        ...striker,
+        runs: striker.runs + runsToBatsman,
+        balls: striker.balls + (strikerFacesBall ? 1 : 0),
+        fours: deliveryType === 'NB' && runsScored === 4 ? striker.fours + 1 : striker.fours,
+        sixes: deliveryType === 'NB' && runsScored === 6 ? striker.sixes + 1 : striker.sixes,
+      };
+
+      const survivingBatsman = runOutBatsman === 'striker' ? nonStriker : updatedStriker;
+      let suggestedStriker;
+      if (shouldRotate) {
+        suggestedStriker = runOutBatsman === 'striker' ? survivingBatsman : newBatsman;
+      } else {
+        suggestedStriker = runOutBatsman === 'striker' ? newBatsman : survivingBatsman;
+      }
+
+      const options = [
+        { ...survivingBatsman, isNew: false, isSuggested: suggestedStriker.id === survivingBatsman.id },
+        { ...newBatsman, isNew: true, isSuggested: suggestedStriker.id === newBatsman.id },
+      ];
+      options.sort((a, b) => (b.isSuggested ? 1 : 0) - (a.isSuggested ? 1 : 0));
+
+      setPendingRunOutData({
+        newBatsman,
+        survivingBatsman,
+        updatedSurvivingBatsman: runOutBatsman === 'nonStriker' ? updatedStriker : null,
+      });
+      setStrikerSelectOptions(options);
+      setShowStrikerSelectModal(true);
+
+      // End of over (only legal deliveries advance the over)
+      if (isLegalBall && (match.balls + 1) % settings.ballsPerOver === 0) {
+        handleEndOfOver({ display: ballDisplay, runs: totalRuns, isWicket: true });
+      }
+
+      // Pending updates for end-of-innings/match checks
+      let pendingBowlerUpdate;
+      if (isLegalBall) {
+        const [overs, balls] = currentBowler.overs.split('.').map(Number);
+        const newBalls = balls + 1;
+        const newOvers = newBalls === settings.ballsPerOver ? overs + 1 : overs;
+        const finalBalls = newBalls === settings.ballsPerOver ? 0 : newBalls;
+        pendingBowlerUpdate = {
+          ...currentBowler,
+          overs: `${newOvers}.${finalBalls}`,
+          runs: currentBowler.runs + bowlerRuns,
+        };
+      } else {
+        pendingBowlerUpdate = { ...currentBowler, runs: currentBowler.runs + bowlerRuns };
+      }
+      const pendingBatsmanUpdate = {
+        ...outBatsman,
+        isOut: true,
+        outType: 'Run Out',
+        balls: outBatsman.balls + ((outBatsman.id === striker.id && strikerFacesBall) ? 1 : 0),
+        runs: outBatsman.id === striker.id ? outBatsman.runs + runsToBatsman : outBatsman.runs,
+      };
+      checkMatchEndConditions(
+        match.runs + totalRuns,
+        match.wickets + 1,
+        match.balls + (isLegalBall ? 1 : 0),
+        pendingBowlerUpdate,
+        pendingBatsmanUpdate
+      );
+
+      emitScoreUpdate();
+
+      // Reset modal
+      setShowWicketModal(false);
+      setSelectedWicketType('');
+      setSelectedRuns(0);
+      setRunOutBatsman(null);
+      setRunOutDeliveryType('legal');
+    } catch (error) {
+      console.error('Error in handleRunOutOnExtra:', error);
+    }
+  };
+
   const handleWicket = (wicketType) => {
     try {
+    // Run Out on a non-legal delivery (Wide / No Ball / Leg Bye / Bye) is
+    // handled in its own branch below; legal Run Out keeps the existing flow.
+    if (wicketType === 'Run Out' && runOutDeliveryType && runOutDeliveryType !== 'legal') {
+      handleRunOutOnExtra(runOutDeliveryType);
+      return;
+    }
+
     // Save state before action for undo
     saveToHistory(`Wicket - ${wicketType}`);
 
@@ -970,6 +1253,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Update current over
     setCurrentOverBalls(prev => [...prev, 'W']);
     setCurrentOverWickets(prev => prev + 1);
+    recordBallInCurrentOver('W', runsScored, true);
 
     // Update bowler stats
     if (wicketType !== 'Run Out') {
@@ -1100,6 +1384,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     setSelectedWicketType('');
     setSelectedRuns(0);
     setRunOutBatsman(null);
+    setRunOutDeliveryType('legal');
     } catch (error) {
       console.error('Error in handleWicket:', error);
     }
@@ -1139,6 +1424,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Update current over display
     setCurrentOverBalls(prev => [...prev, ballDisplay]);
     setCurrentOverRuns(prev => prev + totalRuns);
+    recordBallInCurrentOver(ballDisplay, totalRuns, !!wideNoBallRunOut);
 
     // Update bowler runs
     setCurrentBowler(prev => ({ ...prev, runs: prev.runs + totalRuns }));
@@ -1252,6 +1538,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Update current over display
     setCurrentOverBalls(prev => [...prev, ballDisplay]);
     setCurrentOverRuns(prev => prev + totalRuns);
+    recordBallInCurrentOver(ballDisplay, totalRuns, !!wideNoBallRunOut);
 
     // Update bowler runs
     setCurrentBowler(prev => ({ ...prev, runs: prev.runs + totalRuns }));
@@ -1427,6 +1714,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Update current over display
     setCurrentOverBalls(prev => [...prev, ballDisplay]);
     setCurrentOverRuns(prev => prev + runs);
+    recordBallInCurrentOver(ballDisplay, runs, !!byeRunOut);
 
     // Update bowler overs (ball counted, but runs NOT added to bowler)
     setCurrentBowler(prev => {
@@ -1642,6 +1930,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Update current over display
     setCurrentOverBalls(prev => [...prev, runs.toString()]);
     setCurrentOverRuns(prev => prev + runs);
+    recordBallInCurrentOver(runs.toString(), runs, false);
 
     // Update bowler stats (runs and ball counted)
     updateBowlerStats(runs, false);
@@ -1826,6 +2115,32 @@ const ScoreCardScreen = ({ navigation, route }) => {
         );
       }
 
+      // overHistory may be missing the just-completed over because
+      // setOverHistory hasn't flushed yet. Pull it from the ref if needed.
+      const liveOverHistory = overHistory.map(o => ({ ...o, balls: [...o.balls] }));
+      const pendingOver = lastCompletedOverRef.current;
+      if (
+        pendingOver &&
+        !liveOverHistory.some(o => o.overNumber === pendingOver.overNumber && o.bowlerName === pendingOver.bowlerName)
+      ) {
+        liveOverHistory.push({ ...pendingOver, balls: [...pendingOver.balls] });
+      }
+
+      // If the match ended mid-over (chase completed before the over rolled,
+      // all-out before 6 legal balls, etc.) the in-progress over has no entry
+      // in `overHistory`. Reconstruct it from the partial-over mirror.
+      const partial = partialOverRef.current;
+      if (partial && partial.balls.length > 0) {
+        const partialOverNumber = Math.floor(balls / settings.ballsPerOver) + 1;
+        liveOverHistory.push({
+          overNumber: partialOverNumber,
+          bowlerName: currentBowler.name,
+          balls: [...partial.balls],
+          runs: partial.runs,
+          wickets: partial.wickets,
+        });
+      }
+
       return {
         runs,
         wickets,
@@ -1835,7 +2150,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         bowling: updatedBowlers,
         extras: { ...extras },
         fallOfWickets: fallOfWickets.map(f => ({ ...f })),
-        overHistory: overHistory.map(o => ({ ...o, balls: [...o.balls] })),
+        overHistory: liveOverHistory,
       };
     };
 
@@ -1903,10 +2218,14 @@ const ScoreCardScreen = ({ navigation, route }) => {
     }
   };
 
-  // Confirm end of first innings
+  // Confirm end of first innings — close the prompt and go straight into
+  // the second innings (no intermediate summary popup). The summary info
+  // (target, extras) is shown directly on the End Innings modal now.
   const confirmEndInnings = () => {
     setShowEndInningsModal(false);
-    setShowSummaryModal(true);
+    if (match.innings === 1) {
+      startSecondInnings();
+    }
   };
 
   // Start second innings
@@ -1980,6 +2299,8 @@ const ScoreCardScreen = ({ navigation, route }) => {
     setExtras({ wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 });
     setCurrentOverBalls([]);
     setOverHistory([]);
+    lastCompletedOverRef.current = null;
+    partialOverRef.current = { balls: [], runs: 0, wickets: 0 };
     setCurrentOverRuns(0);
     setCurrentOverWickets(0);
     setFallOfWickets([]);
@@ -2039,6 +2360,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
       };
     }
 
+    // Derive winner from the result string so the backend can populate
+    // matchSummary.winner and propagate it into the next knockout match.
+    const wonByIdx = result.indexOf(' won by ');
+    const winner = wonByIdx > 0 ? result.slice(0, wonByIdx) : '';
+    const margin = wonByIdx > 0 ? result.slice(wonByIdx + ' won by '.length) : (result === 'Match Tied' ? 'tied' : '');
+
     const matchEndData = {
       result,
       status: 'completed',
@@ -2048,6 +2375,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       teamB: { name: teams.teamB.name, shortName: teams.teamB.name.substring(0, 3).toUpperCase() },
       totalOvers: settings.overs,
       date: new Date().toISOString(),
+      matchSummary: { winner, margin, playerOfMatch: '', netRunRates: {} },
     };
 
     // Store the data and show confirmation modal
@@ -2065,11 +2393,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Save to server in the background (non-blocking)
     try {
+      if (liveSyncTimeoutRef.current) {
+        clearTimeout(liveSyncTimeoutRef.current);
+        liveSyncTimeoutRef.current = null;
+      }
       if (user?.token && matchData?._id && !matchData._id.startsWith('guest_')) {
         matchService.endMatch(matchData._id, pendingMatchEnd, user.token)
           .then(() => {
             console.log('Match saved to server in background');
-            emitScoreUpdate();
+            emitSocketUpdate();
           })
           .catch((err) => {
             console.error('Background save failed:', err);
@@ -2081,10 +2413,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
   };
 
   // Save current match progress (for leaving mid-match)
-  const saveMatchProgress = async () => {
-    console.log('=== SAVING MATCH PROGRESS ===');
-    console.log('User token exists:', !!user?.token);
-    console.log('Match ID:', matchData?._id);
+  const saveMatchProgress = async ({ emit = false, silent = false } = {}) => {
+    if (!silent) {
+      console.log('=== SAVING MATCH PROGRESS ===');
+      console.log('User token exists:', !!user?.token);
+      console.log('Match ID:', matchData?._id);
+    }
 
     // Build current innings data
     const currentInningsData = {
@@ -2134,33 +2468,79 @@ const ScoreCardScreen = ({ navigation, route }) => {
       date: new Date().toISOString(),
     };
 
-    console.log('Match progress data:', JSON.stringify({
-      innings: matchProgressData.innings,
-      runs: matchProgressData.currentState.runs,
-      balls: matchProgressData.currentState.balls,
-      batsmenCount: matchProgressData.innings1?.batting?.length,
-    }));
+    if (!silent) {
+      console.log('Match progress data:', JSON.stringify({
+        innings: matchProgressData.innings,
+        runs: matchProgressData.currentState.runs,
+        balls: matchProgressData.currentState.balls,
+        batsmenCount: matchProgressData.innings1?.batting?.length,
+      }));
+    }
 
     // Try to save to server
     try {
       if (user?.token && matchData?._id && !matchData._id.startsWith('guest_')) {
-        console.log('Calling updateMatch API...');
+        if (!silent) {
+          console.log('Calling updateMatch API...');
+        }
         const result = await matchService.updateMatch(matchData._id, matchProgressData, user.token);
-        console.log('Save result:', result);
-        emitScoreUpdate();
+        if (!silent) {
+          console.log('Save result:', result);
+        }
+        if (emit) {
+          emitSocketUpdate();
+        }
         return true;
       } else {
-        console.log('Save skipped - no token or guest match');
+        if (!silent) {
+          console.log('Save skipped - no token or guest match');
+        }
         return true;
       }
     } catch (error) {
-      console.warn('Could not save match progress:', JSON.stringify(error));
-      if (error.validationErrors) {
-        console.warn('Validation errors:', error.validationErrors);
+      if (!silent) {
+        console.warn('Could not save match progress:', JSON.stringify(error));
+        if (error.validationErrors) {
+          console.warn('Validation errors:', error.validationErrors);
+        }
       }
     }
     return false;
   };
+
+  const emitSocketUpdate = useCallback(() => {
+    const matchId = matchData?._id;
+    if (!socketRef.current || !matchId || matchId.startsWith('guest_')) return;
+    socketRef.current.emit('live-score-update', { matchId, payload: { timestamp: Date.now() } });
+  }, [matchData?._id]);
+
+  const scheduleLiveSync = useCallback(() => {
+    const matchId = matchData?._id;
+    if (!user?.token || !matchId || matchId.startsWith('guest_') || pendingMatchEnd) return;
+
+    if (liveSyncTimeoutRef.current) {
+      clearTimeout(liveSyncTimeoutRef.current);
+    }
+
+    liveSyncTimeoutRef.current = setTimeout(async () => {
+      liveSyncTimeoutRef.current = null;
+      await saveMatchProgress({ emit: true, silent: true });
+    }, 800);
+  }, [user?.token, matchData?._id, pendingMatchEnd, saveMatchProgress]);
+
+  // Emit score update to TV viewers (debounced save + socket)
+  const emitScoreUpdate = () => {
+    scheduleLiveSync();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (liveSyncTimeoutRef.current) {
+        clearTimeout(liveSyncTimeoutRef.current);
+        liveSyncTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Handle leaving match - confirm, save, and leave
   const handleLeaveMatch = () => {
@@ -3231,9 +3611,22 @@ const ScoreCardScreen = ({ navigation, route }) => {
       </ScrollView>
       )}
 
-      {/* Scoring Buttons - Fixed at bottom (only show in live mode) */}
+      {/* Scoring Buttons - Fixed at bottom (only show in live mode).
+          Pad below by max(baseline, system inset + small buffer) so the
+          bottom row clears the Android nav bar / gesture pill (and the
+          iPhone home indicator) without piling extra padding on top. */}
       {viewMode === 'live' && (
-      <View style={styles.scoringContainer}>
+      <View
+        style={[
+          styles.scoringContainer,
+          {
+            paddingBottom: Math.max(
+              Platform.OS === 'ios' ? (isSmallScreen ? 20 : 30) : (isSmallScreen ? 8 : 12),
+              (insets.bottom || 0) + 6,
+            ),
+          },
+        ]}
+      >
         {/* Line 1: End Innings (full width) */}
         <TouchableOpacity
           style={styles.endInningsButton}
@@ -3391,36 +3784,43 @@ const ScoreCardScreen = ({ navigation, route }) => {
                 <Text style={styles.extraBallSectionTitle}>Dismissal Type</Text>
                 <View style={styles.wicketTypesGrid}>
                   {[
-                    { type: 'Bowled', icon: '🎯' },
-                    { type: 'Caught', icon: '🧤' },
-                    { type: 'LBW', icon: '🦵' },
-                    { type: 'Stumped', icon: '🏏' },
-                    { type: 'Hit Wicket', icon: '💥' },
-                    { type: 'Run Out', icon: '🏃' },
-                  ].map((wicket) => (
+                    { type: 'Bowled', Icon: BowledIcon },
+                    { type: 'Caught', Icon: CaughtIcon },
+                    { type: 'LBW', Icon: LBWIcon },
+                    { type: 'Stumped', Icon: StumpedIcon },
+                    { type: 'Hit Wicket', Icon: HitWicketIcon },
+                    { type: 'Run Out', Icon: RunOutIcon },
+                  ].map((wicket) => {
+                    const isSelected = selectedWicketType === wicket.type;
+                    const Icon = wicket.Icon;
+                    return (
                     <TouchableOpacity
                       key={wicket.type}
                       style={[
                         styles.wicketTypeOption,
-                        selectedWicketType === wicket.type && styles.wicketTypeOptionSelected,
+                        isSelected && styles.wicketTypeOptionSelected,
                       ]}
                       onPress={() => {
                         setSelectedWicketType(wicket.type);
                         if (wicket.type !== 'Run Out') {
                           setRunOutBatsman(null);
                           setSelectedRuns(0);
+                          setRunOutDeliveryType('legal');
                         }
                       }}
                     >
-                      <Text style={styles.wicketTypeIcon}>{wicket.icon}</Text>
+                      <View style={styles.wicketTypeIconWrap}>
+                        <Icon size={88} />
+                      </View>
                       <Text style={[
                         styles.wicketTypeText,
-                        selectedWicketType === wicket.type && styles.wicketTypeTextSelected,
+                        isSelected && styles.wicketTypeTextSelected,
                       ]}>
                         {wicket.type}
                       </Text>
                     </TouchableOpacity>
-                  ))}
+                    );
+                  })}
                 </View>
               </View>
 
@@ -3486,6 +3886,36 @@ const ScoreCardScreen = ({ navigation, route }) => {
                     </View>
                   </View>
 
+                  {/* Delivery Type */}
+                  <View style={styles.extraBallSection}>
+                    <Text style={styles.extraBallSectionTitle}>Delivery Type</Text>
+                    <View style={styles.runsGridCompact}>
+                      {[
+                        { key: 'legal', label: 'Legal' },
+                        { key: 'WD', label: 'WD' },
+                        { key: 'NB', label: 'NB' },
+                        { key: 'LB', label: 'LB' },
+                        { key: 'BYE', label: 'BYE' },
+                      ].map((d) => (
+                        <TouchableOpacity
+                          key={d.key}
+                          style={[
+                            styles.runOptionCompact,
+                            runOutDeliveryType === d.key && styles.runOptionCompactSelected,
+                          ]}
+                          onPress={() => setRunOutDeliveryType(d.key)}
+                        >
+                          <Text style={[
+                            styles.runOptionCompactText,
+                            runOutDeliveryType === d.key && styles.runOptionCompactTextSelected,
+                          ]}>
+                            {d.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
                   {/* Runs Scored */}
                   <View style={styles.extraBallSection}>
                     <Text style={styles.extraBallSectionTitle}>Runs Scored</Text>
@@ -3522,6 +3952,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   setSelectedWicketType('');
                   setRunOutBatsman(null);
                   setSelectedRuns(0);
+                  setRunOutDeliveryType('legal');
                 }}
               >
                 <Text style={styles.extraBallCancelText}>Cancel</Text>
@@ -3696,7 +4127,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
               {overHistory.length === 0 ? (
                 <Text style={styles.noHistoryText}>No completed overs yet</Text>
               ) : (
-                overHistory.slice().reverse().map((over, index) => (
+                overHistory.map((over, index) => (
                   <View key={index} style={styles.historyItem}>
                     <View style={styles.historyHeader}>
                       <Text style={styles.historyOverNumber}>Over {over.overNumber}</Text>
@@ -3732,61 +4163,80 @@ const ScoreCardScreen = ({ navigation, route }) => {
       {/* End Innings Modal */}
       <Modal visible={showEndInningsModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
+          <View style={inningsModalStyles.card}>
+            <Text style={inningsModalStyles.title}>
               {match.balls >= settings.overs * settings.ballsPerOver
-                ? 'Innings Complete!'
+                ? 'Innings Complete'
                 : match.wickets >= settings.playersPerTeam - 1
-                  ? 'All Out!'
-                  : 'End Innings?'}
-            </Text>
-            <Text style={styles.modalMessage}>
-              {getBattingTeam()} scored {match.runs}/{match.wickets} in {getCurrentOver()} overs
+                  ? 'All Out'
+                  : 'End this innings?'}
             </Text>
 
-            {/* Undo Last Ball button */}
+            {/* Score card */}
+            <View style={inningsModalStyles.scoreCard}>
+              <Text style={inningsModalStyles.scoreTeam} numberOfLines={1}>{getBattingTeam()}</Text>
+              <Text style={inningsModalStyles.scoreLine}>
+                <Text style={inningsModalStyles.scoreRuns}>{match.runs}</Text>
+                <Text style={inningsModalStyles.scoreWickets}>/{match.wickets}</Text>
+              </Text>
+              <Text style={inningsModalStyles.scoreOvers}>{getCurrentOver()} overs</Text>
+
+              {match.innings === 1 && (
+                <View style={inningsModalStyles.statsRow}>
+                  <View style={inningsModalStyles.statItem}>
+                    <Text style={inningsModalStyles.statLabel}>TARGET</Text>
+                    <Text style={inningsModalStyles.statValue}>{match.runs + 1}</Text>
+                  </View>
+                  <View style={inningsModalStyles.statDivider} />
+                  <View style={inningsModalStyles.statItem}>
+                    <Text style={inningsModalStyles.statLabel}>EXTRAS</Text>
+                    <Text style={inningsModalStyles.statValue}>{extras.total}</Text>
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* Primary: Start 2nd Innings / End Match (green) */}
+            <TouchableOpacity
+              style={inningsModalStyles.primaryBtn}
+              onPress={confirmEndInnings}
+              activeOpacity={0.85}
+            >
+              <Text style={inningsModalStyles.primaryIcon}>✓</Text>
+              <Text style={inningsModalStyles.primaryText}>
+                {match.innings === 1 ? 'Start 2nd Innings' : 'End Match'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Continue Playing (only when innings not actually finished) */}
+            {match.balls < settings.overs * settings.ballsPerOver &&
+             match.wickets < settings.playersPerTeam - 1 && (
+              <TouchableOpacity
+                style={inningsModalStyles.continueBtn}
+                onPress={() => {
+                  setShowEndInningsModal(false);
+                  setEndInningsPromptDismissed(true);
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={inningsModalStyles.continueText}>Continue Playing</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Destructive: Undo Last Ball (red) — last position so it isn't tapped by accident */}
             {undoHistory.length > 0 && (
               <TouchableOpacity
-                style={{
-                  backgroundColor: '#f59e0b',
-                  paddingVertical: 12,
-                  paddingHorizontal: 20,
-                  borderRadius: 8,
-                  marginBottom: 12,
-                  alignItems: 'center',
-                }}
+                style={inningsModalStyles.undoBtn}
                 onPress={() => {
                   setShowEndInningsModal(false);
                   handleUndo();
                 }}
+                activeOpacity={0.85}
               >
-                <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>Undo Last Ball</Text>
+                <UndoArrowIcon color="#b91c1c" size={18} />
+                <Text style={inningsModalStyles.undoText}>Undo Last Ball</Text>
               </TouchableOpacity>
             )}
-
-            <View style={styles.modalActions}>
-              {/* Only show Continue Playing if innings is NOT genuinely over */}
-              {match.balls < settings.overs * settings.ballsPerOver &&
-               match.wickets < settings.playersPerTeam - 1 && (
-                <TouchableOpacity
-                  style={styles.modalCancelButton}
-                  onPress={() => {
-                    setShowEndInningsModal(false);
-                    setEndInningsPromptDismissed(true);
-                  }}
-                >
-                  <Text style={styles.modalCancelButtonText}>Continue Playing</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                style={styles.modalConfirmButton}
-                onPress={confirmEndInnings}
-              >
-                <Text style={styles.modalConfirmButtonText}>
-                  {match.innings === 1 ? 'Start 2nd Innings' : 'End Match'}
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>
@@ -3794,81 +4244,49 @@ const ScoreCardScreen = ({ navigation, route }) => {
       {/* Match End Confirmation Modal (2nd Innings) */}
       <Modal visible={showMatchEndModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>🏆 Match Complete!</Text>
-            <Text style={styles.modalMessage}>
-              {pendingMatchEnd?.result || 'Match has ended'}
-            </Text>
-            <Text style={[styles.modalMessage, { marginTop: 8, fontSize: 14 }]}>
-              {getBattingTeam()}: {match.runs}/{match.wickets} ({getCurrentOver()} ov)
-            </Text>
+          <View style={inningsModalStyles.card}>
+            <Text style={inningsModalStyles.title}>Match Complete</Text>
 
-            {/* Undo Last Ball button */}
+            <View style={inningsModalStyles.scoreCard}>
+              <Text style={inningsModalStyles.scoreTeam} numberOfLines={2}>
+                {pendingMatchEnd?.result || 'Match has ended'}
+              </Text>
+              <Text style={inningsModalStyles.scoreLine}>
+                <Text style={inningsModalStyles.scoreRuns}>{match.runs}</Text>
+                <Text style={inningsModalStyles.scoreWickets}>/{match.wickets}</Text>
+              </Text>
+              <Text style={inningsModalStyles.scoreOvers}>{getCurrentOver()} overs</Text>
+            </View>
+
+            {/* Primary: View Scorecard (green) */}
+            <TouchableOpacity
+              style={inningsModalStyles.primaryBtn}
+              onPress={confirmMatchEnd}
+              activeOpacity={0.85}
+            >
+              <Text style={inningsModalStyles.primaryIcon}>✓</Text>
+              <Text style={inningsModalStyles.primaryText}>View Scorecard</Text>
+            </TouchableOpacity>
+
+            {/* Destructive: Undo Last Ball (red) */}
             {undoHistory.length > 0 && (
               <TouchableOpacity
-                style={{
-                  backgroundColor: '#f59e0b',
-                  paddingVertical: 12,
-                  paddingHorizontal: 20,
-                  borderRadius: 8,
-                  marginTop: 16,
-                  marginBottom: 12,
-                  alignItems: 'center',
-                }}
+                style={inningsModalStyles.undoBtn}
                 onPress={() => {
                   setShowMatchEndModal(false);
                   setPendingMatchEnd(null);
                   handleUndo();
                 }}
+                activeOpacity={0.85}
               >
-                <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>Undo Last Ball</Text>
+                <UndoArrowIcon color="#b91c1c" size={18} />
+                <Text style={inningsModalStyles.undoText}>Undo Last Ball</Text>
               </TouchableOpacity>
             )}
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.modalConfirmButton}
-                onPress={confirmMatchEnd}
-              >
-                <Text style={styles.modalConfirmButtonText}>View Scorecard</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>
 
-      {/* Summary Modal (End of 1st Innings) */}
-      <Modal visible={showSummaryModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.summaryModal}>
-            <View style={styles.summaryHeader}>
-              <Text style={styles.summaryEmoji}>🎯</Text>
-              <Text style={styles.summaryTitle}>1st Innings Complete</Text>
-            </View>
-            <View style={styles.summaryResult}>
-              <Text style={styles.summaryTeam}>{getBattingTeam()}</Text>
-              <Text style={styles.summaryScore}>{match.runs}/{match.wickets}</Text>
-              <Text style={styles.summaryOvers}>({getCurrentOver()} overs)</Text>
-            </View>
-            <View style={styles.summaryStats}>
-              <View style={styles.summaryStatRow}>
-                <Text style={styles.summaryStatLabel}>Target</Text>
-                <Text style={styles.summaryStatValue}>{match.runs + 1} runs</Text>
-              </View>
-              <View style={styles.summaryStatRow}>
-                <Text style={styles.summaryStatLabel}>Extras</Text>
-                <Text style={styles.summaryStatValue}>{extras.total}</Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              style={styles.continueButton}
-              onPress={startSecondInnings}
-            >
-              <Text style={styles.continueButtonText}>Start 2nd Innings</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       {/* Wide Ball Modal */}
       <Modal visible={showWideModal} transparent animationType="fade">
@@ -4946,12 +5364,158 @@ const ScoreCardScreen = ({ navigation, route }) => {
         visible={showStrikerSelectModal}
         onSelect={handleStrikerSelection}
         batsmanOptions={strikerSelectOptions}
-        title="Select Next Striker"
+        title="Who is on strike?"
       />
       </View>
     </SafeAreaView>
   );
 };
+
+// Styles for the redesigned Innings Complete / Match End modals.
+// Green primary action (forward), neutral continue, red destructive undo —
+// so the user can read it at a glance without thinking.
+const inningsModalStyles = StyleSheet.create({
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    paddingVertical: 26,
+    paddingHorizontal: 22,
+    width: '92%',
+    maxWidth: 380,
+    alignItems: 'stretch',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 18,
+  },
+  badge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#dcfce7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  badgeEmoji: { fontSize: 30 },
+  title: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0f172a',
+    textAlign: 'center',
+    letterSpacing: -0.3,
+    marginBottom: 16,
+  },
+  scoreCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  scoreTeam: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  scoreLine: { marginBottom: 4 },
+  scoreRuns: {
+    fontSize: 38,
+    fontWeight: '800',
+    color: '#0f172a',
+    letterSpacing: -1,
+  },
+  scoreWickets: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#94a3b8',
+  },
+  scoreOvers: {
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    width: '100%',
+    justifyContent: 'center',
+  },
+  statItem: { flex: 1, alignItems: 'center' },
+  statDivider: { width: 1, height: 32, backgroundColor: '#e2e8f0' },
+  statLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748b',
+    letterSpacing: 1.2,
+    marginBottom: 3,
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0f172a',
+    letterSpacing: -0.5,
+  },
+  helperText: {
+    fontSize: 13,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 18,
+  },
+  // Green primary action (forward / confirm)
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#16a34a',
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginBottom: 10,
+    gap: 8,
+    shadowColor: '#16a34a',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  primaryIcon: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
+  primaryText: { color: '#ffffff', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
+  // Neutral continue (less prominent than green)
+  continueBtn: {
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    marginBottom: 10,
+  },
+  continueText: { color: '#334155', fontSize: 15, fontWeight: '700' },
+  // Red destructive (undo)
+  undoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#fee2e2',
+    borderWidth: 1.5,
+    borderColor: '#fecaca',
+    gap: 8,
+  },
+  undoIcon: { color: '#b91c1c', fontSize: 18, fontWeight: '900' },
+  undoText: { color: '#b91c1c', fontSize: 14, fontWeight: '700', letterSpacing: 0.2 },
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -6179,7 +6743,7 @@ const styles = StyleSheet.create({
   },
   wicketTypeOption: {
     width: '31%',
-    backgroundColor: colors.surfaceGray,
+    backgroundColor: '#ffffff',
     borderRadius: borderRadius.lg,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.sm,
@@ -6188,12 +6752,26 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   wicketTypeOptionSelected: {
-    backgroundColor: '#fef2f2',
+    backgroundColor: '#ffffff',
     borderColor: colors.error,
+    borderWidth: 3,
+    shadowColor: colors.error,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
   },
   wicketTypeIcon: {
     fontSize: 24,
     marginBottom: spacing.xs,
+  },
+  wicketTypeIconWrap: {
+    width: 92,
+    height: 92,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+    backgroundColor: '#ffffff',
   },
   wicketTypeText: {
     fontSize: fontSizes.sm,

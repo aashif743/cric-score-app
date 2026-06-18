@@ -227,7 +227,9 @@ exports.getMatchById = async (req, res) => {
       if (match.tournament) {
         const Tournament = require('../models/Tournament');
         const t = await Tournament.findById(match.tournament).select('visibility').lean();
-        if (t && t.visibility === 'public') allowed = true;
+        // Treat anything not explicitly "private" as public (schema default is
+        // "public"; legacy tournaments have no visibility field stored).
+        if (t && t.visibility !== 'private') allowed = true;
       }
       if (!allowed) {
         return res.status(401).json({ success: false, error: "Not authorized to view this match" });

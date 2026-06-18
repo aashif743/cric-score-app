@@ -345,6 +345,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
 
   // Tournament data for "Next Match" navigation
   const [tournamentDefaults, setTournamentDefaults] = useState(null);
+  const [tournamentFormat, setTournamentFormat] = useState(null);
 
   // Refs
   const shareableRef = useRef(null);
@@ -407,6 +408,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
               venue: tournament.venue,
               tournamentName: tournament.name,
             });
+            setTournamentFormat(tournament.format || null);
           }
         })
         .catch((err) => console.log('Tournament pre-fetch error:', err));
@@ -1304,13 +1306,27 @@ const FullScorecardScreen = ({ navigation, route }) => {
         {/* Action Buttons */}
         {(() => {
           const tid = matchData?.tournament || initialMatchData?.tournament;
+          // Bracketed tournaments (knockout, league) live in their own schedule
+          // screens, not TournamentDetail. Both Tournament and Next Match jump
+          // back to the schedule so the user can pick the next slot.
+          const isKnockout = tournamentFormat === 'knockout';
+          const isLeague = tournamentFormat === 'league';
+          const tournamentRoute = isKnockout
+            ? 'KnockoutSchedule'
+            : isLeague ? 'LeagueSchedule' : 'TournamentDetail';
+          const nextMatchRoute = isKnockout
+            ? 'KnockoutSchedule'
+            : isLeague ? 'LeagueSchedule' : 'MatchSetup';
+          const nextMatchParams = (isKnockout || isLeague)
+            ? { tournamentId: tid }
+            : { tournamentId: tid, ...(tournamentDefaults ? { tournamentDefaults } : {}) };
           return (
             <View style={styles.actionButtons}>
               <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
                 <TouchableOpacity
                   style={styles.dashboardButton}
                   onPress={tid
-                    ? () => navigation.navigate('TournamentDetail', { tournamentId: tid })
+                    ? () => navigation.navigate(tournamentRoute, { tournamentId: tid })
                     : handleGoToDashboard
                   }
                   onPressIn={handleButtonPressIn}
@@ -1325,10 +1341,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
                 <TouchableOpacity
                   style={styles.newMatchButtonLarge}
                   onPress={() => tid
-                    ? navigation.replace('MatchSetup', {
-                        tournamentId: tid,
-                        ...(tournamentDefaults ? { tournamentDefaults } : {}),
-                      })
+                    ? navigation.replace(nextMatchRoute, nextMatchParams)
                     : navigation.navigate('MatchSetup')
                   }
                   onPressIn={handleButtonPressIn}

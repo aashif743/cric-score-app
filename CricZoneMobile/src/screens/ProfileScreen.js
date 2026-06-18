@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import API from '../api/config';
+import GradientHeader from '../components/GradientHeader';
 
 const { width } = Dimensions.get('window');
 
@@ -410,11 +411,12 @@ const ProfileScreen = ({ navigation }) => {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
+            // AuthContext.logout() flips the user state, which causes
+            // AppNavigator to swap to the non-authenticated stack (where
+            // `Auth` lives). No explicit reset needed — the previous code
+            // tried to reset to a route that doesn't exist in the current
+            // (authenticated) navigator, producing a runtime warning.
             await logout();
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Auth' }],
-            });
           },
         },
       ]
@@ -463,11 +465,9 @@ const ProfileScreen = ({ navigation }) => {
           {
             text: 'OK',
             onPress: async () => {
+              // Same reasoning as the logout button: the AuthContext flip
+              // swaps the navigator to the non-auth stack automatically.
               await logout();
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Auth' }],
-              });
             },
           },
         ]
@@ -542,23 +542,16 @@ const ProfileScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <GradientHeader
+        title="Profile"
+        subtitle="Account settings"
+        onBack={navigation?.canGoBack?.() ? () => navigation.goBack() : undefined}
+      />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <Animated.View
-          style={[
-            styles.header,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            }
-          ]}
-        >
-          <Text style={styles.headerTitle}>Profile</Text>
-        </Animated.View>
 
         {/* Profile Card */}
         <Animated.View

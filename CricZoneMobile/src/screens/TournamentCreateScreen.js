@@ -16,14 +16,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
+import GradientHeader from '../components/GradientHeader';
 import { colors, spacing, fontWeights, shadows } from '../utils/theme';
 
 // Dropdown Component (same pattern as MatchSetupScreen)
-const Dropdown = ({ label, value, options, onSelect, icon }) => {
+// When `disabled` is true, the dropdown becomes a read-only chip with a small
+// lock indicator — used in edit mode for fields that can't change after the
+// tournament's matches have been generated.
+const Dropdown = ({ label, value, options, onSelect, icon, info, disabled = false }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const animatedHeight = useRef(new Animated.Value(0)).current;
 
   const toggleDropdown = () => {
+    if (disabled) return;
     const toValue = isOpen ? 0 : 1;
     Animated.spring(animatedHeight, {
       toValue,
@@ -54,19 +60,43 @@ const Dropdown = ({ label, value, options, onSelect, icon }) => {
         <View style={styles.dropdownLabelContainer}>
           {icon && <View style={styles.dropdownIconWrapper}>{icon}</View>}
           <Text style={styles.dropdownLabel}>{label}</Text>
+          {info && (
+            <TouchableOpacity
+              style={[styles.infoBadge, showInfo && styles.infoBadgeActive]}
+              onPress={() => setShowInfo((v) => !v)}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={[styles.infoBadgeText, showInfo && styles.infoBadgeTextActive]}>i</Text>
+            </TouchableOpacity>
+          )}
         </View>
         <TouchableOpacity
-          style={[styles.dropdownButton, isOpen && styles.dropdownButtonActive]}
+          style={[
+            styles.dropdownButton,
+            isOpen && styles.dropdownButtonActive,
+            disabled && styles.dropdownButtonDisabled,
+          ]}
           onPress={toggleDropdown}
-          activeOpacity={0.7}
+          activeOpacity={disabled ? 1 : 0.7}
         >
-          <Text style={styles.dropdownValue}>{value}</Text>
-          <View style={styles.chevronIcon}>
-            <View style={[styles.chevronLine, { transform: [{ rotate: '45deg' }, { translateX: -2 }] }]} />
-            <View style={[styles.chevronLine, { transform: [{ rotate: '-45deg' }, { translateX: 2 }] }]} />
-          </View>
+          <Text style={[styles.dropdownValue, disabled && styles.dropdownValueDisabled]}>{value}</Text>
+          {disabled ? (
+            <View style={styles.lockIcon}>
+              <View style={styles.lockShackle} />
+              <View style={styles.lockBody} />
+            </View>
+          ) : (
+            <View style={styles.chevronIcon}>
+              <View style={[styles.chevronLine, { transform: [{ rotate: '45deg' }, { translateX: -2 }] }]} />
+              <View style={[styles.chevronLine, { transform: [{ rotate: '-45deg' }, { translateX: 2 }] }]} />
+            </View>
+          )}
         </TouchableOpacity>
       </View>
+      {info && showInfo && (
+        <Text style={styles.infoHint}>{info}</Text>
+      )}
       <Animated.View style={[styles.dropdownOptions, { maxHeight }]}>
         <View style={styles.optionsPillContainer}>
           {options.map((option) => (
@@ -102,6 +132,9 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   // Edit mode
   const isEditMode = route.params?.tournamentId && route.params?.tournamentData;
   const existingData = route.params?.tournamentData;
+  // Format: 'quick' | 'knockout' | 'league'.
+  // Edit mode preserves the existing format; create mode reads from route param.
+  const format = existingData?.format || route.params?.format || 'quick';
 
   // Form state
   const [name, setName] = useState(existingData?.name || '');
@@ -124,12 +157,44 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   );
   const [venue, setVenue] = useState(existingData?.venue || '');
   const [description, setDescription] = useState(existingData?.description || '');
+  // Visibility: 'public' (anyone signed in can see live scores) or 'private'.
+  // Default 'public' so the live feed has content unless the creator opts out.
+  const [visibility, setVisibility] = useState(existingData?.visibility || 'public');
+
+  // League-only configuration. Defaults match the user's example
+  // (2 groups, top 2 from each → cross-paired knockout, single round-robin).
+  const [numberOfGroups, setNumberOfGroups] = useState(
+    (existingData?.numberOfGroups || 2).toString()
+  );
+  const [teamsAdvancePerGroup, setTeamsAdvancePerGroup] = useState(
+    (existingData?.teamsAdvancePerGroup ?? 2).toString()
+  );
+  const [matchesPerPair, setMatchesPerPair] = useState(
+    (existingData?.matchesPerPair || 1).toString()
+  );
 
   // Team name edit modal state
   const [teamNameModal, setTeamNameModal] = useState({
     visible: false,
     index: null,
     currentName: '',
+  });
+
+  // Collapsible Team Names section
+  const [teamNamesExpanded, setTeamNamesExpanded] = useState(false);
+  const teamNamesChevron = useRef(new Animated.Value(0)).current;
+  const toggleTeamNames = () => {
+    Animated.spring(teamNamesChevron, {
+      toValue: teamNamesExpanded ? 0 : 1,
+      friction: 8,
+      tension: 100,
+      useNativeDriver: true,
+    }).start();
+    setTeamNamesExpanded((v) => !v);
+  };
+  const teamNamesChevronRotate = teamNamesChevron.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '180deg'],
   });
 
   // Animations
@@ -215,6 +280,26 @@ const TournamentCreateScreen = ({ navigation, route }) => {
       return userProvided || `Team ${alphabet[i] || i + 1}`;
     });
 
+    // League validations — surface them client-side so the user gets a clear
+    // message rather than a generic backend 500.
+    if (format === 'league') {
+      const groups = parseInt(numberOfGroups, 10);
+      const advance = parseInt(teamsAdvancePerGroup, 10);
+      const smallestGroupSize = Math.floor(numTeams / groups);
+      if (groups > numTeams) {
+        Alert.alert('Error', 'Number of groups cannot exceed team count.');
+        setLoading(false); return;
+      }
+      if (smallestGroupSize < 2) {
+        Alert.alert('Error', `Each group needs at least 2 teams. With ${numTeams} teams in ${groups} groups the smallest group would have ${smallestGroupSize}.`);
+        setLoading(false); return;
+      }
+      if (advance > smallestGroupSize) {
+        Alert.alert('Error', `Cannot advance ${advance} teams when the smallest group only has ${smallestGroupSize}.`);
+        setLoading(false); return;
+      }
+    }
+
     const data = {
       name: name.trim(),
       numberOfTeams: numTeams,
@@ -224,16 +309,55 @@ const TournamentCreateScreen = ({ navigation, route }) => {
       ballsPerOver: parseInt(ballsPerOver),
       venue: venue.trim(),
       description: description.trim(),
+      format,
+      visibility,
+      ...(format === 'league' ? {
+        numberOfGroups: parseInt(numberOfGroups, 10),
+        teamsAdvancePerGroup: parseInt(teamsAdvancePerGroup, 10),
+        matchesPerPair: parseInt(matchesPerPair, 10),
+      } : {}),
     };
 
     try {
       if (isEditMode) {
-        await tournamentService.updateTournament(route.params.tournamentId, data, user.token);
+        // 1) Team renames first — these propagate through every match in the
+        //    tournament (teamA.name / teamB.name + innings rosters), keeping
+        //    the bracket and schedule consistent.
+        const originalNames = (existingData?.teamNames || []);
+        for (let i = 0; i < finalTeamNames.length; i++) {
+          const oldName = (originalNames[i] || '').trim();
+          const newName = finalTeamNames[i];
+          if (oldName && newName && oldName !== newName) {
+            try {
+              await tournamentService.renameTeam(route.params.tournamentId, oldName, newName, user.token);
+            } catch (e) {
+              const message = e?.error || e?.response?.data?.error || `Could not rename "${oldName}".`;
+              Alert.alert('Rename failed', message);
+              setLoading(false);
+              return;
+            }
+          }
+        }
+        // 2) Save the rest of the settings. The backend propagates
+        //    overs/balls/players/venue into every scheduled match.
+        const { teamNames: _, numberOfTeams: __, numberOfGroups: ___,
+                teamsAdvancePerGroup: ____, matchesPerPair: _____, format: ______,
+                ...editable } = data;
+        await tournamentService.updateTournament(route.params.tournamentId, editable, user.token);
         Alert.alert('Success', 'Tournament updated successfully.');
+        navigation.goBack();
       } else {
-        await tournamentService.createTournament(data, user.token);
+        const res = await tournamentService.createTournament(data, user.token);
+        const created = res?.data || res;
+        // Knockout / League: jump straight into the auto-generated schedule.
+        if (format === 'knockout' && created?._id) {
+          navigation.replace('KnockoutSchedule', { tournamentId: created._id });
+        } else if (format === 'league' && created?._id) {
+          navigation.replace('LeagueSchedule', { tournamentId: created._id });
+        } else {
+          navigation.goBack();
+        }
       }
-      navigation.goBack();
     } catch (error) {
       Alert.alert('Error', error.error || 'Failed to save tournament.');
     } finally {
@@ -248,20 +372,27 @@ const TournamentCreateScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <View style={styles.backArrow} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {isEditMode ? 'Edit Tournament' : 'New Tournament'}
-        </Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <GradientHeader
+        title={isEditMode ? 'Edit Tournament' : 'New Tournament'}
+        subtitle={isEditMode ? 'Update tournament details' : 'Set up your format'}
+        onBack={() => navigation.goBack()}
+        rightSlot={
+          isEditMode ? (
+            <TouchableOpacity
+              style={styles.headerSaveButton}
+              onPress={handleSubmit}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.headerSaveText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          ) : null
+        }
+      />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -303,6 +434,7 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                   value={numberOfTeams}
                   options={teamCountOptions}
                   onSelect={handleTeamCountChange}
+                  disabled={isEditMode}
                 />
 
                 <View style={styles.divider} />
@@ -334,12 +466,100 @@ const TournamentCreateScreen = ({ navigation, route }) => {
               </View>
             </View>
 
-            {/* Team Names */}
+            {/* Visibility: Public live feed vs Private (owner-only) */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Team Names</Text>
-              <Text style={styles.sectionHint}>Tap to edit team names</Text>
-              <View style={styles.teamNamesCard}>
-                {teamNames.map((teamName, index) => {
+              <Text style={styles.sectionTitle}>Visibility</Text>
+              <View style={styles.visibilityRow}>
+                <TouchableOpacity
+                  style={[styles.visibilityCard, visibility === 'public' && styles.visibilityCardActive]}
+                  onPress={() => setVisibility('public')}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.visibilityIcon, visibility === 'public' && styles.visibilityIconActive]}>
+                    <View style={styles.globeRing} />
+                    <View style={styles.globeMeridian} />
+                  </View>
+                  <Text style={[styles.visibilityTitle, visibility === 'public' && styles.visibilityTitleActive]}>Public</Text>
+                  <Text style={styles.visibilityHint}>Shown on the live feed</Text>
+                  {visibility === 'public' && <View style={styles.visibilityCheck} />}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.visibilityCard, visibility === 'private' && styles.visibilityCardActive]}
+                  onPress={() => setVisibility('private')}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.visibilityIcon, visibility === 'private' && styles.visibilityIconActive]}>
+                    <View style={styles.lockShackleLg} />
+                    <View style={styles.lockBodyLg} />
+                  </View>
+                  <Text style={[styles.visibilityTitle, visibility === 'private' && styles.visibilityTitleActive]}>Private</Text>
+                  <Text style={styles.visibilityHint}>Only you can see it</Text>
+                  {visibility === 'private' && <View style={styles.visibilityCheck} />}
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* League-only configuration */}
+            {format === 'league' && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>League Format</Text>
+                <View style={styles.optionsCard}>
+                  <Dropdown
+                    label="Number of Groups"
+                    value={numberOfGroups}
+                    options={Array.from(
+                      { length: Math.max(1, Math.floor(parseInt(numberOfTeams || '2', 10) / 2)) },
+                      (_, i) => i + 1,
+                    )}
+                    onSelect={setNumberOfGroups}
+                    disabled={isEditMode}
+                    info="How many pools the teams are split into. Each team only plays others in its own group."
+                  />
+                  <View style={styles.divider} />
+                  <Dropdown
+                    label="Teams Advance per Group"
+                    value={teamsAdvancePerGroup}
+                    options={[0, 1, 2, 3, 4]}
+                    onSelect={setTeamsAdvancePerGroup}
+                    disabled={isEditMode}
+                    info="Top teams from each group that move on to the knockout stage. Use 0 for no knockouts."
+                  />
+                  <View style={styles.divider} />
+                  <Dropdown
+                    label="Matches per Pair"
+                    value={matchesPerPair}
+                    options={[1, 2, 3, 4]}
+                    onSelect={setMatchesPerPair}
+                    disabled={isEditMode}
+                    info="How many times each pair of teams plays. 1 = once, 2 = home & away."
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Team Names (collapsible) */}
+            <View style={styles.section}>
+              <TouchableOpacity
+                style={styles.collapsibleHeader}
+                onPress={toggleTeamNames}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.sectionTitle}>Team Names</Text>
+                <Animated.View
+                  style={[
+                    styles.collapsibleChevron,
+                    { transform: [{ rotate: teamNamesChevronRotate }] },
+                  ]}
+                >
+                  <View style={[styles.chevronLine, { transform: [{ rotate: '45deg' }, { translateX: -2 }] }]} />
+                  <View style={[styles.chevronLine, { transform: [{ rotate: '-45deg' }, { translateX: 2 }] }]} />
+                </Animated.View>
+              </TouchableOpacity>
+              {teamNamesExpanded && (
+                <>
+                  <Text style={styles.sectionHint}>Tap to edit team names</Text>
+                  <View style={styles.teamNamesCard}>
+                    {teamNames.map((teamName, index) => {
                   const alphabet = 'ABCDEFGHIJKLMNOPQRST';
                   const defaultName = `Team ${alphabet[index] || index + 1}`;
                   const displayName = teamName?.trim() || defaultName;
@@ -373,7 +593,9 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                     </View>
                   );
                 })}
-              </View>
+                  </View>
+                </>
+              )}
             </View>
 
             {/* Venue & Description */}
@@ -458,6 +680,65 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
+  // Top-right Save chip in the gradient header (edit mode only).
+  headerSaveButton: {
+    minWidth: 70, height: 36,
+    paddingHorizontal: 14, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  headerSaveText: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 0.3 },
+
+  // Visibility picker (Public / Private)
+  visibilityRow: { flexDirection: 'row', gap: 12 },
+  visibilityCard: {
+    flex: 1, padding: 16, borderRadius: 16,
+    backgroundColor: '#fff',
+    borderWidth: 2, borderColor: '#e2e8f0',
+    alignItems: 'flex-start',
+    position: 'relative',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.04, shadowRadius: 8,
+    elevation: 1,
+  },
+  visibilityCardActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+  },
+  visibilityIcon: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: '#f1f5f9',
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  visibilityIconActive: { backgroundColor: '#bfdbfe' },
+  globeRing: {
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 2, borderColor: '#2563eb',
+  },
+  globeMeridian: {
+    position: 'absolute', width: 22, height: 2, backgroundColor: '#2563eb',
+  },
+  lockShackleLg: {
+    width: 14, height: 8,
+    borderTopLeftRadius: 7, borderTopRightRadius: 7,
+    borderWidth: 2, borderBottomWidth: 0, borderColor: '#475569',
+    marginBottom: -1,
+  },
+  lockBodyLg: {
+    width: 20, height: 13,
+    backgroundColor: '#475569', borderRadius: 3,
+  },
+  visibilityTitle: { fontSize: 15, fontWeight: '800', color: '#0f172a', marginBottom: 2 },
+  visibilityTitleActive: { color: '#1e40af' },
+  visibilityHint: { fontSize: 11, fontWeight: '600', color: '#94a3b8' },
+  visibilityCheck: {
+    position: 'absolute', top: 12, right: 12,
+    width: 16, height: 16, borderRadius: 8,
+    backgroundColor: '#2563eb',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -514,6 +795,20 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     marginBottom: spacing.md,
     marginLeft: spacing.xs,
+  },
+  collapsibleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.xs,
+  },
+  collapsibleChevron: {
+    width: 14,
+    height: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.xs,
+    marginBottom: spacing.sm,
   },
   inputCard: {
     backgroundColor: '#fff',
@@ -639,6 +934,36 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.medium,
     color: '#334155',
   },
+  infoBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#e0e7ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 6,
+  },
+  infoBadgeActive: {
+    backgroundColor: '#4f46e5',
+  },
+  infoBadgeText: {
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: fontWeights.bold,
+    color: '#4f46e5',
+    fontStyle: 'italic',
+  },
+  infoBadgeTextActive: {
+    color: '#ffffff',
+  },
+  infoHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#64748b',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    marginTop: -4,
+  },
   dropdownButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -654,11 +979,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#d97706',
   },
+  dropdownButtonDisabled: {
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
   dropdownValue: {
     fontSize: 16,
     fontWeight: fontWeights.bold,
     color: '#d97706',
     marginRight: spacing.sm,
+  },
+  dropdownValueDisabled: { color: '#64748b' },
+  lockIcon: { width: 12, height: 14, alignItems: 'center', justifyContent: 'flex-end' },
+  lockShackle: {
+    width: 8, height: 6,
+    borderTopLeftRadius: 4, borderTopRightRadius: 4,
+    borderWidth: 1.5, borderBottomWidth: 0, borderColor: '#64748b',
+  },
+  lockBody: {
+    width: 12, height: 8,
+    backgroundColor: '#94a3b8',
+    borderRadius: 2,
+    marginTop: -1,
   },
   chevronIcon: {
     width: 12,

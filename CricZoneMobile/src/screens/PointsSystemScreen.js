@@ -8,6 +8,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import GradientHeader from '../components/GradientHeader';
 
 const { width } = Dimensions.get('window');
 
@@ -249,7 +250,7 @@ const getFeatureBgColor = (index) => {
   return bgColors[index] || bgColors[0];
 };
 
-const PointsSystemScreen = () => {
+const PointsSystemScreen = ({ navigation } = {}) => {
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -310,6 +311,11 @@ const PointsSystemScreen = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <GradientHeader
+        title="Points System"
+        subtitle="How scoring works"
+        onBack={navigation?.canGoBack?.() ? () => navigation.goBack() : undefined}
+      />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -324,8 +330,6 @@ const PointsSystemScreen = () => {
             },
           ]}
         >
-          {/* Header */}
-          <Text style={styles.headerTitle}>Points System</Text>
 
           {/* Main Card */}
           <View style={styles.contentBox}>

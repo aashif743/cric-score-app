@@ -144,18 +144,6 @@ const teamNames = [
   'Nepal',
   'USA',
 
-  // IPL Teams
-  'Mumbai Indians',
-  'Chennai Super Kings',
-  'Royal Challengers Bangalore',
-  'Kolkata Knight Riders',
-  'Delhi Capitals',
-  'Punjab Kings',
-  'Rajasthan Royals',
-  'Sunrisers Hyderabad',
-  'Gujarat Titans',
-  'Lucknow Super Giants',
-
   // Common Team Names for Local Matches
   'Warriors',
   'Strikers',
@@ -234,13 +222,24 @@ const seedSuggestions = async () => {
       isSeeded: true,
     }));
 
-    // Insert all suggestions
-    await Suggestion.insertMany([
-      ...customPlayerSuggestions,
-      ...customTeamSuggestions,
-      ...playerSuggestions,
-      ...teamSuggestions,
-    ]);
+    // Insert all suggestions. Use ordered:false so any names that already
+    // exist as user-added (non-seeded) entries are skipped instead of
+    // aborting the whole batch.
+    try {
+      await Suggestion.insertMany([
+        ...customPlayerSuggestions,
+        ...customTeamSuggestions,
+        ...playerSuggestions,
+        ...teamSuggestions,
+      ], { ordered: false });
+    } catch (err) {
+      if (err.code === 11000 || err.writeErrors) {
+        const skipped = err.writeErrors ? err.writeErrors.length : 1;
+        console.log(`Skipped ${skipped} name(s) that already exist as user-added suggestions`);
+      } else {
+        throw err;
+      }
+    }
 
     console.log(`Seeded ${customPlayerSuggestions.length} custom + ${playerSuggestions.length} famous player names`);
     console.log(`Seeded ${customTeamSuggestions.length} custom + ${teamSuggestions.length} standard team names`);

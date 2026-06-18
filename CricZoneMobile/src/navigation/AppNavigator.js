@@ -12,8 +12,15 @@ import MatchSetupScreen from '../screens/MatchSetupScreen';
 import ScoreCardScreen from '../screens/ScoreCardScreen';
 import FullScorecardScreen from '../screens/FullScorecardScreen';
 import TournamentListScreen from '../screens/TournamentListScreen';
+import TournamentFormatListScreen from '../screens/TournamentFormatListScreen';
 import TournamentCreateScreen from '../screens/TournamentCreateScreen';
 import TournamentDetailScreen from '../screens/TournamentDetailScreen';
+import KnockoutScheduleScreen from '../screens/KnockoutScheduleScreen';
+import LeagueScheduleScreen from '../screens/LeagueScheduleScreen';
+import LeaguePointsTableScreen from '../screens/LeaguePointsTableScreen';
+import TournamentStatsScreen from '../screens/TournamentStatsScreen';
+import FullBracketScreen from '../screens/FullBracketScreen';
+import PublicLiveMatchScreen from '../screens/PublicLiveMatchScreen';
 
 // Tab Navigator
 import BottomTabNavigator from '../components/BottomTabNavigator';
@@ -48,8 +55,15 @@ const AppNavigator = () => {
             <Stack.Screen name="ScoreCard" component={ScoreCardScreen} />
             <Stack.Screen name="FullScorecard" component={FullScorecardScreen} />
             <Stack.Screen name="TournamentList" component={TournamentListScreen} />
+            <Stack.Screen name="TournamentFormatList" component={TournamentFormatListScreen} />
             <Stack.Screen name="TournamentCreate" component={TournamentCreateScreen} />
             <Stack.Screen name="TournamentDetail" component={TournamentDetailScreen} />
+            <Stack.Screen name="KnockoutSchedule" component={KnockoutScheduleScreen} />
+            <Stack.Screen name="LeagueSchedule" component={LeagueScheduleScreen} />
+            <Stack.Screen name="LeaguePointsTable" component={LeaguePointsTableScreen} />
+            <Stack.Screen name="TournamentStats" component={TournamentStatsScreen} />
+            <Stack.Screen name="FullBracket" component={FullBracketScreen} />
+            <Stack.Screen name="PublicLiveMatch" component={PublicLiveMatchScreen} />
           </>
         ) : (
           // Non-authenticated user screens

@@ -4,18 +4,27 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   StyleSheet,
   Keyboard,
   Platform,
-  FlatList,
-  Modal,
+  ScrollView,
   Dimensions,
 } from 'react-native';
 import suggestionService from '../utils/suggestionService';
 import { colors, spacing, borderRadius, fontWeights } from '../utils/theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// Suggestion card width — narrow enough that even with a worst-case input
+// position, clamping keeps both edges inside the screen. 260 sits inside
+// the smallest common phone width (~320) with room to spare.
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const DROPDOWN_WIDTH = Math.min(SCREEN_WIDTH - 32, 260);
+const SIDE_MARGIN = 8; // minimum gap from each screen edge
+
+// Inline autocomplete: dropdown is a sibling of the TextInput (NOT inside a
+// Modal — Modals on Android steal focus and force the keyboard closed on
+// every keystroke). We measure the input's screen position on focus and
+// clamp the dropdown's horizontal offset so it's centred on the input
+// whenever possible but never overflows past the device edges.
 
 const AutocompleteInput = ({
   value,
@@ -37,7 +46,7 @@ const AutocompleteInput = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [selection, setSelection] = useState(undefined);
-  const [inputLayout, setInputLayout] = useState(null);
+  const [containerLayout, setContainerLayout] = useState(null);
 
   const debounceTimer = useRef(null);
   const inputRef = useRef(null);
@@ -45,19 +54,17 @@ const AutocompleteInput = ({
   const hasSelectedSuggestion = useRef(false);
   const requestId = useRef(0);
   const isFocusedRef = useRef(false);
+  const blurTimer = useRef(null);
 
-  // Measure input position on screen for dropdown placement
-  const measureInput = useCallback(() => {
-    if (containerRef.current) {
-      containerRef.current.measureInWindow((x, y, w, h) => {
-        if (x !== undefined && y !== undefined) {
-          setInputLayout({ x, y, width: w, height: h });
-        }
-      });
-    }
+  const measureContainer = useCallback(() => {
+    if (!containerRef.current) return;
+    containerRef.current.measureInWindow((x, y, w, h) => {
+      if (typeof x === 'number' && typeof y === 'number') {
+        setContainerLayout({ x, y, width: w, height: h });
+      }
+    });
   }, []);
 
-  // Fetch suggestions
   const fetchSuggestions = useCallback(async (query, currentRequestId) => {
     try {
       const results = type === 'player'
@@ -66,12 +73,8 @@ const AutocompleteInput = ({
 
       if (currentRequestId === requestId.current && isFocusedRef.current) {
         setSuggestions(results);
-        if (results.length > 0) {
-          measureInput();
-          setShowDropdown(true);
-        } else {
-          setShowDropdown(false);
-        }
+        if (results.length > 0) measureContainer();
+        setShowDropdown(results.length > 0);
       }
     } catch (error) {
       if (currentRequestId === requestId.current) {
@@ -79,146 +82,114 @@ const AutocompleteInput = ({
         setShowDropdown(false);
       }
     }
-  }, [type, measureInput]);
+  }, [type, measureContainer]);
 
-  // Debounced search
   const handleTextChange = useCallback((text) => {
     hasSelectedSuggestion.current = false;
     setSelection(undefined);
     onChangeText(text);
 
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
-
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
     requestId.current += 1;
     const currentRequestId = requestId.current;
 
     if (text.trim().length >= 1) {
-      // Fast debounce for immediate suggestions
       debounceTimer.current = setTimeout(() => {
         fetchSuggestions(text.trim(), currentRequestId);
-      }, 50);
+      }, 80);
     } else {
       setSuggestions([]);
       setShowDropdown(false);
     }
   }, [onChangeText, fetchSuggestions]);
 
-  // Handle suggestion selection
   const handleSelectSuggestion = useCallback((suggestion) => {
     hasSelectedSuggestion.current = true;
 
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (blurTimer.current) clearTimeout(blurTimer.current);
     requestId.current += 1;
 
     onChangeText(suggestion.name);
     setShowDropdown(false);
     setSuggestions([]);
 
-    // Save selected suggestion to bump its usage count
+    // Bump usage count for the picked suggestion (fire-and-forget).
     if (saveSuggestion) {
       suggestionService.addSuggestion(suggestion.name, type);
     }
+
+    Keyboard.dismiss();
   }, [onChangeText, saveSuggestion, type]);
 
-  // Handle input focus
   const handleFocus = useCallback(() => {
     setIsFocused(true);
     isFocusedRef.current = true;
 
     if (selectTextOnFocus && value) {
       setSelection({ start: 0, end: value.length });
-      setTimeout(() => {
-        setSelection(undefined);
-      }, 100);
+      setTimeout(() => setSelection(undefined), 100);
     }
+
+    measureContainer();
 
     requestId.current += 1;
     const currentRequestId = requestId.current;
-
     if (value && value.trim().length >= 1) {
       fetchSuggestions(value.trim(), currentRequestId);
     }
 
     onFocus && onFocus();
-  }, [value, fetchSuggestions, onFocus, selectTextOnFocus]);
+  }, [value, fetchSuggestions, onFocus, selectTextOnFocus, measureContainer]);
 
-  // Handle input blur
   const handleBlur = useCallback(() => {
     setIsFocused(false);
     isFocusedRef.current = false;
 
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
     requestId.current += 1;
 
-    // Don't close dropdown immediately — Modal may have caused blur on Android.
-    // Only close if dropdown is not showing (no suggestions) or after a longer delay
-    // to allow the user to tap a suggestion in the Modal.
-    setTimeout(() => {
-      // If suggestions are still showing in Modal, don't auto-close them.
-      // User will dismiss by tapping a suggestion or tapping outside.
-      if (!showDropdown) {
-        setSuggestions([]);
-      }
-    }, 300);
+    // Delay hiding so a tap on a suggestion still registers (taps briefly
+    // blur the input on Android).
+    blurTimer.current = setTimeout(() => {
+      setShowDropdown(false);
+      setSuggestions([]);
+    }, 180);
 
     if (saveSuggestion && value && value.trim() && !hasSelectedSuggestion.current) {
       suggestionService.addSuggestion(value.trim(), type);
     }
 
     onBlur && onBlur();
-  }, [value, type, onBlur, saveSuggestion, showDropdown]);
+  }, [value, type, onBlur, saveSuggestion]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      if (blurTimer.current) clearTimeout(blurTimer.current);
     };
   }, []);
 
   const isPopular = (suggestion) => suggestion.usageCount >= 50;
-
   const dropdownMaxHeight = Math.min(suggestions.length * 44, 220);
 
-  // Calculate dropdown position for Modal — always wide enough, anchored near input
-  const getModalDropdownStyle = () => {
-    if (!inputLayout) return { top: 100, left: 16, width: SCREEN_WIDTH - 32 };
+  // Compute the dropdown's left offset relative to the AutocompleteInput
+  // container so its centre lines up with the input's centre while staying
+  // clamped inside the screen edges.
+  let dropdownLeftOffset = 0;
+  if (containerLayout) {
+    const idealScreenLeft =
+      containerLayout.x + (containerLayout.width - DROPDOWN_WIDTH) / 2;
+    const clampedScreenLeft = Math.max(
+      SIDE_MARGIN,
+      Math.min(idealScreenLeft, SCREEN_WIDTH - DROPDOWN_WIDTH - SIDE_MARGIN)
+    );
+    dropdownLeftOffset = clampedScreenLeft - containerLayout.x;
+  }
 
-    const minWidth = 220;
-    let width = Math.max(inputLayout.width, minWidth);
-    let left = inputLayout.x;
-
-    // If wider than parent, try to center on input
-    if (width > inputLayout.width) {
-      left = inputLayout.x + inputLayout.width / 2 - width / 2;
-    }
-
-    // Clamp to screen edges
-    if (left < 8) left = 8;
-    if (left + width > SCREEN_WIDTH - 8) {
-      width = SCREEN_WIDTH - left - 8;
-    }
-    if (width < minWidth) {
-      left = 8;
-      width = SCREEN_WIDTH - 16;
-    }
-
-    return {
-      top: inputLayout.y + inputLayout.height + 4,
-      left,
-      width,
-    };
-  };
-
-  const renderSuggestionItem = useCallback(({ item: suggestion, index }) => (
+  const renderSuggestionItem = (suggestion, index) => (
     <TouchableOpacity
+      key={suggestion._id || `${suggestion.name}-${index}`}
       style={[
         styles.suggestionItem,
         index === suggestions.length - 1 && styles.suggestionItemLast,
@@ -226,7 +197,7 @@ const AutocompleteInput = ({
       onPress={() => handleSelectSuggestion(suggestion)}
       activeOpacity={0.7}
     >
-      <Text style={styles.suggestionText} numberOfLines={1}>
+      <Text style={styles.suggestionText} numberOfLines={2}>
         {suggestion.name}
       </Text>
       {isPopular(suggestion) && (
@@ -235,12 +206,12 @@ const AutocompleteInput = ({
         </View>
       )}
     </TouchableOpacity>
-  ), [suggestions.length, handleSelectSuggestion]);
+  );
 
-  const isDropdownVisible = showDropdown && suggestions.length > 0 && inputLayout !== null;
+  const isDropdownVisible = showDropdown && suggestions.length > 0;
 
   return (
-    <View style={[styles.container, style]} ref={containerRef}>
+    <View style={[styles.container, style]} ref={containerRef} onLayout={measureContainer}>
       <TextInput
         ref={inputRef}
         style={[
@@ -265,42 +236,29 @@ const AutocompleteInput = ({
         onSubmitEditing={() => Keyboard.dismiss()}
       />
 
-      {/* Suggestions Dropdown via Modal — renders above everything, never clipped */}
-      <Modal
-        visible={isDropdownVisible}
-        transparent
-        animationType="none"
-        statusBarTranslucent
-        onRequestClose={() => {
-          setShowDropdown(false);
-          setSuggestions([]);
-        }}
-      >
-        <TouchableWithoutFeedback
-          onPress={() => {
-            setShowDropdown(false);
-            setSuggestions([]);
-            Keyboard.dismiss();
-          }}
+      {isDropdownVisible && (
+        <View
+          style={[
+            styles.dropdownInline,
+            { left: dropdownLeftOffset, maxHeight: dropdownMaxHeight },
+          ]}
         >
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.dropdown, getModalDropdownStyle(), { maxHeight: dropdownMaxHeight }]}>
-                <FlatList
-                  data={suggestions}
-                  renderItem={renderSuggestionItem}
-                  keyExtractor={(item, idx) => item._id || `${item.name}-${idx}`}
-                  keyboardShouldPersistTaps="always"
-                  nestedScrollEnabled
-                  showsVerticalScrollIndicator={suggestions.length > 5}
-                  bounces={false}
-                  scrollEnabled={suggestions.length > 5}
-                />
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+          {/* Suggestion lists are short (<=20). Use ScrollView + map instead
+              of FlatList so we don't trip RN's "VirtualizedLists nested
+              inside ScrollView" warning when this dropdown lives inside a
+              parent ScrollView (e.g. MatchSetup). */}
+          <ScrollView
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode="none"
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={suggestions.length > 5}
+            bounces={false}
+            scrollEnabled={suggestions.length > 5}
+          >
+            {suggestions.map((item, idx) => renderSuggestionItem(item, idx))}
+          </ScrollView>
+        </View>
+      )}
     </View>
   );
 };
@@ -308,6 +266,7 @@ const AutocompleteInput = ({
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
+    zIndex: 1000,
   },
   input: {
     fontSize: 16,
@@ -324,21 +283,23 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: '#fff',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
-  dropdown: {
+  // Positioned absolutely beneath the input. `left` is set inline based on
+  // the measured input position so the dropdown stays within the screen.
+  dropdownInline: {
     position: 'absolute',
+    top: '100%',
+    width: DROPDOWN_WIDTH,
+    marginTop: 4,
     backgroundColor: '#fff',
     borderRadius: borderRadius.md,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+    zIndex: 1001,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
+        shadowOpacity: 0.18,
         shadowRadius: 12,
       },
       android: {
@@ -350,7 +311,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 44,
+    minHeight: 44,
+    paddingVertical: 8,
     paddingHorizontal: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: '#f1f5f9',

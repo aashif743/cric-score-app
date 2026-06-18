@@ -386,7 +386,9 @@ exports.getTournamentStats = async (req, res) => {
       return res.status(404).json({ success: false, error: "Tournament not found" });
     }
 
-    if (tournament.user.toString() !== req.user.id) {
+    // Owner always; other signed-in users may view stats for non-private
+    // tournaments (public live viewers), consistent with getTournament.
+    if (tournament.user.toString() !== req.user.id && tournament.visibility === "private") {
       return res.status(403).json({ success: false, error: "Not authorized" });
     }
 

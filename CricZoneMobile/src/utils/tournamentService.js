@@ -70,6 +70,17 @@ const tournamentService = {
       throw error;
     }
   },
+
+  // Rename a team everywhere within a tournament (teamNames + all matches).
+  renameTeam: async (id, oldName, newName, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(
+      `/tournaments/${id}/rename-team`,
+      { oldName, newName },
+      config,
+    );
+    return response.data;
+  },
 };
 
 export default tournamentService;

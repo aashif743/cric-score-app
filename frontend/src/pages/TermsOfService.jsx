@@ -178,8 +178,11 @@ const TermsOfService = () => {
 
           <h3>11.1 By You</h3>
           <p>
-            You may stop using the Service at any time. To delete your account, contact us
-            at support@cric-zone.com.
+            You may stop using the Service at any time. To permanently delete your account
+            and all associated data, open the app and go to <strong>Profile &rarr; Delete
+            Account</strong>. The deletion is immediate and irreversible. If you cannot
+            access the in-app option, email us at support@cric-zone.com from the phone number
+            registered to your account and we will process the deletion within 7 business days.
           </p>
 
           <h3>11.2 By Us</h3>

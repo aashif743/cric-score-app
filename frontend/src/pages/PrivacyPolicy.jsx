@@ -165,8 +165,10 @@ const PrivacyPolicy = () => {
               <strong>Correction:</strong> Update your display name in the app
             </li>
             <li>
-              <strong>Deletion:</strong> Request deletion of your account and associated data
-              by contacting us at support@cric-zone.com
+              <strong>Deletion:</strong> Permanently delete your account and all associated
+              data directly from inside the app at <strong>Profile &rarr; Delete Account</strong>.
+              Alternatively, email support@cric-zone.com from the phone number registered to
+              your account and we will process the deletion within 7 business days.
             </li>
             <li>
               <strong>Data Portability:</strong> Export your match data via the share feature
