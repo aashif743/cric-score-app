@@ -172,6 +172,14 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   const [matchesPerPair, setMatchesPerPair] = useState(
     (existingData?.matchesPerPair || 1).toString()
   );
+  // Playoff format: 'knockout' (semis/finals bracket) or 'qualifier' (IPL-style:
+  // Qualifier 1, Eliminator, Qualifier 2, Final) — only valid for a top-4 playoff.
+  const [playoffFormat, setPlayoffFormat] = useState(
+    existingData?.playoffFormat || 'knockout'
+  );
+  // Qualifier playoffs require exactly 4 teams advancing overall (top 4).
+  const advancingTotal = (parseInt(numberOfGroups, 10) || 0) * (parseInt(teamsAdvancePerGroup, 10) || 0);
+  const qualifierAvailable = advancingTotal === 4;
 
   // Team name edit modal state
   const [teamNameModal, setTeamNameModal] = useState({
@@ -315,6 +323,9 @@ const TournamentCreateScreen = ({ navigation, route }) => {
         numberOfGroups: parseInt(numberOfGroups, 10),
         teamsAdvancePerGroup: parseInt(teamsAdvancePerGroup, 10),
         matchesPerPair: parseInt(matchesPerPair, 10),
+        // Qualifier playoffs only make sense for a top-4 bracket.
+        playoffFormat: (parseInt(numberOfGroups, 10) * parseInt(teamsAdvancePerGroup, 10) === 4 && playoffFormat === 'qualifier')
+          ? 'qualifier' : 'knockout',
       } : {}),
     };
 
@@ -533,6 +544,47 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                     disabled={isEditMode}
                     info="How many times each pair of teams plays. 1 = once, 2 = home & away."
                   />
+
+                  {/* Playoff format — only when there's a knockout stage */}
+                  {!isEditMode && (parseInt(teamsAdvancePerGroup, 10) || 0) > 0 ? (
+                    <>
+                      <View style={styles.divider} />
+                      <View style={styles.playoffRow}>
+                        <Text style={styles.dropdownLabel}>Playoff Format</Text>
+                        <View style={styles.playoffOptions}>
+                          <TouchableOpacity
+                            style={[styles.playoffPill, playoffFormat !== 'qualifier' || !qualifierAvailable ? styles.playoffPillActive : null]}
+                            onPress={() => setPlayoffFormat('knockout')}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={[styles.playoffPillText, (playoffFormat !== 'qualifier' || !qualifierAvailable) && styles.playoffPillTextActive]}>Knockout</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.playoffPill,
+                              playoffFormat === 'qualifier' && qualifierAvailable ? styles.playoffPillActive : null,
+                              !qualifierAvailable ? styles.playoffPillDisabled : null,
+                            ]}
+                            onPress={() => qualifierAvailable && setPlayoffFormat('qualifier')}
+                            activeOpacity={qualifierAvailable ? 0.8 : 1}
+                          >
+                            <Text style={[
+                              styles.playoffPillText,
+                              playoffFormat === 'qualifier' && qualifierAvailable && styles.playoffPillTextActive,
+                              !qualifierAvailable && styles.playoffPillTextDisabled,
+                            ]}>Qualifier</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      <Text style={styles.playoffHint}>
+                        {qualifierAvailable
+                          ? (playoffFormat === 'qualifier'
+                              ? 'IPL-style: Qualifier 1, Eliminator, Qualifier 2, Final.'
+                              : 'Standard single-elimination (semifinals & final).')
+                          : 'Qualifier (IPL-style) needs exactly 4 teams advancing.'}
+                      </Text>
+                    </>
+                  ) : null}
                 </View>
               </View>
             )}
@@ -834,6 +886,25 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#f1f5f9',
     marginHorizontal: spacing.lg,
+  },
+  // Playoff format selector
+  playoffRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm,
+  },
+  playoffOptions: { flexDirection: 'row', gap: 8 },
+  playoffPill: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9,
+    borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: '#fff',
+  },
+  playoffPillActive: { borderColor: '#4f46e5', backgroundColor: '#eef2ff' },
+  playoffPillDisabled: { backgroundColor: '#f8fafc', borderColor: '#f1f5f9' },
+  playoffPillText: { fontSize: 13, fontWeight: '700', color: '#64748b' },
+  playoffPillTextActive: { color: '#4338ca', fontWeight: '800' },
+  playoffPillTextDisabled: { color: '#cbd5e1' },
+  playoffHint: {
+    paddingHorizontal: spacing.lg, paddingBottom: spacing.md,
+    fontSize: 12, color: '#94a3b8', lineHeight: 17,
   },
   teamDivider: {
     height: 1,

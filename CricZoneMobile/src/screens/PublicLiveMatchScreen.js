@@ -702,18 +702,28 @@ const PublicLiveMatchScreen = ({ navigation, route }) => {
     }
   }, [match]);
 
-  // Subscribe to the match's socket room — debounced refetch on every event.
+  // Subscribe to the match's socket room for instant updates, plus a periodic
+  // poll as a fallback so the score still refreshes within seconds if a socket
+  // event is dropped/delayed. Also re-fetch on every (re)connect to catch up.
   useEffect(() => {
     if (!matchId) return;
-    const socket = io(SOCKET_URL, { transports: ['websocket'] });
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
-    socket.on('connect', () => socket.emit('join-match', matchId));
-    socket.on('score-updated', () => {
+    const debouncedRefetch = () => {
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
       refetchTimer.current = setTimeout(() => { fetchMatch(); }, 600);
+    };
+    socket.on('connect', () => {
+      socket.emit('join-match', matchId);
+      fetchMatch(); // catch up after a (re)connect
     });
+    socket.on('score-updated', debouncedRefetch);
+
+    const poll = setInterval(() => { fetchMatch(); }, 10000);
+
     return () => {
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      clearInterval(poll);
       try {
         socket.emit('leave-match', matchId);
         socket.disconnect();

@@ -3,7 +3,7 @@ const Match = require("../models/Match");
 const mongoose = require("mongoose");
 const { nanoid } = require("nanoid");
 const { generateKnockoutBracket } = require("../utils/knockoutBracket");
-const { generateLeagueBracket } = require("../utils/leagueBracket");
+const { generateLeagueBracket, buildKnockoutMatches, buildQualifierPlayoff } = require("../utils/leagueBracket");
 const { propagateTeamNameToTournament } = require("../utils/teamRename");
 
 const TBD = 'TBD';
@@ -35,7 +35,7 @@ exports.createTournament = async (req, res) => {
       name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
       venue, description, format, visibility,
       // League-only:
-      numberOfGroups, teamsAdvancePerGroup, matchesPerPair,
+      numberOfGroups, teamsAdvancePerGroup, matchesPerPair, playoffFormat,
     } = req.body;
 
     if (!name || !name.trim()) {
@@ -63,6 +63,7 @@ exports.createTournament = async (req, res) => {
       numberOfGroups: tournamentFormat === "league" ? Math.max(1, numberOfGroups || 1) : 1,
       teamsAdvancePerGroup: tournamentFormat === "league" ? Math.max(0, teamsAdvancePerGroup || 0) : 0,
       matchesPerPair: tournamentFormat === "league" ? Math.max(1, matchesPerPair || 1) : 1,
+      playoffFormat: playoffFormat === "qualifier" ? "qualifier" : "knockout",
     });
 
     // For knockout, pre-generate the full bracket so the schedule is ready immediately.
@@ -111,6 +112,7 @@ exports.createTournament = async (req, res) => {
         tournament.numberOfGroups,
         tournament.teamsAdvancePerGroup,
         tournament.matchesPerPair,
+        tournament.playoffFormat,
       );
 
       // Persist the group layout on the tournament so the schedule screen can
@@ -156,8 +158,12 @@ exports.createTournament = async (req, res) => {
           stage: "knockout",
           round: def.round,
           bracketSlot: def.bracketSlot,
+          matchLabel: def.matchLabel || null,
           nextMatchId: def.parentRound ? idMap[`${def.parentRound}_${def.parentSlot}`] : null,
           nextMatchSlot: def.parentRound ? def.parentSide : null,
+          // Qualifier playoffs: the LOSER of Qualifier 1 drops into Qualifier 2.
+          loserNextMatchId: def.loserParentRound ? idMap[`${def.loserParentRound}_${def.loserParentSlot}`] : null,
+          loserNextMatchSlot: def.loserParentRound ? def.loserParentSide : null,
           // Source labels ("A1", "B2", …) are stashed in liveState so the
           // group-stage-complete hook knows which slot to fill.
           liveState: { sourceA: def.sourceA || null, sourceB: def.sourceB || null },
@@ -226,7 +232,7 @@ exports.getTournamentById = async (req, res) => {
     // Include `tournament` so the FullScorecard "Next Match" button can
     // route the user back into the tournament flow (otherwise the field is
     // stripped and the button falls back to a Quick-match setup).
-    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot matchSummary tournament stage group';
+    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot matchSummary tournament stage group matchLabel';
     const [completedMatches, inProgressMatches] = await Promise.all([
       Match.find({ tournament: id, status: { $in: ["completed", "abandoned"] } })
         .select(`teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam ${BRACKET_FIELDS}`)
@@ -679,5 +685,97 @@ exports.generateShareId = async (req, res) => {
   } catch (error) {
     console.error("Generate share ID error:", error);
     res.status(500).json({ success: false, error: "Failed to generate share link." });
+  }
+};
+
+// PATCH /tournaments/:id/playoff-format  { playoffFormat: 'knockout' | 'qualifier' }
+// Changes a league tournament's knockout-stage format and rebuilds the playoff
+// matches. Allowed while the playoffs haven't started (group stage may be live).
+exports.setPlayoffFormat = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
+    }
+    const newFormat = req.body?.playoffFormat === 'qualifier' ? 'qualifier' : 'knockout';
+
+    const tournament = await Tournament.findById(id);
+    if (!tournament) return res.status(404).json({ success: false, error: "Tournament not found" });
+    if (tournament.user.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+    if (tournament.format !== 'league') {
+      return res.status(400).json({ success: false, error: "Playoff format applies to league tournaments only." });
+    }
+    if (!tournament.teamsAdvancePerGroup) {
+      return res.status(400).json({ success: false, error: "This tournament has no playoff stage." });
+    }
+    const totalAdvancing = tournament.numberOfGroups * tournament.teamsAdvancePerGroup;
+    if (newFormat === 'qualifier' && totalAdvancing !== 4) {
+      return res.status(400).json({ success: false, error: "Qualifier playoffs need exactly 4 qualifying teams (top 4)." });
+    }
+
+    // Can't reshuffle the bracket once a playoff match has begun.
+    const startedKo = await Match.findOne({
+      tournament: id, stage: 'knockout', status: { $ne: 'scheduled' },
+    }).lean();
+    if (startedKo) {
+      return res.status(400).json({ success: false, error: "Can't change the playoff format once the playoffs have started." });
+    }
+
+    if (newFormat === tournament.playoffFormat) {
+      const same = await Tournament.findById(id).lean();
+      return res.json({ success: true, data: same });
+    }
+
+    // Replace the scheduled playoff matches with the new format.
+    await Match.deleteMany({ tournament: id, stage: 'knockout' });
+    tournament.playoffFormat = newFormat;
+    await tournament.save();
+
+    const { knockoutMatches } = newFormat === 'qualifier'
+      ? buildQualifierPlayoff(tournament.numberOfGroups, tournament.teamsAdvancePerGroup)
+      : buildKnockoutMatches(tournament.numberOfGroups, tournament.teamsAdvancePerGroup);
+
+    const koSorted = [...knockoutMatches].sort((a, b) => b.round - a.round);
+    const idMap = {};
+    for (const def of koSorted) {
+      const created = await Match.create({
+        user: tournament.user,
+        tournament: tournament._id,
+        teamA: teamObj(TBD),
+        teamB: teamObj(TBD),
+        venue: tournament.venue || "Unknown Venue",
+        matchType: "T20",
+        totalOvers: tournament.totalOvers,
+        ballsPerOver: tournament.ballsPerOver,
+        playersPerTeam: tournament.playersPerTeam,
+        status: "scheduled",
+        stage: "knockout",
+        round: def.round,
+        bracketSlot: def.bracketSlot,
+        matchLabel: def.matchLabel || null,
+        nextMatchId: def.parentRound ? idMap[`${def.parentRound}_${def.parentSlot}`] : null,
+        nextMatchSlot: def.parentRound ? def.parentSide : null,
+        loserNextMatchId: def.loserParentRound ? idMap[`${def.loserParentRound}_${def.loserParentSlot}`] : null,
+        loserNextMatchSlot: def.loserParentRound ? def.loserParentSide : null,
+        liveState: { sourceA: def.sourceA || null, sourceB: def.sourceB || null },
+        innings1: buildInnings(TBD, TBD, tournament.playersPerTeam),
+      });
+      idMap[`${def.round}_${def.bracketSlot}`] = created._id;
+    }
+
+    // If a group already finished, fill the fresh knockout slots from standings.
+    const { tryAdvanceLeagueGroup } = require('./matchController');
+    const groupLetters = (tournament.groups || []).map((_, i) => String.fromCharCode(65 + i));
+    for (const gl of groupLetters) {
+      try { await tryAdvanceLeagueGroup(id, gl); } catch (e) { console.error('Re-fill error:', e.message); }
+    }
+
+    const updated = await Tournament.findById(id).lean();
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error("Set playoff format error:", error);
+    res.status(500).json({ success: false, error: "Failed to update playoff format." });
   }
 };

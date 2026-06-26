@@ -14,6 +14,20 @@
 // describe where the slot will be filled from (e.g. "A1" = group A position 1).
 // teamA/teamB on knockout matches are always null until the group stage finishes.
 
+// Canonical seed order for a power-of-two bracket (1-based seed numbers in slot
+// order), e.g. size 8 -> [1,8,4,5,2,7,3,6]. Keeps seed 1 & 2 in opposite halves
+// (only meet in the final), 1 v 4 / 2 v 3 in the semis, etc.
+function seedBracketOrder(size) {
+  let order = [1];
+  while (order.length < size) {
+    const n = order.length * 2;
+    const next = [];
+    for (const s of order) { next.push(s); next.push(n + 1 - s); }
+    order = next;
+  }
+  return order;
+}
+
 // Snake order: round-robin draft. Spreads strong/weak teams evenly if the
 // input list is roughly ranked. e.g. [t1..t6], 2 groups →
 // A: t1, t4, t5 ; B: t2, t3, t6
@@ -85,44 +99,24 @@ function buildKnockoutMatches(numGroups, teamsAdvance) {
   if (totalAdvancing < 2) return { knockoutMatches: [], sources: [] };
   const groupLetter = (i) => String.fromCharCode(65 + i);
 
-  // Build first-round sources via cross-pairing. Each pair of groups (g, g+1)
-  // contributes a block of QFs: [g1 vs gp1_2, gp1_1 vs g2, g3 vs gp1_4, ...].
-  // Blocks are then interleaved across the bracket so winners from the same
-  // group-pair are kept on opposite halves until the final — preventing two
-  // teams from the same group-pair meeting again in the very next round.
-  const blocks = [];
-  for (let g = 0; g < numGroups; g += 2) {
-    const a = groupLetter(g);
-    const b = g + 1 < numGroups ? groupLetter(g + 1) : groupLetter(g);
-    const block = [];
-    for (let p = 1; p <= teamsAdvance; p += 2) {
-      block.push(`${a}${p}`);
-      block.push(`${b}${p + 1 <= teamsAdvance ? p + 1 : p}`);
-      if (p + 1 <= teamsAdvance) {
-        block.push(`${b}${p}`);
-        block.push(`${a}${p + 1}`);
-      }
-    }
-    blocks.push(block);
-  }
-  // Round-robin interleave the blocks so adjacent first-round matches come
-  // from different group-pairs whenever possible.
-  const sources = [];
-  let still = true;
-  for (let i = 0; still; i += 2) {
-    still = false;
-    for (const block of blocks) {
-      if (i < block.length) {
-        sources.push(block[i]);
-        sources.push(block[i + 1]);
-        still = true;
-      }
+  // Seed the qualifiers, then place them into the canonical bracket order.
+  // Seeding: all group winners first (A1, B1, …), then all runners-up
+  // (A2, B2, …), and so on. So group winners are the top seeds — the canonical
+  // order keeps them apart (winners on opposite halves), pairs the best with the
+  // weakest, and cross-pairs winners against other groups' lower finishers.
+  // This always yields exactly `totalAdvancing` distinct qualifiers (the old
+  // block logic duplicated sources for a single group / odd group counts).
+  const seedList = [];
+  for (let p = 1; p <= teamsAdvance; p++) {
+    for (let g = 0; g < numGroups; g++) {
+      seedList.push(`${groupLetter(g)}${p}`);
     }
   }
-  // Pad up to the next power of two with byes so brackets are clean.
-  const numRounds = Math.ceil(Math.log2(sources.length));
+  // Pad up to the next power of two with byes (which fall on the top seeds).
+  const numRounds = Math.ceil(Math.log2(seedList.length));
   const slots = 2 ** numRounds;
-  while (sources.length < slots) sources.push(null);
+  const order = seedBracketOrder(slots);
+  const sources = order.map((s) => (s <= seedList.length ? seedList[s - 1] : null));
 
   // Build the bracket: round 1 from sources, then halve each round.
   // slotInfo[r] tracks which slots are byes (single source) vs real (two sources).
@@ -163,7 +157,57 @@ function buildKnockoutMatches(numGroups, teamsAdvance) {
   return { knockoutMatches, sources };
 }
 
-function generateLeagueBracket(teamNames, numGroups, teamsAdvance, matchesPerPair) {
+// Qualifiers as seeds: group winners first (A1, B1, …), then runners-up.
+function qualifierSeeds(numGroups, teamsAdvance) {
+  const groupLetter = (i) => String.fromCharCode(65 + i);
+  const seeds = [];
+  for (let p = 1; p <= teamsAdvance; p++) {
+    for (let g = 0; g < numGroups; g++) seeds.push(`${groupLetter(g)}${p}`);
+  }
+  return seeds;
+}
+
+// IPL-style playoffs for the top 4 qualifiers (S1..S4):
+//   Qualifier 1 : S1 v S2  → winner to Final, loser to Qualifier 2
+//   Eliminator  : S3 v S4  → winner to Qualifier 2, loser out
+//   Qualifier 2 : Q1 loser v Eliminator winner → winner to Final, loser out
+//   Final       : Q1 winner v Q2 winner
+// Match defs carry winner links (parent*) and, for Q1, a loser link
+// (loserParent*). Q2/Final sources are null (filled by result propagation).
+function buildQualifierPlayoff(numGroups, teamsAdvance) {
+  const seeds = qualifierSeeds(numGroups, teamsAdvance);
+  if (seeds.length !== 4) {
+    // Qualifier playoffs are a strict top-4 format; fall back to a normal bracket.
+    return buildKnockoutMatches(numGroups, teamsAdvance);
+  }
+  const [s1, s2, s3, s4] = seeds;
+  const knockoutMatches = [
+    {
+      round: 1, bracketSlot: 1, matchLabel: 'Qualifier 1',
+      sourceA: s1, sourceB: s2,
+      parentRound: 3, parentSlot: 1, parentSide: 'A',          // winner → Final A
+      loserParentRound: 2, loserParentSlot: 1, loserParentSide: 'A', // loser → Qualifier 2 A
+    },
+    {
+      round: 1, bracketSlot: 2, matchLabel: 'Eliminator',
+      sourceA: s3, sourceB: s4,
+      parentRound: 2, parentSlot: 1, parentSide: 'B',          // winner → Qualifier 2 B
+    },
+    {
+      round: 2, bracketSlot: 1, matchLabel: 'Qualifier 2',
+      sourceA: null, sourceB: null,
+      parentRound: 3, parentSlot: 1, parentSide: 'B',          // winner → Final B
+    },
+    {
+      round: 3, bracketSlot: 1, matchLabel: 'Final',
+      sourceA: null, sourceB: null,
+      parentRound: null, parentSlot: null, parentSide: null,
+    },
+  ];
+  return { knockoutMatches, sources: seeds };
+}
+
+function generateLeagueBracket(teamNames, numGroups, teamsAdvance, matchesPerPair, playoffFormat) {
   if (!Array.isArray(teamNames) || teamNames.length < 2) {
     throw new Error('League requires at least 2 teams');
   }
@@ -180,8 +224,19 @@ function generateLeagueBracket(teamNames, numGroups, teamsAdvance, matchesPerPai
   }
 
   const groupMatches = buildGroupMatches(groups, matchesPerPair);
-  const { knockoutMatches } = buildKnockoutMatches(numGroups, teamsAdvance);
+  // Qualifier playoffs need exactly 4 qualifiers; otherwise use a normal bracket.
+  const useQualifier =
+    playoffFormat === 'qualifier' && teamsAdvance > 0 && numGroups * teamsAdvance === 4;
+  const { knockoutMatches } = useQualifier
+    ? buildQualifierPlayoff(numGroups, teamsAdvance)
+    : buildKnockoutMatches(numGroups, teamsAdvance);
   return { groups, groupMatches, knockoutMatches };
 }
 
-module.exports = { generateLeagueBracket, snakeDistribute, roundRobinPairs };
+module.exports = {
+  generateLeagueBracket,
+  buildKnockoutMatches,
+  buildQualifierPlayoff,
+  snakeDistribute,
+  roundRobinPairs,
+};

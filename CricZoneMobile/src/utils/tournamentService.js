@@ -81,6 +81,18 @@ const tournamentService = {
     );
     return response.data;
   },
+
+  // Switch the league playoff format ('knockout' | 'qualifier'). Rebuilds the
+  // playoff matches; allowed while the playoffs haven't started.
+  setPlayoffFormat: async (id, playoffFormat, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(
+      `/tournaments/${id}/playoff-format`,
+      { playoffFormat },
+      config,
+    );
+    return response.data;
+  },
 };
 
 export default tournamentService;

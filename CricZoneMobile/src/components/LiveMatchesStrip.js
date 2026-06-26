@@ -239,6 +239,10 @@ const LiveMatchCard = ({ match, index, onPress, navigation, cardWidth }) => {
 // into a single API call within a small window. Important during fast scoring.
 const REFETCH_DEBOUNCE_MS = 600;
 
+// Fallback polling interval — guarantees the strip refreshes even when a socket
+// event is missed (backgrounded app, dropped WebSocket, etc.).
+const POLL_INTERVAL_MS = 12000;
+
 const LiveMatchesStrip = ({ navigation }) => {
   const { user } = useContext(AuthContext);
   const [matches, setMatches] = useState([]);
@@ -264,23 +268,34 @@ const LiveMatchesStrip = ({ navigation }) => {
     }
   }, [user?.token]);
 
-  // Initial fetch + socket subscription. Re-fetches the strip on any
-  // `public-live-update` from the backend (debounced).
+  // Initial fetch + socket subscription. The socket gives instant updates; a
+  // periodic poll is a fallback so scores still refresh within seconds even if
+  // a socket event is dropped/delayed (mobile backgrounding, flaky networks,
+  // WebSocket hiccups). We also re-fetch on every (re)connect to catch up.
   useEffect(() => {
     if (!user?.token) return;
     fetchMatches();
 
-    const socket = io(SOCKET_URL, { transports: ['websocket'] });
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
-    socket.on('connect', () => socket.emit('join-public-live'));
-    socket.on('public-live-update', () => {
+    const debouncedRefetch = () => {
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
       refetchTimer.current = setTimeout(() => { fetchMatches(); }, REFETCH_DEBOUNCE_MS);
+    };
+
+    socket.on('connect', () => {
+      socket.emit('join-public-live');
+      fetchMatches(); // catch up after a (re)connect
     });
+    socket.on('public-live-update', debouncedRefetch);
+
+    // Fallback poll — caps staleness even if no socket event arrives.
+    const poll = setInterval(() => { fetchMatches(); }, POLL_INTERVAL_MS);
 
     return () => {
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      clearInterval(poll);
       try {
         socket.emit('leave-public-live');
         socket.disconnect();

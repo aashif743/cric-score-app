@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -411,6 +412,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState({ kind: 'group', id: 'A' });
+  const [switchingFormat, setSwitchingFormat] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!user?.token || !tournamentId) return;
@@ -442,17 +444,42 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
   const myId = user?.id || user?._id;
   const isOwner = !!(tournament?.user && myId && String(tournament.user) === String(myId));
 
+  const isQualifier = tournament?.playoffFormat === 'qualifier';
+  // Qualifier playoffs require exactly 4 qualifiers; the format can only be
+  // changed before any playoff match has started.
+  const advancingTotal = (tournament?.numberOfGroups || 0) * (tournament?.teamsAdvancePerGroup || 0);
+  const qualifierAvailable = advancingTotal === 4;
+  const playoffsStarted = knockoutMatches.some((m) => m.status && m.status !== 'scheduled');
+
+  const changePlayoffFormat = async (fmt) => {
+    if (!tournament?._id || switchingFormat || fmt === tournament.playoffFormat) return;
+    setSwitchingFormat(true);
+    try {
+      await tournamentService.setPlayoffFormat(tournament._id, fmt, user.token);
+      await fetchData();
+    } catch (err) {
+      Alert.alert('Cannot change format', err?.response?.data?.error || err?.error || 'Failed to change playoff format.');
+    } finally {
+      setSwitchingFormat(false);
+    }
+  };
+
   const tabs = useMemo(() => {
     const g = groups.map((_, i) => ({
       key: `g_${groupLetter(i)}`, kind: 'group', id: groupLetter(i),
       label: `Group ${groupLetter(i)}`,
     }));
-    const k = Array.from({ length: numKnockoutRounds }, (_, i) => ({
-      key: `k_${i + 1}`, kind: 'knockout', id: i + 1,
-      label: koRoundLabel(i + 1, numKnockoutRounds),
-    }));
+    // IPL-style playoffs are shown together under one "Playoffs" tab (their
+    // labels — Qualifier 1, Eliminator, … — distinguish them). A standard
+    // knockout uses one tab per round.
+    const k = isQualifier
+      ? [{ key: 'po', kind: 'playoffs', id: 'po', label: 'Playoffs' }]
+      : Array.from({ length: numKnockoutRounds }, (_, i) => ({
+          key: `k_${i + 1}`, kind: 'knockout', id: i + 1,
+          label: koRoundLabel(i + 1, numKnockoutRounds),
+        }));
     return [...g, ...(hasKnockout ? k : [])];
-  }, [groups, numKnockoutRounds, hasKnockout]);
+  }, [groups, numKnockoutRounds, hasKnockout, isQualifier]);
 
   const startMatchPayload = (match) => ({
     tournamentId: tournament?._id,
@@ -501,6 +528,11 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
       return groupMatches
         .filter((m) => m.group === activeTab.id)
         .sort((a, b) => (a.round || 0) - (b.round || 0));
+    }
+    if (activeTab.kind === 'playoffs') {
+      // All playoff matches in playing order (Qualifier 1, Eliminator, …).
+      return [...knockoutMatches].sort((a, b) =>
+        (a.round || 0) - (b.round || 0) || (a.bracketSlot || 0) - (b.bracketSlot || 0));
     }
     return knockoutMatches
       .filter((m) => m.round === activeTab.id)
@@ -604,6 +636,35 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
 
       {/* Match list */}
       <ScrollView contentContainerStyle={styles.scheduleList} showsVerticalScrollIndicator={false}>
+        {/* Owner-only playoff format switch (locks once playoffs start) */}
+        {isOwner && hasKnockout && (activeTab.kind === 'playoffs' || activeTab.kind === 'knockout') ? (
+          <View style={styles.formatBar}>
+            <Text style={styles.formatBarLabel}>Playoff format</Text>
+            {playoffsStarted ? (
+              <Text style={styles.formatLocked}>Locked · playoffs started</Text>
+            ) : (
+              <View style={styles.formatPills}>
+                <TouchableOpacity
+                  style={[styles.formatPill, !isQualifier && styles.formatPillActive]}
+                  onPress={() => changePlayoffFormat('knockout')}
+                  disabled={switchingFormat}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.formatPillText, !isQualifier && styles.formatPillTextActive]}>Knockout</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.formatPill, isQualifier && styles.formatPillActive, !qualifierAvailable && styles.formatPillDisabled]}
+                  onPress={() => qualifierAvailable && changePlayoffFormat('qualifier')}
+                  disabled={switchingFormat || !qualifierAvailable}
+                  activeOpacity={qualifierAvailable ? 0.8 : 1}
+                >
+                  <Text style={[styles.formatPillText, isQualifier && styles.formatPillTextActive, !qualifierAvailable && styles.formatPillTextDisabled]}>Qualifier</Text>
+                </TouchableOpacity>
+                {switchingFormat ? <ActivityIndicator size="small" color="#4f46e5" style={{ marginLeft: 6 }} /> : null}
+              </View>
+            )}
+          </View>
+        ) : null}
         {matchesForActiveTab.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>
@@ -633,7 +694,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
               key={m._id}
               index={i}
               ordinal={i + 1}
-              roundLabel={currentTabLabel}
+              roundLabel={m.matchLabel || currentTabLabel}
               match={m}
               onStart={handleStartMatch}
               isOwner={isOwner}
@@ -709,6 +770,25 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#2563eb', fontWeight: '800' },
 
   scheduleList: { padding: 16, paddingBottom: 60 },
+
+  // Playoff format switch
+  formatBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#fff', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14,
+    marginBottom: 14, borderWidth: 1, borderColor: '#eef2f7',
+  },
+  formatBarLabel: { fontSize: 13, fontWeight: '800', color: '#334155' },
+  formatLocked: { fontSize: 12, fontWeight: '700', color: '#94a3b8' },
+  formatPills: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  formatPill: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+    borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: '#fff',
+  },
+  formatPillActive: { borderColor: '#4f46e5', backgroundColor: '#eef2ff' },
+  formatPillDisabled: { backgroundColor: '#f8fafc', borderColor: '#f1f5f9' },
+  formatPillText: { fontSize: 12.5, fontWeight: '700', color: '#64748b' },
+  formatPillTextActive: { color: '#4338ca', fontWeight: '800' },
+  formatPillTextDisabled: { color: '#cbd5e1' },
 
   emptyState: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 24 },
   emptyTitle: { fontSize: 17, fontWeight: '700', color: '#94a3b8', marginBottom: 6 },

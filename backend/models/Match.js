@@ -328,6 +328,24 @@ const MatchSchema = new mongoose.Schema({
     enum: ['A', 'B', null],
     default: null
   },
+  // IPL-style qualifier playoffs only: where the LOSER goes (Qualifier 1's loser
+  // drops into Qualifier 2). Null for standard knockout (loser is eliminated).
+  loserNextMatchId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Match',
+    default: null
+  },
+  loserNextMatchSlot: {
+    type: String,
+    enum: ['A', 'B', null],
+    default: null
+  },
+  // Display label for playoff matches (e.g. "Qualifier 1", "Eliminator",
+  // "Qualifier 2", "Final"). Null for normal bracket rounds.
+  matchLabel: {
+    type: String,
+    default: null
+  },
   // League-format only. `stage` distinguishes round-robin group matches from
   // the knockout stage that follows; `group` is the group letter (A, B, ...).
   stage: {

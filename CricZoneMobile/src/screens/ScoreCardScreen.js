@@ -402,7 +402,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     const matchId = matchData?._id;
     if (!matchId || matchId.startsWith('guest_')) return;
 
-    const s = io(SOCKET_URL, { transports: ['websocket'] });
+    const s = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socketRef.current = s;
 
     s.on('connect', () => {

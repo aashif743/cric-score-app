@@ -635,6 +635,16 @@ exports.endMatch = async (req, res) => {
         .catch(e => console.error('Knockout propagation error:', e.message));
     }
 
+    // Qualifier playoffs: the LOSER also advances (Qualifier 1 loser → Qualifier 2).
+    if (match.loserNextMatchId && match.matchSummary?.winner) {
+      const w = match.matchSummary.winner;
+      const loserName = match.teamA?.name === w ? match.teamB?.name : match.teamA?.name;
+      if (loserName && loserName !== 'TBD') {
+        propagateKnockoutWinner(match.loserNextMatchId, match.loserNextMatchSlot, loserName)
+          .catch(e => console.error('Qualifier loser propagation error:', e.message));
+      }
+    }
+
     // League group stage: if this match was a group match and its group is now
     // fully complete, rank the group and populate the knockout TBD slots.
     if (match.tournament && match.stage === 'group') {
@@ -862,4 +872,7 @@ module.exports = {
   endInnings: exports.endInnings,
   endMatch: exports.endMatch,
   deleteAllMatches: exports.deleteAllMatches,
+  // Exposed so the tournament controller can re-fill knockout slots after the
+  // playoff format is changed mid-tournament.
+  tryAdvanceLeagueGroup,
 };
