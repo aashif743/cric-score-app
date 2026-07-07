@@ -6,7 +6,7 @@ const Tournament = require('../models/Tournament');
 
 // Helper to generate a JWT
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '365d' });
 };
 
 // Apple App Store review bypass. When a reviewer signs in we can't actually

@@ -24,6 +24,107 @@ const buildInnings = (battingTeam, bowlingTeam, playersPerTeam) => ({
   declared: false,
 });
 
+// Wipe and rebuild every match for a league tournament from its current
+// settings (groups, advancing, matches-per-pair, playoff format). Used when the
+// owner edits the structure before any match has started. Throws on an invalid
+// configuration (e.g. a group with < 2 teams) so the caller can surface it.
+const regenerateLeagueMatches = async (tournament, userId) => {
+  const filledTeams = Array.from({ length: tournament.numberOfTeams }, (_, i) =>
+    (tournament.teamNames?.[i]?.trim()) || `Team ${String.fromCharCode(65 + i)}`);
+
+  const { groups, groupMatches, knockoutMatches } = generateLeagueBracket(
+    filledTeams,
+    tournament.numberOfGroups,
+    tournament.teamsAdvancePerGroup,
+    tournament.matchesPerPair,
+    tournament.playoffFormat,
+  );
+
+  await Match.deleteMany({ tournament: tournament._id });
+  await Tournament.findByIdAndUpdate(tournament._id, { $set: { groups } });
+
+  for (const gm of groupMatches) {
+    await Match.create({
+      user: userId, tournament: tournament._id,
+      teamA: teamObj(gm.teamA), teamB: teamObj(gm.teamB),
+      venue: tournament.venue || "Unknown Venue", matchType: "T20",
+      totalOvers: tournament.totalOvers, ballsPerOver: tournament.ballsPerOver,
+      playersPerTeam: tournament.playersPerTeam,
+      status: "scheduled", stage: "group", group: gm.group, round: gm.roundInGroup,
+      innings1: buildInnings(gm.teamA, gm.teamB, tournament.playersPerTeam),
+    });
+  }
+
+  const koSorted = [...knockoutMatches].sort((a, b) => b.round - a.round);
+  const idMap = {};
+  for (const def of koSorted) {
+    const created = await Match.create({
+      user: userId, tournament: tournament._id,
+      teamA: teamObj(TBD), teamB: teamObj(TBD),
+      venue: tournament.venue || "Unknown Venue", matchType: "T20",
+      totalOvers: tournament.totalOvers, ballsPerOver: tournament.ballsPerOver,
+      playersPerTeam: tournament.playersPerTeam,
+      status: "scheduled", stage: "knockout", round: def.round, bracketSlot: def.bracketSlot,
+      matchLabel: def.matchLabel || null,
+      nextMatchId: def.parentRound ? idMap[`${def.parentRound}_${def.parentSlot}`] : null,
+      nextMatchSlot: def.parentRound ? def.parentSide : null,
+      loserNextMatchId: def.loserParentRound ? idMap[`${def.loserParentRound}_${def.loserParentSlot}`] : null,
+      loserNextMatchSlot: def.loserParentRound ? def.loserParentSide : null,
+      liveState: { sourceA: def.sourceA || null, sourceB: def.sourceB || null },
+      innings1: buildInnings(TBD, TBD, tournament.playersPerTeam),
+    });
+    idMap[`${def.round}_${def.bracketSlot}`] = created._id;
+  }
+
+  await Tournament.findByIdAndUpdate(tournament._id, {
+    $set: { matchCount: groupMatches.length + knockoutMatches.length },
+  });
+};
+
+// Rebuild ONLY the knockout/playoff stage from the tournament's current
+// teamsAdvancePerGroup + playoffFormat, leaving the group matches (and their
+// results) untouched. Used when the owner changes how many teams advance or the
+// playoff format — those depend on the standings, not on any group result. Any
+// already-finished group is then re-filled into the fresh bracket slots.
+const regenerateKnockoutStage = async (tournament, userId) => {
+  await Match.deleteMany({ tournament: tournament._id, stage: 'knockout' });
+  if (!tournament.teamsAdvancePerGroup) return;
+
+  const useQualifier = tournament.playoffFormat === 'qualifier'
+    && tournament.numberOfGroups * tournament.teamsAdvancePerGroup === 4;
+  const { knockoutMatches } = useQualifier
+    ? buildQualifierPlayoff(tournament.numberOfGroups, tournament.teamsAdvancePerGroup)
+    : buildKnockoutMatches(tournament.numberOfGroups, tournament.teamsAdvancePerGroup);
+
+  const koSorted = [...knockoutMatches].sort((a, b) => b.round - a.round);
+  const idMap = {};
+  for (const def of koSorted) {
+    const created = await Match.create({
+      user: userId, tournament: tournament._id,
+      teamA: teamObj(TBD), teamB: teamObj(TBD),
+      venue: tournament.venue || "Unknown Venue", matchType: "T20",
+      totalOvers: tournament.totalOvers, ballsPerOver: tournament.ballsPerOver,
+      playersPerTeam: tournament.playersPerTeam,
+      status: "scheduled", stage: "knockout", round: def.round, bracketSlot: def.bracketSlot,
+      matchLabel: def.matchLabel || null,
+      nextMatchId: def.parentRound ? idMap[`${def.parentRound}_${def.parentSlot}`] : null,
+      nextMatchSlot: def.parentRound ? def.parentSide : null,
+      loserNextMatchId: def.loserParentRound ? idMap[`${def.loserParentRound}_${def.loserParentSlot}`] : null,
+      loserNextMatchSlot: def.loserParentRound ? def.loserParentSide : null,
+      liveState: { sourceA: def.sourceA || null, sourceB: def.sourceB || null },
+      innings1: buildInnings(TBD, TBD, tournament.playersPerTeam),
+    });
+    idMap[`${def.round}_${def.bracketSlot}`] = created._id;
+  }
+
+  // Re-fill slots from any group that has already finished.
+  const { tryAdvanceLeagueGroup } = require('./matchController');
+  const groupLetters = (tournament.groups || []).map((_, i) => String.fromCharCode(65 + i));
+  for (const gl of groupLetters) {
+    try { await tryAdvanceLeagueGroup(tournament._id, gl); } catch (e) { console.error('Re-fill error:', e.message); }
+  }
+};
+
 // Create tournament
 exports.createTournament = async (req, res) => {
   try {
@@ -273,7 +374,11 @@ exports.updateTournament = async (req, res) => {
       return res.status(403).json({ success: false, error: "Not authorized" });
     }
 
-    const { name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver, venue, description, status, visibility } = req.body;
+    const {
+      name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
+      venue, description, status, visibility,
+      numberOfGroups, teamsAdvancePerGroup, matchesPerPair, playoffFormat,
+    } = req.body;
 
     // Capture the current values so we can compare and only propagate fields
     // the user actually changed. This avoids touching a match's innings1
@@ -285,9 +390,8 @@ exports.updateTournament = async (req, res) => {
       venue: tournament.venue,
     };
 
+    // --- Non-structural fields (always editable) -----------------------------
     if (name !== undefined) tournament.name = name.trim();
-    if (numberOfTeams !== undefined) tournament.numberOfTeams = numberOfTeams;
-    if (teamNames !== undefined) tournament.teamNames = teamNames;
     if (playersPerTeam !== undefined) tournament.playersPerTeam = playersPerTeam;
     if (totalOvers !== undefined) tournament.totalOvers = totalOvers;
     if (ballsPerOver !== undefined) tournament.ballsPerOver = ballsPerOver;
@@ -297,6 +401,74 @@ exports.updateTournament = async (req, res) => {
     if (visibility !== undefined && (visibility === "public" || visibility === "private")) {
       tournament.visibility = visibility;
     }
+
+    // --- League structure -----------------------------------------------------
+    // Two kinds of change:
+    //  • GROUP change (team count / number of groups / matches-per-pair / team
+    //    names) → reshapes the group stage, so the whole league is rebuilt.
+    //    This clears match results, so it's owner-confirmed on the client.
+    //  • KNOCKOUT-only change (teams advancing / playoff format) → depends on the
+    //    final standings, not on any group result, so only the knockout stage is
+    //    rebuilt and all group matches/results are preserved. Allowed any time
+    //    before the playoffs themselves have started.
+    let structureWarning = null;
+    if (tournament.format === 'league') {
+      const newGroups = numberOfGroups !== undefined ? Math.max(1, parseInt(numberOfGroups, 10) || 1) : tournament.numberOfGroups;
+      const newAdvance = teamsAdvancePerGroup !== undefined ? Math.max(0, parseInt(teamsAdvancePerGroup, 10) || 0) : tournament.teamsAdvancePerGroup;
+      const newMpp = matchesPerPair !== undefined ? Math.max(1, parseInt(matchesPerPair, 10) || 1) : tournament.matchesPerPair;
+      let newPlayoff = tournament.playoffFormat;
+      if (playoffFormat === 'qualifier' || playoffFormat === 'knockout') newPlayoff = playoffFormat;
+      if (newPlayoff === 'qualifier' && newGroups * newAdvance !== 4) newPlayoff = 'knockout';
+      const newTeams = numberOfTeams !== undefined ? numberOfTeams : tournament.numberOfTeams;
+
+      const groupChanged =
+        newGroups !== tournament.numberOfGroups ||
+        newMpp !== tournament.matchesPerPair ||
+        newTeams !== tournament.numberOfTeams;
+      const knockoutChanged =
+        newAdvance !== tournament.teamsAdvancePerGroup ||
+        newPlayoff !== tournament.playoffFormat;
+
+      if (groupChanged) {
+        // Full rebuild — clears all matches. The client confirms before sending.
+        tournament.numberOfGroups = newGroups;
+        tournament.teamsAdvancePerGroup = newAdvance;
+        tournament.matchesPerPair = newMpp;
+        tournament.playoffFormat = newPlayoff;
+        if (numberOfTeams !== undefined) tournament.numberOfTeams = numberOfTeams;
+        if (teamNames !== undefined) tournament.teamNames = teamNames;
+        await tournament.save();
+        try {
+          await regenerateLeagueMatches(tournament, req.user.id);
+        } catch (e) {
+          return res.status(400).json({ success: false, error: e.message || 'Invalid league configuration.' });
+        }
+        const fresh = await Tournament.findById(id).lean();
+        return res.json({ success: true, data: fresh, regenerated: true });
+      }
+
+      if (knockoutChanged) {
+        const koStarted = await Match.findOne({ tournament: id, stage: 'knockout', status: { $ne: 'scheduled' } }).lean();
+        if (koStarted) {
+          structureWarning = 'Teams advancing and playoff format can only be changed before the playoffs start — those changes were not applied.';
+        } else {
+          tournament.teamsAdvancePerGroup = newAdvance;
+          tournament.playoffFormat = newPlayoff;
+          await tournament.save();
+          try {
+            await regenerateKnockoutStage(tournament, req.user.id);
+          } catch (e) {
+            return res.status(400).json({ success: false, error: e.message || 'Invalid playoff configuration.' });
+          }
+          const fresh = await Tournament.findById(id).lean();
+          return res.json({ success: true, data: fresh, regenerated: true });
+        }
+      }
+    }
+
+    // No structural rebuild — apply team count / names normally.
+    if (numberOfTeams !== undefined) tournament.numberOfTeams = numberOfTeams;
+    if (teamNames !== undefined) tournament.teamNames = teamNames;
 
     const updated = await tournament.save();
 
@@ -339,7 +511,7 @@ exports.updateTournament = async (req, res) => {
       );
     }
 
-    res.json({ success: true, data: updated });
+    res.json({ success: true, data: updated, warning: structureWarning });
   } catch (error) {
     console.error("Update tournament error:", error);
     res.status(500).json({ success: false, error: "Failed to update tournament." });
@@ -728,49 +900,11 @@ exports.setPlayoffFormat = async (req, res) => {
       return res.json({ success: true, data: same });
     }
 
-    // Replace the scheduled playoff matches with the new format.
-    await Match.deleteMany({ tournament: id, stage: 'knockout' });
+    // Replace the scheduled playoff matches with the new format (group matches
+    // and their results are preserved).
     tournament.playoffFormat = newFormat;
     await tournament.save();
-
-    const { knockoutMatches } = newFormat === 'qualifier'
-      ? buildQualifierPlayoff(tournament.numberOfGroups, tournament.teamsAdvancePerGroup)
-      : buildKnockoutMatches(tournament.numberOfGroups, tournament.teamsAdvancePerGroup);
-
-    const koSorted = [...knockoutMatches].sort((a, b) => b.round - a.round);
-    const idMap = {};
-    for (const def of koSorted) {
-      const created = await Match.create({
-        user: tournament.user,
-        tournament: tournament._id,
-        teamA: teamObj(TBD),
-        teamB: teamObj(TBD),
-        venue: tournament.venue || "Unknown Venue",
-        matchType: "T20",
-        totalOvers: tournament.totalOvers,
-        ballsPerOver: tournament.ballsPerOver,
-        playersPerTeam: tournament.playersPerTeam,
-        status: "scheduled",
-        stage: "knockout",
-        round: def.round,
-        bracketSlot: def.bracketSlot,
-        matchLabel: def.matchLabel || null,
-        nextMatchId: def.parentRound ? idMap[`${def.parentRound}_${def.parentSlot}`] : null,
-        nextMatchSlot: def.parentRound ? def.parentSide : null,
-        loserNextMatchId: def.loserParentRound ? idMap[`${def.loserParentRound}_${def.loserParentSlot}`] : null,
-        loserNextMatchSlot: def.loserParentRound ? def.loserParentSide : null,
-        liveState: { sourceA: def.sourceA || null, sourceB: def.sourceB || null },
-        innings1: buildInnings(TBD, TBD, tournament.playersPerTeam),
-      });
-      idMap[`${def.round}_${def.bracketSlot}`] = created._id;
-    }
-
-    // If a group already finished, fill the fresh knockout slots from standings.
-    const { tryAdvanceLeagueGroup } = require('./matchController');
-    const groupLetters = (tournament.groups || []).map((_, i) => String.fromCharCode(65 + i));
-    for (const gl of groupLetters) {
-      try { await tryAdvanceLeagueGroup(id, gl); } catch (e) { console.error('Re-fill error:', e.message); }
-    }
+    await regenerateKnockoutStage(tournament, tournament.user);
 
     const updated = await Tournament.findById(id).lean();
     res.json({ success: true, data: updated });
