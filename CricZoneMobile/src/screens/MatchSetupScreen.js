@@ -381,6 +381,17 @@ const MatchSetupScreen = ({ navigation, route }) => {
     }
   };
 
+  // Swap which fixture team bats first vs bowls first. For a tournament match
+  // the two teams are fixed, so this simply trades their batting/bowling roles.
+  const swapBattingBowling = () => {
+    setBattingTeam(bowlingTeam);
+    setBowlingTeam(battingTeam);
+    setShowBattingDropdown(false);
+    setShowBowlingDropdown(false);
+    battingDropdownAnim.setValue(0);
+    bowlingDropdownAnim.setValue(0);
+  };
+
   const handleStartMatch = async () => {
     const teamA = battingTeam.trim() || 'Team A';
     const teamB = bowlingTeam.trim() || 'Team B';
@@ -590,11 +601,14 @@ const MatchSetupScreen = ({ navigation, route }) => {
                           style={[
                             styles.tournamentDropdownItem,
                             battingTeam === tn && styles.tournamentDropdownItemSelected,
-                            bowlingTeam === tn && styles.tournamentDropdownItemDisabled,
                           ]}
                           onPress={() => {
-                            if (bowlingTeam === tn) return;
-                            setBattingTeam(tn);
+                            if (battingTeam !== tn) {
+                              // Picking the team that's currently bowling swaps the
+                              // two roles so the fixture teams trade batting/bowling.
+                              if (bowlingTeam === tn) setBowlingTeam(battingTeam);
+                              setBattingTeam(tn);
+                            }
                             setShowBattingDropdown(false);
                             Animated.spring(battingDropdownAnim, {
                               toValue: 0,
@@ -603,13 +617,11 @@ const MatchSetupScreen = ({ navigation, route }) => {
                               useNativeDriver: false,
                             }).start();
                           }}
-                          disabled={bowlingTeam === tn}
                           activeOpacity={0.7}
                         >
                           <Text style={[
                             styles.tournamentDropdownItemText,
                             battingTeam === tn && styles.tournamentDropdownItemTextSelected,
-                            bowlingTeam === tn && styles.tournamentDropdownItemTextDisabled,
                           ]}>
                             {tn}
                           </Text>
@@ -620,7 +632,7 @@ const MatchSetupScreen = ({ navigation, route }) => {
                             </View>
                           )}
                           {bowlingTeam === tn && (
-                            <Text style={styles.alreadySelectedTag}>BOWLING</Text>
+                            <Text style={styles.alreadySelectedTag}>⇄ SWAP</Text>
                           )}
                         </TouchableOpacity>
                       ))}
@@ -630,9 +642,14 @@ const MatchSetupScreen = ({ navigation, route }) => {
 
                 <View style={styles.tournamentVsDivider}>
                   <View style={styles.tournamentVsLine} />
-                  <View style={styles.tournamentVsCircle}>
-                    <Text style={styles.tournamentVsText}>VS</Text>
-                  </View>
+                  <TouchableOpacity
+                    style={styles.tournamentVsCircle}
+                    onPress={swapBattingBowling}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Text style={styles.tournamentVsText}>⇄</Text>
+                  </TouchableOpacity>
                   <View style={styles.tournamentVsLine} />
                 </View>
 
@@ -717,11 +734,13 @@ const MatchSetupScreen = ({ navigation, route }) => {
                           style={[
                             styles.tournamentDropdownItem,
                             bowlingTeam === tn && styles.tournamentDropdownItemSelected,
-                            battingTeam === tn && styles.tournamentDropdownItemDisabled,
                           ]}
                           onPress={() => {
-                            if (battingTeam === tn) return;
-                            setBowlingTeam(tn);
+                            if (bowlingTeam !== tn) {
+                              // Picking the team that's currently batting swaps roles.
+                              if (battingTeam === tn) setBattingTeam(bowlingTeam);
+                              setBowlingTeam(tn);
+                            }
                             setShowBowlingDropdown(false);
                             Animated.spring(bowlingDropdownAnim, {
                               toValue: 0,
@@ -730,13 +749,11 @@ const MatchSetupScreen = ({ navigation, route }) => {
                               useNativeDriver: false,
                             }).start();
                           }}
-                          disabled={battingTeam === tn}
                           activeOpacity={0.7}
                         >
                           <Text style={[
                             styles.tournamentDropdownItemText,
                             bowlingTeam === tn && styles.tournamentDropdownItemTextSelected,
-                            battingTeam === tn && styles.tournamentDropdownItemTextDisabled,
                           ]}>
                             {tn}
                           </Text>
@@ -747,7 +764,7 @@ const MatchSetupScreen = ({ navigation, route }) => {
                             </View>
                           )}
                           {battingTeam === tn && (
-                            <Text style={styles.alreadySelectedTag}>BATTING</Text>
+                            <Text style={styles.alreadySelectedTag}>⇄ SWAP</Text>
                           )}
                         </TouchableOpacity>
                       ))}

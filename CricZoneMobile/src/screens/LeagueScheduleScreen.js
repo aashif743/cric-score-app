@@ -17,6 +17,9 @@ import Svg, { Path } from 'react-native-svg';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import GradientHeader from '../components/GradientHeader';
+import TournamentTopTabs from '../components/TournamentTopTabs';
+import PointsTableView from '../components/PointsTableView';
+import TournamentStatsView from '../components/TournamentStatsView';
 
 // --- Small helpers ---------------------------------------------------------
 
@@ -414,6 +417,15 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
   const [activeTab, setActiveTab] = useState({ kind: 'group', id: 'A' });
   const [switchingFormat, setSwitchingFormat] = useState(false);
 
+  // Top-level view tab: Matches | Points Table | Stats — switched in-place so
+  // it feels like tabs (no page navigation / reload).
+  const [activeView, setActiveView] = useState('matches');
+  // Stats are lazily fetched the first time the Stats tab is opened, then cached
+  // so switching back is instant.
+  const [stats, setStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState('');
+
   const fetchData = useCallback(async () => {
     if (!user?.token || !tournamentId) return;
     try {
@@ -430,6 +442,27 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
   }, [user?.token, tournamentId]);
 
   useFocusEffect(useCallback(() => { fetchData(); }, [fetchData]));
+
+  const fetchStats = useCallback(async () => {
+    if (!user?.token || !tournamentId) return;
+    try {
+      setStatsLoading(true); setStatsError('');
+      const res = await tournamentService.getTournamentStats(tournamentId, user.token);
+      setStats(res?.data || res || {});
+    } catch (err) {
+      console.warn('Tournament stats error:', err);
+      setStatsError('Failed to load stats.');
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [user?.token, tournamentId]);
+
+  // Load stats the first time the Stats tab is opened.
+  useEffect(() => {
+    if (activeView === 'stats' && stats === null && !statsLoading && !statsError) {
+      fetchStats();
+    }
+  }, [activeView, stats, statsLoading, statsError, fetchStats]);
 
   const groups = tournament?.groups || [];
   const hasKnockout = (tournament?.teamsAdvancePerGroup || 0) > 0;
@@ -539,16 +572,6 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
       .sort((a, b) => (a.bracketSlot || 0) - (b.bracketSlot || 0));
   }, [activeTab, groupMatches, knockoutMatches]);
 
-  const onPressPointsTable = () => {
-    if (!tournament?._id) return;
-    navigation.navigate('LeaguePointsTable', { tournamentId: tournament._id });
-  };
-
-  const onPressStats = () => {
-    if (!tournament?._id) return;
-    navigation.navigate('TournamentStats', { tournamentId: tournament._id, tournamentName: tournament.name });
-  };
-
   const onPressSettings = () => {
     if (!tournament?._id) return;
     navigation.navigate('TournamentCreate', { tournamentId: tournament._id, tournamentData: tournament });
@@ -592,24 +615,37 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
         onBack={() => navigation.goBack()}
       />
 
-      {/* Action bar: Points Table + Stats (equal), Settings (owner only) */}
-      <View style={styles.actionBar}>
-        <TouchableOpacity activeOpacity={0.85} onPress={onPressPointsTable} style={[styles.actionPill, styles.actionPillPrimary]}>
-          <Text style={styles.actionPillTextPrimary}>Points Table</Text>
-        </TouchableOpacity>
+      {/* Top nav: Matches · Points Table · Stats — switches in-place (tabs) */}
+      <TournamentTopTabs
+        active={activeView}
+        onSelect={setActiveView}
+        tournamentId={tournament?._id}
+        tournamentName={tournament?.name}
+        isOwner={isOwner}
+        onPressSettings={onPressSettings}
+      />
 
-        <TouchableOpacity activeOpacity={0.85} onPress={onPressStats} style={[styles.actionPill, styles.actionPillSecondary]}>
-          <Text style={styles.actionPillTextSecondary}>Stats</Text>
-        </TouchableOpacity>
-
-        {isOwner ? (
-          <TouchableOpacity activeOpacity={0.7} style={styles.settingsButton} onPress={onPressSettings}>
-            <SettingsIcon size={20} color="#475569" />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {/* Stage tab strip */}
+      {activeView === 'points' ? (
+        <PointsTableView tournament={tournament} />
+      ) : activeView === 'stats' ? (
+        statsLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#4f46e5" />
+            <Text style={styles.loadingText}>Loading stats…</Text>
+          </View>
+        ) : statsError ? (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.errorText}>{statsError}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={fetchStats}>
+              <Text style={styles.retryButtonText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TournamentStatsView stats={stats} />
+        )
+      ) : (
+      <>
+      {/* Stage tab strip — group / playoff filters, Matches page only */}
       <View style={styles.tabStripWrap}>
         <ScrollView
           horizontal
@@ -702,6 +738,8 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
           ))
         )}
       </ScrollView>
+      </>
+      )}
     </SafeAreaView>
   );
 };

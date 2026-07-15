@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import GradientHeader from '../components/GradientHeader';
+import TournamentTopTabs from '../components/TournamentTopTabs';
 
 // --- Helpers ---------------------------------------------------------------
 const initialOf = (s) => (s || '?').trim().charAt(0).toUpperCase();
@@ -128,6 +129,16 @@ const TournamentStatsScreen = ({ navigation, route }) => {
         subtitle={tournamentName || 'Tournament'}
         onBack={() => navigation.goBack()}
       />
+
+      {/* Top nav: Matches · Points Table · Stats (active) — league tournaments only */}
+      {route.params?.showTournamentTabs ? (
+        <TournamentTopTabs
+          active="stats"
+          navigation={navigation}
+          tournamentId={tournamentId}
+          tournamentName={tournamentName}
+        />
+      ) : null}
 
       {loading ? (
         <View style={styles.center}>

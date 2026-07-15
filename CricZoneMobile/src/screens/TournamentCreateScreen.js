@@ -135,6 +135,20 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   // Format: 'quick' | 'knockout' | 'league'.
   // Edit mode preserves the existing format; create mode reads from route param.
   const format = existingData?.format || route.params?.format || 'quick';
+  // Any group/league match already started? Changing the team count / number of
+  // groups / matches-per-pair rebuilds the group schedule and clears results, so
+  // we confirm before saving those.
+  const matchesStarted = !!isEditMode && (existingData?.matches || []).some(
+    (m) => m.status && m.status !== 'scheduled',
+  );
+  // Teams-advancing and playoff format only depend on the final standings, so
+  // they stay editable until the playoffs themselves start.
+  const knockoutStarted = !!isEditMode && (existingData?.matches || []).some(
+    (m) => m.stage === 'knockout' && m.status && m.status !== 'scheduled',
+  );
+  // Team count rebuilds for league tournaments only; locked when editing a
+  // knockout/quick tournament (their bracket isn't regenerated on update).
+  const teamsLocked = isEditMode && format !== 'league';
 
   // Form state
   const [name, setName] = useState(existingData?.name || '');
@@ -331,31 +345,59 @@ const TournamentCreateScreen = ({ navigation, route }) => {
 
     try {
       if (isEditMode) {
-        // 1) Team renames first — these propagate through every match in the
-        //    tournament (teamA.name / teamB.name + innings rosters), keeping
-        //    the bracket and schedule consistent.
-        const originalNames = (existingData?.teamNames || []);
-        for (let i = 0; i < finalTeamNames.length; i++) {
-          const oldName = (originalNames[i] || '').trim();
-          const newName = finalTeamNames[i];
-          if (oldName && newName && oldName !== newName) {
-            try {
-              await tournamentService.renameTeam(route.params.tournamentId, oldName, newName, user.token);
-            } catch (e) {
-              const message = e?.error || e?.response?.data?.error || `Could not rename "${oldName}".`;
-              Alert.alert('Rename failed', message);
-              setLoading(false);
-              return;
+        // A GROUP change (team count / number of groups / matches-per-pair)
+        // reshapes the group schedule → the backend rebuilds every match (so
+        // per-team renames are skipped, and we confirm if it clears results).
+        const groupChanged = format === 'league' && (
+          parseInt(numberOfTeams, 10) !== existingData?.numberOfTeams ||
+          parseInt(numberOfGroups, 10) !== existingData?.numberOfGroups ||
+          parseInt(matchesPerPair, 10) !== existingData?.matchesPerPair
+        );
+
+        // Confirm a destructive rebuild (group change after matches have started).
+        if (groupChanged && matchesStarted) {
+          const ok = await new Promise((resolve) => {
+            Alert.alert(
+              'Rebuild schedule?',
+              'Changing the teams, number of groups, or matches per pair rebuilds the whole schedule and clears all played results. Continue?',
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Rebuild', style: 'destructive', onPress: () => resolve(true) },
+              ],
+            );
+          });
+          if (!ok) { setLoading(false); return; }
+        }
+
+        // 1) Team renames first (name-only edits) — propagate through every
+        //    match so the bracket/schedule stay consistent. Skipped on a group
+        //    rebuild (those matches are about to be recreated).
+        if (!groupChanged) {
+          const originalNames = (existingData?.teamNames || []);
+          for (let i = 0; i < finalTeamNames.length; i++) {
+            const oldName = (originalNames[i] || '').trim();
+            const newName = finalTeamNames[i];
+            if (oldName && newName && oldName !== newName) {
+              try {
+                await tournamentService.renameTeam(route.params.tournamentId, oldName, newName, user.token);
+              } catch (e) {
+                const message = e?.error || e?.response?.data?.error || `Could not rename "${oldName}".`;
+                Alert.alert('Rename failed', message);
+                setLoading(false);
+                return;
+              }
             }
           }
         }
-        // 2) Save the rest of the settings. The backend propagates
-        //    overs/balls/players/venue into every scheduled match.
-        const { teamNames: _, numberOfTeams: __, numberOfGroups: ___,
-                teamsAdvancePerGroup: ____, matchesPerPair: _____, format: ______,
-                ...editable } = data;
-        await tournamentService.updateTournament(route.params.tournamentId, editable, user.token);
-        Alert.alert('Success', 'Tournament updated successfully.');
+        // 2) Save the settings (format isn't editable). The backend rebuilds the
+        //    league/knockout as needed, or propagates basic settings.
+        const { format: _fmt, ...editable } = data;
+        const resp = await tournamentService.updateTournament(route.params.tournamentId, editable, user.token);
+        if (resp?.warning) {
+          Alert.alert('Saved', resp.warning);
+        } else {
+          Alert.alert('Success', 'Tournament updated successfully.');
+        }
         navigation.goBack();
       } else {
         const res = await tournamentService.createTournament(data, user.token);
@@ -445,7 +487,7 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                   value={numberOfTeams}
                   options={teamCountOptions}
                   onSelect={handleTeamCountChange}
-                  disabled={isEditMode}
+                  disabled={teamsLocked}
                 />
 
                 <View style={styles.divider} />
@@ -477,43 +519,15 @@ const TournamentCreateScreen = ({ navigation, route }) => {
               </View>
             </View>
 
-            {/* Visibility: Public live feed vs Private (owner-only) */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Visibility</Text>
-              <View style={styles.visibilityRow}>
-                <TouchableOpacity
-                  style={[styles.visibilityCard, visibility === 'public' && styles.visibilityCardActive]}
-                  onPress={() => setVisibility('public')}
-                  activeOpacity={0.8}
-                >
-                  <View style={[styles.visibilityIcon, visibility === 'public' && styles.visibilityIconActive]}>
-                    <View style={styles.globeRing} />
-                    <View style={styles.globeMeridian} />
-                  </View>
-                  <Text style={[styles.visibilityTitle, visibility === 'public' && styles.visibilityTitleActive]}>Public</Text>
-                  <Text style={styles.visibilityHint}>Shown on the live feed</Text>
-                  {visibility === 'public' && <View style={styles.visibilityCheck} />}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.visibilityCard, visibility === 'private' && styles.visibilityCardActive]}
-                  onPress={() => setVisibility('private')}
-                  activeOpacity={0.8}
-                >
-                  <View style={[styles.visibilityIcon, visibility === 'private' && styles.visibilityIconActive]}>
-                    <View style={styles.lockShackleLg} />
-                    <View style={styles.lockBodyLg} />
-                  </View>
-                  <Text style={[styles.visibilityTitle, visibility === 'private' && styles.visibilityTitleActive]}>Private</Text>
-                  <Text style={styles.visibilityHint}>Only you can see it</Text>
-                  {visibility === 'private' && <View style={styles.visibilityCheck} />}
-                </TouchableOpacity>
-              </View>
-            </View>
-
             {/* League-only configuration */}
             {format === 'league' && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>League Format</Text>
+                {matchesStarted ? (
+                  <Text style={styles.lockedNote}>
+                    Changing teams, groups or matches-per-pair will rebuild the schedule and clear played results. Teams-advancing and playoff format stay editable until the playoffs start.
+                  </Text>
+                ) : null}
                 <View style={styles.optionsCard}>
                   <Dropdown
                     label="Number of Groups"
@@ -523,7 +537,7 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                       (_, i) => i + 1,
                     )}
                     onSelect={setNumberOfGroups}
-                    disabled={isEditMode}
+                    disabled={false}
                     info="How many pools the teams are split into. Each team only plays others in its own group."
                   />
                   <View style={styles.divider} />
@@ -532,7 +546,7 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                     value={teamsAdvancePerGroup}
                     options={[0, 1, 2, 3, 4]}
                     onSelect={setTeamsAdvancePerGroup}
-                    disabled={isEditMode}
+                    disabled={knockoutStarted}
                     info="Top teams from each group that move on to the knockout stage. Use 0 for no knockouts."
                   />
                   <View style={styles.divider} />
@@ -541,16 +555,16 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                     value={matchesPerPair}
                     options={[1, 2, 3, 4]}
                     onSelect={setMatchesPerPair}
-                    disabled={isEditMode}
+                    disabled={false}
                     info="How many times each pair of teams plays. 1 = once, 2 = home & away."
                   />
 
-                  {/* Playoff format — only when there's a knockout stage */}
-                  {!isEditMode && (parseInt(teamsAdvancePerGroup, 10) || 0) > 0 ? (
+                  {/* Playoff format — editable until the playoffs start */}
+                  {!knockoutStarted && (parseInt(teamsAdvancePerGroup, 10) || 0) > 0 ? (
                     <>
                       <View style={styles.divider} />
                       <View style={styles.playoffRow}>
-                        <Text style={styles.dropdownLabel}>Playoff Format</Text>
+                        <Text style={styles.dropdownLabel}>2nd Round Format</Text>
                         <View style={styles.playoffOptions}>
                           <TouchableOpacity
                             style={[styles.playoffPill, playoffFormat !== 'qualifier' || !qualifierAvailable ? styles.playoffPillActive : null]}
@@ -648,6 +662,39 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                   </View>
                 </>
               )}
+            </View>
+
+            {/* Visibility: Public live feed vs Private (owner-only) */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Visibility</Text>
+              <View style={styles.visibilityRow}>
+                <TouchableOpacity
+                  style={[styles.visibilityCard, visibility === 'public' && styles.visibilityCardActive]}
+                  onPress={() => setVisibility('public')}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.visibilityIcon, visibility === 'public' && styles.visibilityIconActive]}>
+                    <View style={styles.globeRing} />
+                    <View style={styles.globeMeridian} />
+                  </View>
+                  <Text style={[styles.visibilityTitle, visibility === 'public' && styles.visibilityTitleActive]}>Public</Text>
+                  <Text style={styles.visibilityHint}>Shown on the live feed</Text>
+                  {visibility === 'public' && <View style={styles.visibilityCheck} />}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.visibilityCard, visibility === 'private' && styles.visibilityCardActive]}
+                  onPress={() => setVisibility('private')}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.visibilityIcon, visibility === 'private' && styles.visibilityIconActive]}>
+                    <View style={styles.lockShackleLg} />
+                    <View style={styles.lockBodyLg} />
+                  </View>
+                  <Text style={[styles.visibilityTitle, visibility === 'private' && styles.visibilityTitleActive]}>Private</Text>
+                  <Text style={styles.visibilityHint}>Only you can see it</Text>
+                  {visibility === 'private' && <View style={styles.visibilityCheck} />}
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Venue & Description */}
@@ -905,6 +952,10 @@ const styles = StyleSheet.create({
   playoffHint: {
     paddingHorizontal: spacing.lg, paddingBottom: spacing.md,
     fontSize: 12, color: '#94a3b8', lineHeight: 17,
+  },
+  lockedNote: {
+    fontSize: 12.5, color: '#b45309', lineHeight: 18,
+    marginBottom: spacing.sm, fontWeight: '600',
   },
   teamDivider: {
     height: 1,
