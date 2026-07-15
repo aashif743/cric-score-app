@@ -611,8 +611,8 @@ const FullScorecardScreen = ({ navigation, route }) => {
       setIsSaving(true);
       setShowShareModal(true);
 
-      // Request permissions
-      const { status } = await MediaLibrary.requestPermissionsAsync();
+      // Request write-only permission (we only save; we never read the gallery)
+      const { status } = await MediaLibrary.requestPermissionsAsync(true);
       if (status !== 'granted') {
         Alert.alert('Permission Required', 'Please grant permission to save images to your gallery.');
         setIsSaving(false);
@@ -632,9 +632,8 @@ const FullScorecardScreen = ({ navigation, route }) => {
         return;
       }
 
-      // Save to gallery
-      const asset = await MediaLibrary.createAssetAsync(uri);
-      await MediaLibrary.createAlbumAsync('CricZone', asset, false);
+      // Save to gallery (write-only; does not require read-media permission)
+      await MediaLibrary.saveToLibraryAsync(uri);
 
       setShowShareModal(false);
       Alert.alert('Success', 'Scorecard saved to your gallery!');
