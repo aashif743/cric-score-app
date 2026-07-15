@@ -506,7 +506,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
     // labels — Qualifier 1, Eliminator, … — distinguish them). A standard
     // knockout uses one tab per round.
     const k = isQualifier
-      ? [{ key: 'po', kind: 'playoffs', id: 'po', label: 'Playoffs' }]
+      ? [{ key: 'po', kind: 'playoffs', id: 'po', label: '2nd Round' }]
       : Array.from({ length: numKnockoutRounds }, (_, i) => ({
           key: `k_${i + 1}`, kind: 'knockout', id: i + 1,
           label: koRoundLabel(i + 1, numKnockoutRounds),
@@ -672,35 +672,6 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
 
       {/* Match list */}
       <ScrollView contentContainerStyle={styles.scheduleList} showsVerticalScrollIndicator={false}>
-        {/* Owner-only playoff format switch (locks once playoffs start) */}
-        {isOwner && hasKnockout && (activeTab.kind === 'playoffs' || activeTab.kind === 'knockout') ? (
-          <View style={styles.formatBar}>
-            <Text style={styles.formatBarLabel}>Playoff format</Text>
-            {playoffsStarted ? (
-              <Text style={styles.formatLocked}>Locked · playoffs started</Text>
-            ) : (
-              <View style={styles.formatPills}>
-                <TouchableOpacity
-                  style={[styles.formatPill, !isQualifier && styles.formatPillActive]}
-                  onPress={() => changePlayoffFormat('knockout')}
-                  disabled={switchingFormat}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.formatPillText, !isQualifier && styles.formatPillTextActive]}>Knockout</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.formatPill, isQualifier && styles.formatPillActive, !qualifierAvailable && styles.formatPillDisabled]}
-                  onPress={() => qualifierAvailable && changePlayoffFormat('qualifier')}
-                  disabled={switchingFormat || !qualifierAvailable}
-                  activeOpacity={qualifierAvailable ? 0.8 : 1}
-                >
-                  <Text style={[styles.formatPillText, isQualifier && styles.formatPillTextActive, !qualifierAvailable && styles.formatPillTextDisabled]}>Qualifier</Text>
-                </TouchableOpacity>
-                {switchingFormat ? <ActivityIndicator size="small" color="#4f46e5" style={{ marginLeft: 6 }} /> : null}
-              </View>
-            )}
-          </View>
-        ) : null}
         {matchesForActiveTab.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>
