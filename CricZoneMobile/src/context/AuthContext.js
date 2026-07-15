@@ -1,5 +1,7 @@
 import React, { createContext, useState, useEffect } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { UNAUTHORIZED_EVENT } from '../api/config';
 
 export const AuthContext = createContext();
 
@@ -22,6 +24,16 @@ export const AuthProvider = ({ children }) => {
       }
     };
     loadUser();
+  }, []);
+
+  // When any API call gets a 401 (expired/invalid token), the axios interceptor
+  // clears storage and emits this event. Drop the user from state so the app
+  // navigates back to the login screen and they can re-authenticate.
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(UNAUTHORIZED_EVENT, () => {
+      setUser(null);
+    });
+    return () => sub.remove();
   }, []);
 
   // Login function - saves user to state and storage

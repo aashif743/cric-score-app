@@ -1,5 +1,13 @@
 import axios from 'axios';
-import { Platform } from 'react-native';
+import { Platform, DeviceEventEmitter } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Broadcast name used to force a global logout when a token is rejected (401).
+export const UNAUTHORIZED_EVENT = 'auth:unauthorized';
+
+// Auth endpoints where a 401 means "wrong OTP", NOT "expired session" —
+// we must not wipe the session for these.
+const AUTH_PATHS = ['/users/send-otp', '/users/verify-otp', '/users/login'];
 
 // API Base URL configuration
 const PRODUCTION_API_URL = 'https://cric-score-app.onrender.com';
@@ -69,6 +77,22 @@ API.interceptors.response.use(
       await delay(RETRY_DELAY * config.retryCount);
 
       return API(config);
+    }
+
+    // Expired / invalid token: clear the stored session and force the app back
+    // to login so the user re-authenticates and gets a fresh token. Without
+    // this, an expired token makes every screen show "Failed to fetch".
+    const url = config?.url || '';
+    const isAuthCall = AUTH_PATHS.some((p) => url.includes(p));
+    if (error.response?.status === 401 && !isAuthCall) {
+      try {
+        await AsyncStorage.removeItem('user');
+        await AsyncStorage.removeItem('currentMatch');
+      } catch (e) {
+        // ignore storage errors — the event below still logs the user out
+      }
+      DeviceEventEmitter.emit(UNAUTHORIZED_EVENT);
+      return Promise.reject({ error: 'Your session has expired. Please log in again.' });
     }
 
     const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message;
