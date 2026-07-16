@@ -1,4 +1,4 @@
-import React, { useState, useContext, useRef, useEffect } from 'react';
+import React, { useState, useContext, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -423,11 +423,42 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   const overOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50];
   const ballsOptions = [2, 3, 4, 5, 6];
 
+  // Total matches the chosen settings will generate — mirrors the backend:
+  // knockout = teams-1; league = per-group round-robins (× matches-per-pair)
+  // plus playoffs (advancing-1, or 4 for a qualifier). Quick pre-generates none.
+  const totalMatches = useMemo(() => {
+    const teams = parseInt(numberOfTeams, 10) || 0;
+    if (format === 'knockout') return Math.max(0, teams - 1);
+    if (format === 'league') {
+      const groups = Math.max(1, parseInt(numberOfGroups, 10) || 1);
+      const mpp = Math.max(1, parseInt(matchesPerPair, 10) || 1);
+      const advance = Math.max(0, parseInt(teamsAdvancePerGroup, 10) || 0);
+      const base = Math.floor(teams / groups);
+      const rem = teams % groups;
+      let group = 0;
+      for (let i = 0; i < groups; i++) {
+        const size = base + (i < rem ? 1 : 0);
+        group += (size * (size - 1) / 2) * mpp;
+      }
+      const advancing = groups * advance;
+      let playoff = 0;
+      if (advance > 0 && advancing >= 2) {
+        playoff = (playoffFormat === 'qualifier' && advancing === 4) ? 4 : advancing - 1;
+      }
+      return group + playoff;
+    }
+    return 0;
+  }, [format, numberOfTeams, numberOfGroups, matchesPerPair, teamsAdvancePerGroup, playoffFormat]);
+
+  const matchCountLabel = `${totalMatches} ${totalMatches === 1 ? 'match' : 'matches'} total`;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <GradientHeader
         title={isEditMode ? 'Edit Tournament' : 'New Tournament'}
-        subtitle={isEditMode ? 'Update tournament details' : 'Set up your format'}
+        subtitle={format === 'quick'
+          ? (isEditMode ? 'Update tournament details' : 'Set up your format')
+          : matchCountLabel}
         onBack={() => navigation.goBack()}
         rightSlot={
           isEditMode ? (
