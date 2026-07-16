@@ -20,6 +20,7 @@ import GradientHeader from '../components/GradientHeader';
 import TournamentTopTabs from '../components/TournamentTopTabs';
 import PointsTableView from '../components/PointsTableView';
 import TournamentStatsView from '../components/TournamentStatsView';
+import QualifierBracket from '../components/QualifierBracket';
 
 // --- Small helpers ---------------------------------------------------------
 
@@ -695,6 +696,12 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
               isOwner={isOwner}
             />
           ))
+        ) : activeTab.kind === 'playoffs' ? (
+          <QualifierBracket
+            matches={matchesForActiveTab}
+            onStart={handleStartMatch}
+            isOwner={isOwner}
+          />
         ) : (
           matchesForActiveTab.map((m, i) => (
             <KnockoutMatchCard
