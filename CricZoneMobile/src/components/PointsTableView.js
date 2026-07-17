@@ -1,8 +1,23 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing } from 'react-native';
-import { computeGroupStandings, formatNRR, shortCode } from '../utils/leagueStandings';
+import { computeGroupStandings, formatNRR } from '../utils/leagueStandings';
 
 const groupLetter = (i) => String.fromCharCode(65 + i);
+
+// Compact team name for the standings. Short names show in full; a very long
+// name keeps its first word and abbreviates the rest to initials
+// (e.g. "Royal Challengers Bangalore" -> "Royal CB"), so the column stays tidy
+// without hiding which team it is. A single very long word is truncated.
+const displayName = (raw) => {
+  const n = (raw || '').trim();
+  if (n.length <= 12) return n;
+  const words = n.split(/\s+/).filter(Boolean);
+  if (words.length === 1) return `${n.slice(0, 11)}…`;
+  const first = words[0];
+  const rest = words.slice(1).map((w) => w.charAt(0).toUpperCase()).join('');
+  const out = `${first} ${rest}`;
+  return out.length <= 15 ? out : `${first.slice(0, 12)}…`;
+};
 
 // Column flex weights. Wide Team col, compact numeric cols, wider NRR col.
 const COL = {
@@ -56,10 +71,7 @@ const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQu
       </View>
 
       <View style={[styles.teamCol, { flex: COL.team }]}>
-        <View style={styles.teamLogo}>
-          <Text style={styles.teamLogoText}>{shortCode(row.team).charAt(0)}</Text>
-        </View>
-        <Text style={styles.teamCode} numberOfLines={1}>{shortCode(row.team)}</Text>
+        <Text style={styles.teamCode} numberOfLines={1}>{displayName(row.team)}</Text>
         {qualified && <Text style={styles.qSuffix}>(Q)</Text>}
         {eliminated && <Text style={styles.eSuffix}>(E)</Text>}
       </View>
@@ -233,14 +245,8 @@ const styles = StyleSheet.create({
   rankCol: { alignItems: 'center', justifyContent: 'center' },
   rankText: { fontSize: 13, fontWeight: '700', color: '#475569', fontVariant: ['tabular-nums'] },
 
-  teamCol: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  teamLogo: {
-    width: 28, height: 28, borderRadius: 8,
-    backgroundColor: '#0d3b66',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  teamLogoText: { color: '#fff', fontSize: 13, fontWeight: '900' },
-  teamCode: { fontSize: 14, fontWeight: '800', color: '#0f172a', letterSpacing: 0.3 },
+  teamCol: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  teamCode: { fontSize: 14, fontWeight: '800', color: '#0f172a', letterSpacing: 0.2 },
   qSuffix: { fontSize: 11, fontWeight: '700', color: '#059669', marginLeft: 2 },
   eSuffix: { fontSize: 11, fontWeight: '700', color: '#94a3b8', marginLeft: 2 },
 
