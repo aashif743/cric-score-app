@@ -128,6 +128,7 @@ const LiveMatchCard = ({ match, index, onPress, navigation, cardWidth }) => {
     ]).start();
   }, []);
 
+  const isCompleted = match.status === 'completed';
   const battingTeam = currentlyBatting(match);
   const teamA = match.teamA?.name || 'Team A';
   const teamB = match.teamB?.name || 'Team B';
@@ -145,21 +146,28 @@ const LiveMatchCard = ({ match, index, onPress, navigation, cardWidth }) => {
         onPressOut={() => Animated.spring(scaleAnim, { toValue: 1, friction: 8, useNativeDriver: true }).start()}
       >
         <LinearGradient
-          colors={['#1e1b4b', '#3b1d6e', '#1e3a8a']}
+          colors={isCompleted ? ['#064e3b', '#0f766e', '#115e59'] : ['#1e1b4b', '#3b1d6e', '#1e3a8a']}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={[styles.card, cardWidth ? { width: cardWidth } : null]}
         >
-          {/* Top row: LIVE pulse + tournament + match number */}
+          {/* Top row: LIVE pulse / RESULT tag + tournament + match number */}
           <View style={styles.cardHeader}>
-            <View style={styles.liveTag}>
-              <LivePulse />
-              <Text style={styles.liveText}>LIVE</Text>
-            </View>
+            {isCompleted ? (
+              <View style={styles.doneTag}>
+                <Text style={styles.doneText}>RESULT</Text>
+              </View>
+            ) : (
+              <View style={styles.liveTag}>
+                <LivePulse />
+                <Text style={styles.liveText}>LIVE</Text>
+              </View>
+            )}
             <View style={styles.tournamentRow}>
               <Text style={styles.tournamentName} numberOfLines={1}>{match.tournamentName || 'Live Match'}</Text>
               <Text style={styles.inningsText} numberOfLines={1}>
-                {match.matchNumber ? `${ordinal(match.matchNumber)} match` : 'Live'}
+                {match.matchNumber ? `${ordinal(match.matchNumber)} match` : (isCompleted ? 'Result' : 'Live')}
                 {match.status === 'innings_break' ? ' • Break' : ''}
+                {isCompleted ? ' • Completed' : ''}
               </Text>
             </View>
           </View>
@@ -200,10 +208,12 @@ const LiveMatchCard = ({ match, index, onPress, navigation, cardWidth }) => {
             </View>
           </View>
 
-          {/* Situation line: batting first / chase equation */}
+          {/* Situation line: result (completed) or batting/chase equation (live) */}
           <View style={styles.situationRow}>
             <View style={styles.footerDot} />
-            <Text style={styles.situationText} numberOfLines={1}>{matchSituation(match)}</Text>
+            <Text style={styles.situationText} numberOfLines={1}>
+              {isCompleted ? (match.result || 'Match completed') : matchSituation(match)}
+            </Text>
           </View>
 
           {/* Actions: Schedule + (league only) Points Table */}
@@ -305,7 +315,12 @@ const LiveMatchesStrip = ({ navigation }) => {
   }, [user?.token, fetchMatches]);
 
   const onCardPress = (match) => {
-    navigation.navigate('PublicLiveMatch', { matchId: match._id });
+    // Finished matches open the full scorecard; live ones open the live viewer.
+    if (match.status === 'completed') {
+      navigation.navigate('FullScorecard', { matchId: match._id });
+    } else {
+      navigation.navigate('PublicLiveMatch', { matchId: match._id });
+    }
   };
 
   // Hide the entire strip until first load completes — avoids a flicker.
@@ -340,7 +355,7 @@ const LiveMatchesStrip = ({ navigation }) => {
       <View style={styles.headerRow}>
         <View style={styles.headerLeft}>
           <View style={styles.headerDot} />
-          <Text style={styles.headerTitle}>Live now</Text>
+          <Text style={styles.headerTitle}>Live &amp; Recent</Text>
         </View>
         <Text style={styles.headerCount}>
           {N} {N === 1 ? 'match' : 'matches'}
@@ -417,6 +432,14 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(248,113,113,0.4)',
   },
   liveText: { color: '#fca5a5', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  doneTag: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(16,185,129,0.22)',
+    borderWidth: 1, borderColor: 'rgba(110,231,183,0.45)',
+  },
+  doneText: { color: '#a7f3d0', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   tournamentRow: { flex: 1 },
   tournamentName: { color: 'rgba(255,255,255,0.95)', fontSize: 11, fontWeight: '700' },
   inningsText: { color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: '600', marginTop: 1 },
