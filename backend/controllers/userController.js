@@ -226,4 +226,18 @@ const getProfile = async (req, res) => {
   }
 };
 
-module.exports = { sendOtp, verifyOtp, setUserName, deleteAccount, getProfile };
+// @desc    Issue a fresh long-lived token for an already-authenticated user.
+// @route   POST /api/users/refresh-token   (protected)
+// The app calls this on launch so an active user's token never reaches expiry
+// — they stay logged in as long as they keep opening the app.
+const refreshToken = async (req, res) => {
+  try {
+    const id = req.user?._id || req.user?.id;
+    if (!id) return res.status(401).json({ success: false, error: 'Not authorized' });
+    return res.json({ success: true, token: generateToken(id) });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: 'Could not refresh token' });
+  }
+};
+
+module.exports = { sendOtp, verifyOtp, setUserName, deleteAccount, getProfile, refreshToken };
