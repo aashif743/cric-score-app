@@ -1,6 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing } from 'react-native';
+import {
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing,
+  Modal, TextInput, Alert, ActivityIndicator,
+} from 'react-native';
 import { computeGroupStandings, formatNRR } from '../utils/leagueStandings';
+import tournamentService from '../utils/tournamentService';
 
 const groupLetter = (i) => String.fromCharCode(65 + i);
 
@@ -40,7 +44,7 @@ const HeaderRow = () => (
   </View>
 );
 
-const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQualifyingSlot, index }) => {
+const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQualifyingSlot, index, onPress }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
 
@@ -58,25 +62,29 @@ const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQu
   }, []);
 
   return (
-    <Animated.View
-      style={[
-        styles.row,
-        isQualifyingSlot && styles.rowQualifying,
-        isLastQualifyingSlot && styles.rowQualifyingCutoff,
-        { opacity, transform: [{ translateY }] },
-      ]}
-    >
-      <View style={[styles.rankCol, { width: COL.rank }]}>
-        <Text style={styles.rankText}>{rank}</Text>
-      </View>
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      <TouchableOpacity
+        activeOpacity={onPress ? 0.6 : 1}
+        onPress={onPress}
+        disabled={!onPress}
+        style={[
+          styles.row,
+          isQualifyingSlot && styles.rowQualifying,
+          isLastQualifyingSlot && styles.rowQualifyingCutoff,
+        ]}
+      >
+        <View style={[styles.rankCol, { width: COL.rank }]}>
+          <Text style={styles.rankText}>{rank}</Text>
+        </View>
 
-      <View style={[styles.teamCol, { flex: COL.team }]}>
-        <Text style={styles.teamCode} numberOfLines={1}>{displayName(row.team)}</Text>
-        {qualified && <Text style={styles.qSuffix}>(Q)</Text>}
-        {eliminated && <Text style={styles.eSuffix}>(E)</Text>}
-      </View>
+        <View style={[styles.teamCol, { flex: COL.team }]}>
+          <Text style={styles.teamCode} numberOfLines={1}>{displayName(row.team)}</Text>
+          {qualified && <Text style={styles.qSuffix}>(Q)</Text>}
+          {eliminated && <Text style={styles.eSuffix}>(E)</Text>}
+          {onPress ? <Text style={styles.editHint}>✎</Text> : null}
+        </View>
 
-      <Text style={[styles.numCell, { flex: COL.num }]}>{row.played}</Text>
+        <Text style={[styles.numCell, { flex: COL.num }]}>{row.played}</Text>
       <Text style={[styles.numCell, { flex: COL.num }]}>{row.won}</Text>
       <Text style={[styles.numCell, { flex: COL.num }]}>{row.lost}</Text>
       <Text style={[styles.numCell, { flex: COL.num }]}>{row.tied}</Text>
@@ -90,6 +98,7 @@ const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQu
       >
         {formatNRR(row.nrr)}
       </Text>
+      </TouchableOpacity>
     </Animated.View>
   );
 };
@@ -98,12 +107,66 @@ const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQu
  * Points-table body for a league tournament. Pure render from the already
  * fetched tournament object (no network) so it can be used as an instant tab.
  */
-const PointsTableView = ({ tournament }) => {
+const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onChanged }) => {
   const [activeGroup, setActiveGroup] = useState(0);
 
   const groups = tournament?.groups || [];
   const matches = tournament?.matches || [];
   const advance = tournament?.teamsAdvancePerGroup || 0;
+
+  // Owner can tap a team to rename it or swap its group. Swapping is blocked
+  // once any group match has started (it would rebuild the fixtures).
+  const canEdit = !!(isOwner && tournamentId && token);
+  const groupStarted = useMemo(
+    () => matches.some((m) => m.stage === 'group' && m.status && m.status !== 'scheduled'),
+    [matches],
+  );
+
+  const [editTeam, setEditTeam] = useState(null);   // team name being edited
+  const [mode, setMode] = useState('menu');          // 'menu' | 'rename' | 'swap'
+  const [renameValue, setRenameValue] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const openEdit = (name) => { setEditTeam(name); setMode('menu'); setRenameValue(name); };
+  const closeEdit = () => { if (busy) return; setEditTeam(null); setMode('menu'); };
+
+  // Teams in the OTHER groups — the valid swap partners for the edited team.
+  const swapCandidates = useMemo(() => {
+    if (!editTeam) return [];
+    const homeIdx = groups.findIndex((g) => g.includes(editTeam));
+    const out = [];
+    groups.forEach((g, gi) => {
+      if (gi === homeIdx) return;
+      g.forEach((name) => out.push({ name, group: groupLetter(gi) }));
+    });
+    return out;
+  }, [editTeam, groups]);
+
+  const doRename = async () => {
+    const next = renameValue.trim();
+    if (!next || next === editTeam) { setMode('menu'); return; }
+    try {
+      setBusy(true);
+      await tournamentService.renameTeam(tournamentId, editTeam, next, token);
+      setBusy(false); setEditTeam(null); setMode('menu');
+      onChanged && onChanged();
+    } catch (err) {
+      setBusy(false);
+      Alert.alert('Rename failed', err?.error || 'Could not rename the team. Please try again.');
+    }
+  };
+
+  const doSwap = async (partner) => {
+    try {
+      setBusy(true);
+      await tournamentService.swapTeams(tournamentId, editTeam, partner, token);
+      setBusy(false); setEditTeam(null); setMode('menu');
+      onChanged && onChanged();
+    } catch (err) {
+      setBusy(false);
+      Alert.alert('Move failed', err?.error || 'Could not move the team. Please try again.');
+    }
+  };
 
   const standingsByGroup = useMemo(
     () => groups.map((teams, gIdx) => {
@@ -176,11 +239,14 @@ const PointsTableView = ({ tournament }) => {
                   eliminated={showQE && rank > advance}
                   isQualifyingSlot={isQualifyingSlot}
                   isLastQualifyingSlot={isLastQualifyingSlot}
+                  onPress={canEdit ? () => openEdit(row.team) : undefined}
                 />
               );
             })
           )}
         </View>
+
+        {canEdit ? <Text style={styles.editTip}>Tap a team to rename or move its group</Text> : null}
 
         {advance > 0 && (
           <View style={styles.qualifyNote}>
@@ -191,6 +257,81 @@ const PointsTableView = ({ tournament }) => {
           </View>
         )}
       </ScrollView>
+
+      {canEdit && (
+        <Modal visible={!!editTeam} transparent animationType="fade" onRequestClose={closeEdit}>
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={closeEdit}>
+            <TouchableOpacity style={styles.modalCard} activeOpacity={1} onPress={() => {}}>
+              <Text style={styles.modalTeam} numberOfLines={1}>{editTeam}</Text>
+
+              {mode === 'menu' && (
+                <>
+                  <TouchableOpacity style={styles.modalBtn} onPress={() => setMode('rename')} activeOpacity={0.85}>
+                    <Text style={styles.modalBtnText}>Rename team</Text>
+                  </TouchableOpacity>
+                  {groups.length > 1 ? (
+                    groupStarted ? (
+                      <View style={[styles.modalBtn, styles.modalBtnDisabled]}>
+                        <Text style={styles.modalBtnTextDisabled}>Move group · locked (matches started)</Text>
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={styles.modalBtn} onPress={() => setMode('swap')} activeOpacity={0.85}>
+                        <Text style={styles.modalBtnText}>Move to another group</Text>
+                      </TouchableOpacity>
+                    )
+                  ) : null}
+                  <TouchableOpacity style={styles.modalCancel} onPress={closeEdit} activeOpacity={0.7}>
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {mode === 'rename' && (
+                <>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={renameValue}
+                    onChangeText={setRenameValue}
+                    placeholder="Team name"
+                    placeholderTextColor="#94a3b8"
+                    maxLength={24}
+                    autoFocus
+                    editable={!busy}
+                    returnKeyType="done"
+                    onSubmitEditing={doRename}
+                  />
+                  <View style={styles.modalRow}>
+                    <TouchableOpacity style={[styles.modalBtn, styles.modalBtnGhost]} onPress={() => setMode('menu')} disabled={busy} activeOpacity={0.7}>
+                      <Text style={styles.modalBtnGhostText}>Back</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={doRename} disabled={busy} activeOpacity={0.85}>
+                      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.modalBtnPrimaryText}>Save</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
+              {mode === 'swap' && (
+                <>
+                  <Text style={styles.modalHint}>Pick a team to swap groups with:</Text>
+                  <ScrollView style={styles.swapList} keyboardShouldPersistTaps="handled">
+                    {swapCandidates.map((c) => (
+                      <TouchableOpacity key={c.name} style={styles.swapItem} onPress={() => doSwap(c.name)} disabled={busy} activeOpacity={0.7}>
+                        <Text style={styles.swapItemName} numberOfLines={1}>{c.name}</Text>
+                        <Text style={styles.swapItemGroup}>Group {c.group}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <TouchableOpacity style={styles.modalCancel} onPress={() => setMode('menu')} disabled={busy} activeOpacity={0.7}>
+                    <Text style={styles.modalCancelText}>Back</Text>
+                  </TouchableOpacity>
+                  {busy ? <View style={styles.swapBusy}><ActivityIndicator size="small" color="#2563eb" /></View> : null}
+                </>
+              )}
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </>
   );
 };
@@ -272,6 +413,48 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 },
   emptyTitle: { fontSize: 16, fontWeight: '700', color: '#94a3b8', marginBottom: 6 },
   emptyText: { fontSize: 12, color: '#cbd5e1', textAlign: 'center' },
+
+  editHint: { fontSize: 12, color: '#94a3b8', marginLeft: 4 },
+  editTip: { textAlign: 'center', fontSize: 12, color: '#94a3b8', marginTop: 12, fontWeight: '600' },
+
+  // Edit sheet
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(15,23,42,0.5)',
+    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28,
+  },
+  modalCard: {
+    width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 18, padding: 18,
+    shadowColor: '#0f172a', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 20, elevation: 10,
+  },
+  modalTeam: { fontSize: 17, fontWeight: '900', color: '#0f172a', textAlign: 'center', marginBottom: 14 },
+  modalBtn: {
+    height: 48, borderRadius: 12, backgroundColor: '#f1f5f9',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 10,
+  },
+  modalBtnText: { fontSize: 15, fontWeight: '800', color: '#1e293b' },
+  modalBtnDisabled: { backgroundColor: '#f8fafc' },
+  modalBtnTextDisabled: { fontSize: 13, fontWeight: '700', color: '#94a3b8' },
+  modalCancel: { height: 44, justifyContent: 'center', alignItems: 'center', marginTop: 2 },
+  modalCancelText: { fontSize: 15, fontWeight: '700', color: '#64748b' },
+  modalInput: {
+    height: 50, borderWidth: 1.5, borderColor: '#cbd5e1', borderRadius: 12,
+    paddingHorizontal: 14, fontSize: 16, fontWeight: '700', color: '#0f172a', marginBottom: 12,
+  },
+  modalRow: { flexDirection: 'row', gap: 10 },
+  modalBtnGhost: { flex: 1, backgroundColor: '#f1f5f9', marginBottom: 0 },
+  modalBtnGhostText: { fontSize: 15, fontWeight: '800', color: '#64748b' },
+  modalBtnPrimary: { flex: 1, backgroundColor: '#2563eb', marginBottom: 0 },
+  modalBtnPrimaryText: { fontSize: 15, fontWeight: '800', color: '#fff' },
+  modalHint: { fontSize: 13, color: '#64748b', fontWeight: '600', marginBottom: 10, textAlign: 'center' },
+  swapList: { maxHeight: 240 },
+  swapItem: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    height: 46, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#f8fafc',
+    borderWidth: 1, borderColor: '#eef2f7', marginBottom: 8,
+  },
+  swapItemName: { flex: 1, fontSize: 14.5, fontWeight: '800', color: '#0f172a' },
+  swapItemGroup: { fontSize: 12, fontWeight: '700', color: '#2563eb', marginLeft: 8 },
+  swapBusy: { position: 'absolute', top: 14, right: 14 },
 });
 
 export default PointsTableView;

@@ -82,6 +82,18 @@ const tournamentService = {
     return response.data;
   },
 
+  // Swap two teams between their groups (league only). Allowed before any group
+  // match has started; rebuilds the fixtures from the swapped arrangement.
+  swapTeams: async (id, teamA, teamB, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(
+      `/tournaments/${id}/swap-teams`,
+      { teamA, teamB },
+      config,
+    );
+    return response.data;
+  },
+
   // Switch the league playoff format ('knockout' | 'qualifier'). Rebuilds the
   // playoff matches; allowed while the playoffs haven't started.
   setPlayoffFormat: async (id, playoffFormat, token) => {

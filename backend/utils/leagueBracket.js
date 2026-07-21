@@ -207,14 +207,18 @@ function buildQualifierPlayoff(numGroups, teamsAdvance) {
   return { knockoutMatches, sources: seeds };
 }
 
-function generateLeagueBracket(teamNames, numGroups, teamsAdvance, matchesPerPair, playoffFormat) {
+function generateLeagueBracket(teamNames, numGroups, teamsAdvance, matchesPerPair, playoffFormat, groupsOverride) {
   if (!Array.isArray(teamNames) || teamNames.length < 2) {
     throw new Error('League requires at least 2 teams');
   }
   if (numGroups < 1) throw new Error('numGroups must be >= 1');
   if (matchesPerPair < 1) throw new Error('matchesPerPair must be >= 1');
 
-  const groups = snakeDistribute(teamNames, numGroups);
+  // A caller can pass an explicit groups arrangement (e.g. after the owner swaps
+  // two teams between groups); otherwise fall back to the snake distribution.
+  const groups = (Array.isArray(groupsOverride) && groupsOverride.length)
+    ? groupsOverride.map((g) => [...g])
+    : snakeDistribute(teamNames, numGroups);
   // A group needs at least 2 teams to play anything.
   if (groups.some((g) => g.length < 2)) {
     throw new Error('Each group needs at least 2 teams');

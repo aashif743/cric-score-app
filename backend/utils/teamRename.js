@@ -23,9 +23,21 @@ const propagateTeamNameToTournament = async (tournamentId, oldName, newName) => 
     const idx = tournament.teamNames.indexOf(oldName);
     if (idx !== -1) {
       tournament.teamNames[idx] = newName;
-      await tournament.save();
       tournamentUpdated = true;
     }
+    // Also rename inside the persisted groups — the Points Table reads team
+    // names from here, so skipping this left the standings showing the old name.
+    if (Array.isArray(tournament.groups)) {
+      let groupsChanged = false;
+      tournament.groups = tournament.groups.map((g) =>
+        (Array.isArray(g) ? g.map((n) => { if (n === oldName) { groupsChanged = true; return newName; } return n; }) : g)
+      );
+      if (groupsChanged) {
+        tournament.markModified('groups');
+        tournamentUpdated = true;
+      }
+    }
+    if (tournamentUpdated) await tournament.save();
   }
 
   const siblingMatches = await Match.find({

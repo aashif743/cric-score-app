@@ -627,7 +627,13 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
       />
 
       {activeView === 'points' ? (
-        <PointsTableView tournament={tournament} />
+        <PointsTableView
+          tournament={tournament}
+          isOwner={isOwner}
+          tournamentId={tournament?._id}
+          token={user?.token}
+          onChanged={fetchData}
+        />
       ) : activeView === 'stats' ? (
         statsLoading ? (
           <View style={styles.loadingContainer}>

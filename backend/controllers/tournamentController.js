@@ -28,7 +28,7 @@ const buildInnings = (battingTeam, bowlingTeam, playersPerTeam) => ({
 // settings (groups, advancing, matches-per-pair, playoff format). Used when the
 // owner edits the structure before any match has started. Throws on an invalid
 // configuration (e.g. a group with < 2 teams) so the caller can surface it.
-const regenerateLeagueMatches = async (tournament, userId) => {
+const regenerateLeagueMatches = async (tournament, userId, groupsOverride) => {
   const filledTeams = Array.from({ length: tournament.numberOfTeams }, (_, i) =>
     (tournament.teamNames?.[i]?.trim()) || `Team ${String.fromCharCode(65 + i)}`);
 
@@ -38,6 +38,7 @@ const regenerateLeagueMatches = async (tournament, userId) => {
     tournament.teamsAdvancePerGroup,
     tournament.matchesPerPair,
     tournament.playoffFormat,
+    groupsOverride,
   );
 
   await Match.deleteMany({ tournament: tournament._id });
@@ -819,6 +820,66 @@ exports.renameTeam = async (req, res) => {
   } catch (error) {
     console.error("Rename team error:", error);
     res.status(500).json({ success: false, error: "Failed to rename team." });
+  }
+};
+
+// PATCH /api/tournaments/:id/swap-teams   body: { teamA, teamB }
+// Swap two teams between their groups. Only allowed before any group match has
+// started (so no played result is lost). Regenerates the group + knockout
+// fixtures from the swapped arrangement.
+exports.swapTeamGroups = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { teamA, teamB } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
+    }
+    const a = (teamA || "").trim();
+    const b = (teamB || "").trim();
+    if (!a || !b || a === b) {
+      return res.status(400).json({ success: false, error: "Two different team names are required" });
+    }
+
+    const tournament = await Tournament.findById(id);
+    if (!tournament) return res.status(404).json({ success: false, error: "Tournament not found" });
+    if (tournament.user.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+    if (tournament.format !== "league") {
+      return res.status(400).json({ success: false, error: "Only league tournaments have groups" });
+    }
+
+    const groups = (tournament.groups || []).map((g) => [...g]);
+    let ga = -1, gb = -1, ia = -1, ib = -1;
+    groups.forEach((g, gi) => {
+      const pa = g.indexOf(a); if (pa !== -1) { ga = gi; ia = pa; }
+      const pb = g.indexOf(b); if (pb !== -1) { gb = gi; ib = pb; }
+    });
+    if (ga === -1 || gb === -1) {
+      return res.status(404).json({ success: false, error: "Both teams must be in the tournament" });
+    }
+    if (ga === gb) {
+      return res.status(400).json({ success: false, error: "Pick teams from two different groups" });
+    }
+
+    // Block once any group match has begun.
+    const started = await Match.findOne({
+      tournament: id, stage: "group", status: { $ne: "scheduled" },
+    }).lean();
+    if (started) {
+      return res.status(409).json({ success: false, error: "Group matches have started — teams can no longer be moved between groups." });
+    }
+
+    // Trade positions, then rebuild fixtures from the new arrangement.
+    groups[ga][ia] = b;
+    groups[gb][ib] = a;
+    await regenerateLeagueMatches(tournament, req.user.id, groups);
+
+    const updated = await Tournament.findById(id).lean();
+    return res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error("Swap teams error:", error);
+    res.status(500).json({ success: false, error: "Failed to swap teams." });
   }
 };
 
