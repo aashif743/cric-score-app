@@ -127,9 +127,23 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
   const [mode, setMode] = useState('edit');          // 'edit' | 'swap'
   const [renameValue, setRenameValue] = useState('');
   const [busy, setBusy] = useState(false);
+  const inputRef = useRef(null);
 
   const openEdit = (name) => { setEditTeam(name); setMode('edit'); setRenameValue(name); };
   const closeEdit = () => { if (busy) return; setEditTeam(null); setMode('edit'); };
+
+  // When the editor opens, focus the field and highlight the whole name so the
+  // user can just start typing to replace it. selectTextOnFocus alone doesn't
+  // fire reliably on iOS auto-focus, so we set the selection explicitly.
+  useEffect(() => {
+    if (!editTeam || mode !== 'edit') return undefined;
+    const len = (renameValue || '').length;
+    const t = setTimeout(() => {
+      inputRef.current?.focus?.();
+      inputRef.current?.setNativeProps?.({ selection: { start: 0, end: len } });
+    }, 160);
+    return () => clearTimeout(t);
+  }, [editTeam, mode]);
 
   // Teams in the OTHER groups — the valid swap partners for the edited team.
   const swapCandidates = useMemo(() => {
@@ -277,6 +291,7 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
                   {/* Rename — pre-filled + selected; tap to bring up the keyboard */}
                   <View style={styles.renameRow}>
                     <TextInput
+                      ref={inputRef}
                       style={styles.renameInput}
                       value={renameValue}
                       onChangeText={setRenameValue}
