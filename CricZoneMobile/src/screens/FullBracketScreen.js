@@ -88,11 +88,7 @@ const ByeLine = () => (
   </View>
 );
 
-const GameBadge = ({ n }) => (n ? (
-  <View style={styles.gameBadge}><Text style={styles.gameBadgeText}>G{n}</Text></View>
-) : null);
-
-const MatchNode = ({ match, x, y, seedOf, gameNo }) => {
+const MatchNode = ({ match, x, y, seedOf }) => {
   const win = winnerName(match);
   const isLive = match.status === 'in_progress' || match.status === 'innings_break';
   const accent = match.status === 'completed' ? '#10b981' : isLive ? '#dc2626' : '#cbd5e1';
@@ -104,7 +100,6 @@ const MatchNode = ({ match, x, y, seedOf, gameNo }) => {
         <View style={styles.nodeDivider} />
         <TeamLine name={match.teamB?.name} seed={seedOf(match.teamB?.name)} isWinner={win && win === match.teamB?.name} />
       </View>
-      <GameBadge n={gameNo} />
       {isLive ? <View style={styles.liveDotWrap}><View style={styles.liveDot} /></View> : null}
     </View>
   );
@@ -194,6 +189,18 @@ const FullBracketScreen = ({ navigation, route }) => {
     connectors.push({ key: 'champ_h', left: colX(numRounds) + CARD_W, top: fy - 1, width: GUTTER, height: 2 });
   }
 
+  // Game-number labels ("G1"…) sit in the gutter to the RIGHT of each game — near
+  // the connector, like the paper sample — so they never cover the seed numbers.
+  const gameBadges = [];
+  if (bracket) {
+    for (let r = 1; r <= numRounds; r += 1) {
+      const count = r === 1 ? bracket.games : slots / 2 ** r;
+      for (let s = 1; s <= count; s += 1) {
+        gameBadges.push({ key: `g_${r}_${s}`, n: bracket.gameNo[`${r}_${s}`], left: colX(r) + CARD_W + 5, top: centreY(r, s) - 9 });
+      }
+    }
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <GradientHeader
@@ -279,6 +286,13 @@ const FullBracketScreen = ({ navigation, route }) => {
                   {champion || 'TBD'}
                 </Text>
               </View>
+
+              {/* Game-number labels (on top, in the gutter) */}
+              {gameBadges.map((b) => (
+                <View key={b.key} style={[styles.gameLabel, { left: b.left, top: b.top }]}>
+                  <Text style={styles.gameLabelText}>G{b.n}</Text>
+                </View>
+              ))}
             </View>
           </ScrollView>
         </>
@@ -336,11 +350,13 @@ const styles = StyleSheet.create({
   teamNameTBD: { color: '#94a3b8', fontWeight: '500' },
   byeText: { flex: 1, fontSize: 11.5, fontWeight: '800', color: '#93c5fd', letterSpacing: 1 },
 
-  gameBadge: {
-    position: 'absolute', top: 4, left: 8,
-    backgroundColor: '#eef2ff', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1,
+  gameLabel: {
+    position: 'absolute',
+    backgroundColor: '#eef2ff', borderRadius: 5,
+    paddingHorizontal: 5, paddingVertical: 1,
+    borderWidth: 1, borderColor: '#c7d2fe',
   },
-  gameBadgeText: { fontSize: 8.5, fontWeight: '900', color: '#4f46e5', letterSpacing: 0.3 },
+  gameLabelText: { fontSize: 9, fontWeight: '900', color: '#4f46e5', letterSpacing: 0.2 },
 
   liveDotWrap: { position: 'absolute', top: 5, right: 5 },
   liveDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#dc2626' },
