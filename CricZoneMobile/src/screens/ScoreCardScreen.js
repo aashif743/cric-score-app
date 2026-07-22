@@ -3778,7 +3778,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
             </View>
 
             {/* Content */}
-            <View style={styles.outModalContent}>
+            <ScrollView style={styles.outModalContent} showsVerticalScrollIndicator={false}>
               {/* Wicket Types */}
               <View style={styles.extraBallSection}>
                 <Text style={styles.extraBallSectionTitle}>Dismissal Type</Text>
@@ -3941,10 +3941,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   </View>
                 </View>
               )}
-            </View>
+            </ScrollView>
 
             {/* Action Buttons */}
-            <View style={styles.extraBallActions}>
+            <View style={[styles.extraBallActions, { paddingBottom: insets.bottom + spacing.lg }]}>
               <TouchableOpacity
                 style={styles.extraBallCancelButton}
                 onPress={() => {
@@ -4302,7 +4302,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
             </View>
 
             {/* Content */}
-            <View style={styles.extraBallContent}>
+            <ScrollView style={styles.extraBallContent} showsVerticalScrollIndicator={false}>
               {/* Wide Options */}
               <View style={styles.extraBallSection}>
                 <Text style={styles.extraBallSectionTitle}>Runs</Text>
@@ -4419,10 +4419,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   </View>
                 )}
               </View>
-            </View>
+            </ScrollView>
 
             {/* Action Buttons */}
-            <View style={styles.extraBallActions}>
+            <View style={[styles.extraBallActions, { paddingBottom: insets.bottom + spacing.lg }]}>
               <TouchableOpacity
                 style={styles.extraBallCancelButton}
                 onPress={() => {
@@ -4461,7 +4461,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
             </View>
 
             {/* Content */}
-            <View style={styles.extraBallContent}>
+            <ScrollView style={styles.extraBallContent} showsVerticalScrollIndicator={false}>
               {/* No Ball Options */}
               <View style={styles.extraBallSection}>
                 <Text style={styles.extraBallSectionTitle}>Runs</Text>
@@ -4578,10 +4578,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   </View>
                 )}
               </View>
-            </View>
+            </ScrollView>
 
             {/* Action Buttons */}
-            <View style={styles.extraBallActions}>
+            <View style={[styles.extraBallActions, { paddingBottom: insets.bottom + spacing.lg }]}>
               <TouchableOpacity
                 style={styles.extraBallCancelButton}
                 onPress={() => {
@@ -4620,7 +4620,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
             </View>
 
             {/* Content */}
-            <View style={styles.extraBallContent}>
+            <ScrollView style={styles.extraBallContent} showsVerticalScrollIndicator={false}>
               {/* Bye Options */}
               <View style={styles.extraBallSection}>
                 <Text style={styles.extraBallSectionTitle}>Leg Bye Runs</Text>
@@ -4737,10 +4737,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   </View>
                 )}
               </View>
-            </View>
+            </ScrollView>
 
             {/* Action Buttons */}
-            <View style={styles.extraBallActions}>
+            <View style={[styles.extraBallActions, { paddingBottom: insets.bottom + spacing.lg }]}>
               <TouchableOpacity
                 style={styles.extraBallCancelButton}
                 onPress={() => {
@@ -4780,7 +4780,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
             </View>
 
             {/* Content */}
-            <View style={styles.extraBallContent}>
+            <ScrollView style={styles.extraBallContent} showsVerticalScrollIndicator={false}>
               {/* Runs Options */}
               <View style={styles.extraBallSection}>
                 <Text style={styles.extraBallSectionTitle}>Select Runs</Text>
@@ -4822,10 +4822,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   <Text style={styles.moreRunsInfoItem}>• Bowler's spell</Text>
                 </View>
               </View>
-            </View>
+            </ScrollView>
 
             {/* Action Buttons */}
-            <View style={styles.extraBallActions}>
+            <View style={[styles.extraBallActions, { paddingBottom: insets.bottom + spacing.lg }]}>
               <TouchableOpacity
                 style={styles.extraBallCancelButton}
                 onPress={() => {
@@ -4872,7 +4872,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
             </View>
 
             {/* Content */}
-            <View style={styles.extraBallContent}>
+            <ScrollView style={styles.extraBallContent} showsVerticalScrollIndicator={false}>
               {/* Retire Type Selection */}
               <View style={styles.extraBallSection}>
                 <Text style={styles.extraBallSectionTitle}>Retire Type</Text>
@@ -5113,10 +5113,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   </Text>
                 )}
               </View>
-            </View>
+            </ScrollView>
 
             {/* Action Buttons */}
-            <View style={styles.extraBallActions}>
+            <View style={[styles.extraBallActions, { paddingBottom: insets.bottom + spacing.lg }]}>
               <TouchableOpacity
                 style={styles.extraBallCancelButton}
                 onPress={() => {
@@ -6493,6 +6493,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     width: '100%',
     maxWidth: 400,
+    // Cap the box so it never grows past the screen; the body scrolls and the
+    // action row stays pinned above the (Android) navigation bar.
+    maxHeight: '90%',
   },
   extraBallHeader: {
     backgroundColor: '#fbbf24',
@@ -6531,6 +6534,7 @@ const styles = StyleSheet.create({
   },
   extraBallContent: {
     padding: spacing.lg,
+    flexShrink: 1,
   },
   extraBallSection: {
     marginBottom: spacing.lg,
@@ -6735,6 +6739,7 @@ const styles = StyleSheet.create({
   },
   outModalContent: {
     padding: spacing.lg,
+    flexShrink: 1,
   },
   wicketTypesGrid: {
     flexDirection: 'row',
