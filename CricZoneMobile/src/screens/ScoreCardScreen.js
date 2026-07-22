@@ -2508,6 +2508,13 @@ const ScoreCardScreen = ({ navigation, route }) => {
     return false;
   };
 
+  // The debounced timer must run the FRESHEST saveMatchProgress. The closure
+  // captured when a ball is scored still reads that ball's pre-update state
+  // (React hasn't re-rendered yet), which made the public view lag one ball
+  // behind. Route through a ref that always points at the latest render's copy.
+  const saveProgressRef = useRef(null);
+  saveProgressRef.current = saveMatchProgress;
+
   const emitSocketUpdate = useCallback(() => {
     const matchId = matchData?._id;
     if (!socketRef.current || !matchId || matchId.startsWith('guest_')) return;
@@ -2522,11 +2529,13 @@ const ScoreCardScreen = ({ navigation, route }) => {
       clearTimeout(liveSyncTimeoutRef.current);
     }
 
+    // Short debounce: batches very fast entries but publishes within a blink,
+    // and always saves the current state (via the ref) before emitting.
     liveSyncTimeoutRef.current = setTimeout(async () => {
       liveSyncTimeoutRef.current = null;
-      await saveMatchProgress({ emit: true, silent: true });
-    }, 800);
-  }, [user?.token, matchData?._id, pendingMatchEnd, saveMatchProgress]);
+      await saveProgressRef.current?.({ emit: true, silent: true });
+    }, 300);
+  }, [user?.token, matchData?._id, pendingMatchEnd]);
 
   // Emit score update to TV viewers (debounced save + socket)
   const emitScoreUpdate = () => {

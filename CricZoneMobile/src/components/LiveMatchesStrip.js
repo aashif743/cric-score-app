@@ -246,8 +246,9 @@ const LiveMatchCard = ({ match, index, onPress, navigation, cardWidth }) => {
 // --- Strip -----------------------------------------------------------------
 
 // Refetch debounce so a flurry of socket events (each ball is one) collapses
-// into a single API call within a small window. Important during fast scoring.
-const REFETCH_DEBOUNCE_MS = 600;
+// into a single API call within a small window. Kept short so the public score
+// updates almost immediately after the scorer marks a ball.
+const REFETCH_DEBOUNCE_MS = 250;
 
 // Fallback polling interval — guarantees the strip refreshes even when a socket
 // event is missed (backgrounded app, dropped WebSocket, etc.).
