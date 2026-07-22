@@ -14,9 +14,9 @@ import tournamentService from '../utils/tournamentService';
 import GradientHeader from '../components/GradientHeader';
 
 // --- Layout constants ------------------------------------------------------
-const CARD_W = 166;
+const CARD_W = 168;
 const MATCH_H = 66;
-const GUTTER = 46;          // horizontal gap between rounds (connector space)
+const GUTTER = 48;          // horizontal gap between rounds (connector space)
 const COL_W = CARD_W + GUTTER;
 const PITCH = MATCH_H + 26; // round-1 vertical spacing
 const PAD = 20;
@@ -30,11 +30,43 @@ const roundLabel = (round, numRounds) => {
 };
 
 const winnerName = (m) => {
-  if (m.status !== 'completed') return null;
+  if (!m || m.status !== 'completed') return null;
   return m.matchSummary?.winner || null;
 };
 
-// --- Match node ------------------------------------------------------------
+// Rebuild the full sequential bracket (games + byes) from the team list — mirrors
+// the backend generator, so teams read 1..N top-to-bottom and every bye is shown.
+const buildBracket = (teamNames) => {
+  const N = teamNames.length;
+  if (N < 2) return null;
+  const numRounds = Math.ceil(Math.log2(N));
+  const slots = 2 ** numRounds;
+  const half = slots / 2;
+  const games = N - half;
+
+  const round1 = [];
+  for (let j = 1; j <= half; j++) {
+    if (j <= games) {
+      round1.push({ slot: j, isBye: false, a: teamNames[2 * j - 2], b: teamNames[2 * j - 1] });
+    } else {
+      const team = teamNames[games + j - 1];
+      const side = (j - games) % 2 === 1 ? 'A' : 'B';
+      round1.push({ slot: j, isBye: true, team, side });
+    }
+  }
+
+  // Number the real games (byes excluded), round by round, top to bottom.
+  const gameNo = {};
+  let g = 0;
+  for (let r = 1; r <= numRounds; r++) {
+    const count = r === 1 ? games : slots / 2 ** r;
+    for (let s = 1; s <= count; s++) { g += 1; gameNo[`${r}_${s}`] = g; }
+  }
+
+  return { N, numRounds, slots, half, games, round1, gameNo };
+};
+
+// --- Small pieces ----------------------------------------------------------
 const TeamLine = ({ name, seed, isWinner }) => {
   const tbd = !name || name === 'TBD';
   return (
@@ -49,7 +81,18 @@ const TeamLine = ({ name, seed, isWinner }) => {
   );
 };
 
-const MatchNode = ({ match, x, y, seedOf }) => {
+const ByeLine = () => (
+  <View style={styles.teamLine}>
+    <View style={[styles.seedBadge, styles.seedBadgeBye]}><Text style={styles.byeBadgeText}>–</Text></View>
+    <Text style={styles.byeText}>BYE</Text>
+  </View>
+);
+
+const GameBadge = ({ n }) => (n ? (
+  <View style={styles.gameBadge}><Text style={styles.gameBadgeText}>G{n}</Text></View>
+) : null);
+
+const MatchNode = ({ match, x, y, seedOf, gameNo }) => {
   const win = winnerName(match);
   const isLive = match.status === 'in_progress' || match.status === 'innings_break';
   const accent = match.status === 'completed' ? '#10b981' : isLive ? '#dc2626' : '#cbd5e1';
@@ -61,10 +104,22 @@ const MatchNode = ({ match, x, y, seedOf }) => {
         <View style={styles.nodeDivider} />
         <TeamLine name={match.teamB?.name} seed={seedOf(match.teamB?.name)} isWinner={win && win === match.teamB?.name} />
       </View>
+      <GameBadge n={gameNo} />
       {isLive ? <View style={styles.liveDotWrap}><View style={styles.liveDot} /></View> : null}
     </View>
   );
 };
+
+const ByeNode = ({ team, side, x, y, seedOf }) => (
+  <View style={[styles.node, { left: x, top: y, width: CARD_W, height: MATCH_H }]}>
+    <View style={[styles.nodeAccent, { backgroundColor: '#93c5fd' }]} />
+    <View style={styles.nodeBody}>
+      {side === 'A' ? <TeamLine name={team} seed={seedOf(team)} /> : <ByeLine />}
+      <View style={styles.nodeDivider} />
+      {side === 'A' ? <ByeLine /> : <TeamLine name={team} seed={seedOf(team)} />}
+    </View>
+  </View>
+);
 
 // --- Screen ----------------------------------------------------------------
 const FullBracketScreen = ({ navigation, route }) => {
@@ -82,8 +137,7 @@ const FullBracketScreen = ({ navigation, route }) => {
       setError('');
       const res = await tournamentService.getTournament(tournamentId, user.token);
       const data = res?.data || res;
-      // Knockout-stage matches only (a league tournament's bracket is its KO stage).
-      const ms = (data?.matches || []).filter((m) => m.round != null);
+      const ms = (data?.matches || []).filter((m) => m.round != null && m.stage !== 'group');
       setMatches(ms);
       setTeamNames(data?.teamNames || []);
     } catch (err) {
@@ -96,35 +150,49 @@ const FullBracketScreen = ({ navigation, route }) => {
 
   useFocusEffect(useCallback(() => { fetchData(); }, [fetchData]));
 
-  const numRounds = matches.length ? Math.max(...matches.map((m) => m.round || 1)) : 0;
-  const slots = numRounds ? 2 ** numRounds : 0;
+  const bracket = buildBracket(teamNames);
+  const numRounds = bracket?.numRounds || 0;
+  const slots = bracket?.slots || 0;
+
   const seedOf = (name) => {
     const i = teamNames.indexOf(name);
     return i >= 0 ? i + 1 : null;
   };
+  const matchAt = (round, slot) => matches.find((m) => m.round === round && m.bracketSlot === slot);
 
-  // Position of a match's vertical centre — standard bracket geometry, so byes
-  // (missing round-1 slots) leave a natural gap and parents sit between children.
-  const centreY = (round, slot) => PAD + PITCH * (2 ** (round - 1)) * ((slot - 1) + 0.5);
+  // Standard bracket geometry: parents sit centred between their two children.
+  const centreY = (round, slot) => PAD + 24 + PITCH * (2 ** (round - 1)) * ((slot - 1) + 0.5);
   const colX = (round) => PAD + (round - 1) * COL_W;
 
-  const totalW = PAD * 2 + numRounds * COL_W - GUTTER;
-  const totalH = PAD * 2 + PITCH * (slots / 2);
+  const finalMatch = numRounds ? matchAt(numRounds, 1) : null;
+  const champion = winnerName(finalMatch);
+  const championX = colX(numRounds) + COL_W;
 
-  // Pre-compute connectors (child → parent elbows).
+  const totalW = PAD * 2 + numRounds * COL_W - GUTTER + (numRounds ? COL_W : 0);
+  const totalH = PAD * 2 + 24 + PITCH * (slots / 2);
+
+  // Connectors: every round-1 slot (game OR bye) → its round-2 parent, and every
+  // slot in later rounds → its parent, then the final → the Champion box.
   const connectors = [];
-  matches.forEach((m) => {
-    if (m.round >= numRounds) return;
-    const cy = centreY(m.round, m.bracketSlot);
-    const parentSlot = Math.floor((m.bracketSlot - 1) / 2) + 1;
-    const py = centreY(m.round + 1, parentSlot);
-    const startX = colX(m.round) + CARD_W;
-    const midX = startX + GUTTER / 2;
-    const parentX = colX(m.round + 1);
-    connectors.push({ key: `h1_${m.round}_${m.bracketSlot}`, left: startX, top: cy - 1, width: GUTTER / 2, height: 2 });
-    connectors.push({ key: `v_${m.round}_${m.bracketSlot}`, left: midX - 1, top: Math.min(cy, py), width: 2, height: Math.abs(py - cy) || 2 });
-    connectors.push({ key: `h2_${m.round}_${m.bracketSlot}`, left: midX, top: py - 1, width: parentX - midX, height: 2 });
-  });
+  if (bracket) {
+    for (let r = 1; r < numRounds; r += 1) {
+      const count = r === 1 ? bracket.half : slots / 2 ** r;
+      for (let s = 1; s <= count; s += 1) {
+        const cy = centreY(r, s);
+        const parentSlot = Math.floor((s - 1) / 2) + 1;
+        const py = centreY(r + 1, parentSlot);
+        const startX = colX(r) + CARD_W;
+        const midX = startX + GUTTER / 2;
+        const parentX = colX(r + 1);
+        connectors.push({ key: `h1_${r}_${s}`, left: startX, top: cy - 1, width: GUTTER / 2, height: 2 });
+        connectors.push({ key: `v_${r}_${s}`, left: midX - 1, top: Math.min(cy, py), width: 2, height: Math.abs(py - cy) || 2 });
+        connectors.push({ key: `h2_${r}_${s}`, left: midX, top: py - 1, width: parentX - midX, height: 2 });
+      }
+    }
+    // Final → Champion
+    const fy = centreY(numRounds, 1);
+    connectors.push({ key: 'champ_h', left: colX(numRounds) + CARD_W, top: fy - 1, width: GUTTER, height: 2 });
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -146,7 +214,7 @@ const FullBracketScreen = ({ navigation, route }) => {
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
-      ) : matches.length === 0 ? (
+      ) : !bracket || matches.length === 0 ? (
         <View style={styles.center}>
           <Text style={styles.muted}>No bracket yet.</Text>
         </View>
@@ -155,13 +223,11 @@ const FullBracketScreen = ({ navigation, route }) => {
           <View style={styles.hintBar}>
             <Text style={styles.hintText}>Pinch to zoom • drag to pan</Text>
           </View>
-          {/* iOS supports pinch-zoom on ScrollView; explicit content size enables
-              two-axis panning so the whole bracket is reachable. */}
           <ScrollView
             style={styles.canvas}
             contentContainerStyle={{ width: Math.max(totalW, 1), height: Math.max(totalH, 1) }}
             maximumZoomScale={3}
-            minimumZoomScale={0.5}
+            minimumZoomScale={0.4}
             bouncesZoom
             directionalLockEnabled={false}
             showsHorizontalScrollIndicator
@@ -174,20 +240,45 @@ const FullBracketScreen = ({ navigation, route }) => {
                   {roundLabel(r, numRounds)}
                 </Text>
               ))}
+              <Text style={[styles.roundHead, styles.champHead, { left: championX, top: 2, width: CARD_W }]} numberOfLines={1}>
+                Champion
+              </Text>
+
               {/* Connectors (behind the nodes) */}
               {connectors.map((c) => (
                 <View key={c.key} style={[styles.connector, { left: c.left, top: c.top, width: c.width, height: c.height }]} />
               ))}
-              {/* Match nodes */}
-              {matches.map((m) => (
-                <MatchNode
-                  key={`${m.round}_${m.bracketSlot}`}
-                  match={m}
-                  seedOf={seedOf}
-                  x={colX(m.round)}
-                  y={centreY(m.round, m.bracketSlot) - MATCH_H / 2}
-                />
-              ))}
+
+              {/* Round 1 — real games and BYE boxes, teams in order */}
+              {bracket.round1.map((r1) => {
+                const y = centreY(1, r1.slot) - MATCH_H / 2;
+                if (r1.isBye) {
+                  return <ByeNode key={`bye_${r1.slot}`} team={r1.team} side={r1.side} seedOf={seedOf} x={colX(1)} y={y} />;
+                }
+                const m = matchAt(1, r1.slot) || { teamA: { name: r1.a }, teamB: { name: r1.b } };
+                return (
+                  <MatchNode key={`m1_${r1.slot}`} match={m} seedOf={seedOf} gameNo={bracket.gameNo[`1_${r1.slot}`]} x={colX(1)} y={y} />
+                );
+              })}
+
+              {/* Rounds 2..final — actual matches */}
+              {Array.from({ length: Math.max(0, numRounds - 1) }, (_, i) => i + 2).map((r) => {
+                const count = slots / 2 ** r;
+                return Array.from({ length: count }, (_, i) => i + 1).map((s) => {
+                  const m = matchAt(r, s) || { teamA: { name: 'TBD' }, teamB: { name: 'TBD' } };
+                  return (
+                    <MatchNode key={`m_${r}_${s}`} match={m} seedOf={seedOf} gameNo={bracket.gameNo[`${r}_${s}`]} x={colX(r)} y={centreY(r, s) - MATCH_H / 2} />
+                  );
+                });
+              })}
+
+              {/* Champion box */}
+              <View style={[styles.champNode, { left: championX, top: centreY(numRounds, 1) - MATCH_H / 2 }]}>
+                <Text style={styles.champTrophy}>🏆</Text>
+                <Text style={[styles.champName, !champion && styles.champNameTBD]} numberOfLines={1}>
+                  {champion || 'TBD'}
+                </Text>
+              </View>
             </View>
           </ScrollView>
         </>
@@ -214,6 +305,7 @@ const styles = StyleSheet.create({
     fontSize: 11, fontWeight: '800', color: '#94a3b8',
     letterSpacing: 0.4, textTransform: 'uppercase',
   },
+  champHead: { color: '#d97706' },
 
   connector: { position: 'absolute', backgroundColor: LINE },
 
@@ -236,12 +328,33 @@ const styles = StyleSheet.create({
   },
   seedBadgeTBD: { backgroundColor: '#cbd5e1' },
   seedBadgeWin: { backgroundColor: '#059669' },
+  seedBadgeBye: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
   seedBadgeText: { fontSize: 10.5, fontWeight: '800', color: '#fff', fontVariant: ['tabular-nums'] },
+  byeBadgeText: { fontSize: 10.5, fontWeight: '800', color: '#93c5fd' },
   teamName: { flex: 1, fontSize: 12.5, fontWeight: '700', color: '#334155' },
   teamNameWin: { fontWeight: '800', color: '#047857' },
   teamNameTBD: { color: '#94a3b8', fontWeight: '500' },
+  byeText: { flex: 1, fontSize: 11.5, fontWeight: '800', color: '#93c5fd', letterSpacing: 1 },
+
+  gameBadge: {
+    position: 'absolute', top: 4, left: 8,
+    backgroundColor: '#eef2ff', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1,
+  },
+  gameBadgeText: { fontSize: 8.5, fontWeight: '900', color: '#4f46e5', letterSpacing: 0.3 },
+
   liveDotWrap: { position: 'absolute', top: 5, right: 5 },
   liveDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#dc2626' },
+
+  champNode: {
+    position: 'absolute', width: CARD_W, height: MATCH_H,
+    backgroundColor: '#fffbeb', borderRadius: 10,
+    borderWidth: 1.5, borderColor: '#fbbf24',
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, gap: 8,
+    shadowColor: '#d97706', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 3,
+  },
+  champTrophy: { fontSize: 20 },
+  champName: { flex: 1, fontSize: 14, fontWeight: '900', color: '#b45309' },
+  champNameTBD: { color: '#d6b06b', fontWeight: '600' },
 });
 
 export default FullBracketScreen;

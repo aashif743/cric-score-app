@@ -11,23 +11,6 @@
 // round-2 slot. Match defs carry { round, bracketSlot, teamA, teamB,
 // parentRound, parentSlot, parentSide }. Works for any N >= 2.
 
-// Canonical seed order for a power-of-two bracket. Returns seed numbers
-// (1-based) in slot order, e.g. size 8 -> [1,8,4,5,2,7,3,6]. This guarantees
-// seed 1 and seed 2 can only meet in the final, 1 v 4 / 2 v 3 in the semis, etc.
-function seedOrder(size) {
-  let order = [1];
-  while (order.length < size) {
-    const n = order.length * 2;
-    const next = [];
-    for (const s of order) {
-      next.push(s);
-      next.push(n + 1 - s); // pair each seed with its mirror
-    }
-    order = next;
-  }
-  return order;
-}
-
 function generateKnockoutBracket(teamNames) {
   const N = teamNames.length;
   if (N < 2) throw new Error('Knockout requires at least 2 teams');
@@ -36,24 +19,22 @@ function generateKnockoutBracket(teamNames) {
   const slots = 2 ** numRounds;
   const byes = slots - N;
 
-  // Lay round 1 out in canonical seed order. Seeds 1..N are the entered teams;
-  // seeds > N are byes. Because byes are the highest seed numbers, they fall on
-  // the slots opposite the strongest teams — so the top `byes` seeds advance for
-  // free, and (since size > N > size/2) no pair is ever bye-vs-bye.
-  const order = seedOrder(slots);
-  const teamForSeed = (s) => (s <= N ? teamNames[s - 1] : null);
-
-  const r1Count = slots / 2;
+  // Sequential draw with byes, laid out so teams read 1..N top-to-bottom (like a
+  // hand-drawn scorer's bracket). The first `games` pairings are real games
+  // between teams 1..2*games (1v2, 3v4, …); every remaining team gets a BYE into
+  // round 2. The bye's side alternates so the draw stays visually balanced.
+  const r1Count = slots / 2;           // round-1 pairings
+  const games = N - r1Count;           // real first-round games (rest are byes)
   const slotInfo = { 1: [] };
-  for (let i = 0; i < r1Count; i++) {
-    const a = teamForSeed(order[2 * i]);
-    const b = teamForSeed(order[2 * i + 1]);
-    if (a !== null && b !== null) {
-      slotInfo[1].push({ teamA: a, teamB: b, isBye: false });
+  for (let j = 1; j <= r1Count; j++) {
+    if (j <= games) {
+      slotInfo[1].push({ teamA: teamNames[2 * j - 2], teamB: teamNames[2 * j - 1], isBye: false });
     } else {
-      // Exactly one side is a bye — store the real team in teamA so the
-      // promotion step (teamA || teamB) carries it into round 2.
-      slotInfo[1].push({ teamA: a || b, teamB: null, isBye: true });
+      const team = teamNames[games + j - 1]; // seed (games + j), in entry order
+      const teamLeft = (j - games) % 2 === 1;
+      slotInfo[1].push(teamLeft
+        ? { teamA: team, teamB: null, isBye: true }
+        : { teamA: null, teamB: team, isBye: true });
     }
   }
 
