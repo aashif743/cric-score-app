@@ -117,22 +117,16 @@ const primaryMatchIndex = (list) => {
   return live >= 0 ? live : list.length - 1;
 };
 
-// One card per TOURNAMENT. Shows a single match at a time (the live/current one
-// by default) with a compact pager to step through that tournament's other
-// matches — instead of a separate card per match.
+// One card per TOURNAMENT. Shows the current match (the live one, or the most
+// recent if none live). All matches are browsable via the Schedule button, so
+// the card just shows one match — keeping every card the same size.
 const TournamentLiveCard = ({ group, index, onPress, navigation, cardWidth }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateX = useRef(new Animated.Value(20)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const list = group.matches;
-  // Manual selection overrides the auto pick; it resets whenever the match set
-  // changes (a match finishing / a new one going live) so the card auto-advances.
-  const [override, setOverride] = useState(null);
-  const sig = list.map((m) => `${m._id}:${m.status}`).join('|');
-  useEffect(() => { setOverride(null); }, [sig]);
-
-  const activeIdx = override != null ? Math.min(override, list.length - 1) : primaryMatchIndex(list);
+  const activeIdx = primaryMatchIndex(list);
   const match = list[activeIdx] || list[0];
 
   useEffect(() => {
@@ -154,8 +148,6 @@ const TournamentLiveCard = ({ group, index, onPress, navigation, cardWidth }) =>
   const teamB = match.teamB?.name || 'Team B';
   const scoreA = scoreFor(teamA, match);
   const scoreB = scoreFor(teamB, match);
-  const multi = list.length > 1;
-  const step = (dir) => setOverride(((activeIdx + dir) % list.length + list.length) % list.length);
 
   return (
     <Animated.View
@@ -237,29 +229,6 @@ const TournamentLiveCard = ({ group, index, onPress, navigation, cardWidth }) =>
               {isCompleted ? (match.result || 'Match completed') : matchSituation(match)}
             </Text>
           </View>
-
-          {/* Match pager — only when this tournament has more than one match here */}
-          {multi ? (
-            <View style={styles.pagerRow}>
-              <TouchableOpacity
-                style={styles.pagerBtn}
-                onPress={() => step(-1)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.pagerArrow}>‹</Text>
-              </TouchableOpacity>
-              <Text style={styles.pagerLabel}>Match {activeIdx + 1} of {list.length}</Text>
-              <TouchableOpacity
-                style={styles.pagerBtn}
-                onPress={() => step(1)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.pagerArrow}>›</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
 
           {/* Actions: Schedule + (league only) Points Table */}
           {match.tournament ? (
@@ -548,21 +517,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   situationText: { flex: 1, color: '#fde047', fontSize: 12, fontWeight: '800' },
-
-  // In-card match pager (one card per tournament, step through its matches)
-  pagerRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 14,
-    marginTop: 12, paddingTop: 10,
-    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)',
-  },
-  pagerBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  pagerArrow: { color: '#fff', fontSize: 18, fontWeight: '900', marginTop: -2 },
-  pagerLabel: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '800', minWidth: 96, textAlign: 'center' },
 
   actionRow: {
     flexDirection: 'row', gap: 10,
