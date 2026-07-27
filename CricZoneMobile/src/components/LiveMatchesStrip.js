@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useContext, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -110,10 +110,30 @@ const LivePulse = () => {
 
 // --- Card ------------------------------------------------------------------
 
-const LiveMatchCard = ({ match, index, onPress, navigation, cardWidth }) => {
+// Which match in a tournament group to show by default: the live one (earliest
+// live by order) if any, otherwise the most recent (last, since sorted ascending).
+const primaryMatchIndex = (list) => {
+  const live = list.findIndex((m) => m.status === 'in_progress' || m.status === 'innings_break');
+  return live >= 0 ? live : list.length - 1;
+};
+
+// One card per TOURNAMENT. Shows a single match at a time (the live/current one
+// by default) with a compact pager to step through that tournament's other
+// matches — instead of a separate card per match.
+const TournamentLiveCard = ({ group, index, onPress, navigation, cardWidth }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateX = useRef(new Animated.Value(20)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const list = group.matches;
+  // Manual selection overrides the auto pick; it resets whenever the match set
+  // changes (a match finishing / a new one going live) so the card auto-advances.
+  const [override, setOverride] = useState(null);
+  const sig = list.map((m) => `${m._id}:${m.status}`).join('|');
+  useEffect(() => { setOverride(null); }, [sig]);
+
+  const activeIdx = override != null ? Math.min(override, list.length - 1) : primaryMatchIndex(list);
+  const match = list[activeIdx] || list[0];
 
   useEffect(() => {
     Animated.parallel([
@@ -134,6 +154,8 @@ const LiveMatchCard = ({ match, index, onPress, navigation, cardWidth }) => {
   const teamB = match.teamB?.name || 'Team B';
   const scoreA = scoreFor(teamA, match);
   const scoreB = scoreFor(teamB, match);
+  const multi = list.length > 1;
+  const step = (dir) => setOverride(((activeIdx + dir) % list.length + list.length) % list.length);
 
   return (
     <Animated.View
@@ -215,6 +237,29 @@ const LiveMatchCard = ({ match, index, onPress, navigation, cardWidth }) => {
               {isCompleted ? (match.result || 'Match completed') : matchSituation(match)}
             </Text>
           </View>
+
+          {/* Match pager — only when this tournament has more than one match here */}
+          {multi ? (
+            <View style={styles.pagerRow}>
+              <TouchableOpacity
+                style={styles.pagerBtn}
+                onPress={() => step(-1)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.pagerArrow}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.pagerLabel}>Match {activeIdx + 1} of {list.length}</Text>
+              <TouchableOpacity
+                style={styles.pagerBtn}
+                onPress={() => step(1)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.pagerArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           {/* Actions: Schedule + (league only) Points Table */}
           {match.tournament ? (
@@ -324,15 +369,44 @@ const LiveMatchesStrip = ({ navigation }) => {
     }
   };
 
-  // Hide the entire strip until first load completes — avoids a flicker.
-  if (!loaded || matches.length === 0) return null;
+  // Group matches by tournament so each tournament shows as ONE card (a quick/
+  // standalone match with no tournament becomes its own single-match group).
+  // Within a group, matches are ordered by match number so the pager steps in
+  // fixture order.
+  const groups = useMemo(() => {
+    const byT = new Map();
+    const singles = [];
+    for (const m of matches) {
+      if (m.tournament) {
+        const key = String(m.tournament);
+        if (!byT.has(key)) byT.set(key, []);
+        byT.get(key).push(m);
+      } else {
+        singles.push({ key: `single_${m._id}`, tournament: null, tournamentName: m.tournamentName, matches: [m] });
+      }
+    }
+    const tGroups = [...byT.entries()].map(([key, ms]) => {
+      const sorted = [...ms].sort((a, b) => (a.matchNumber || 0) - (b.matchNumber || 0));
+      return {
+        key,
+        tournament: sorted[0].tournament,
+        tournamentName: sorted[0].tournamentName,
+        tournamentFormat: sorted[0].tournamentFormat,
+        matches: sorted,
+      };
+    });
+    return [...tGroups, ...singles];
+  }, [matches]);
 
-  const N = matches.length;
+  // Hide the entire strip until first load completes — avoids a flicker.
+  if (!loaded || groups.length === 0) return null;
+
+  const N = groups.length;
   const loop = N > 1;
   // For an infinite carousel we render three copies and keep the user parked in
   // the middle copy; when they cross into the first/last copy we silently jump
-  // back to the equivalent card in the middle. Single match → no looping.
-  const data = loop ? [...matches, ...matches, ...matches] : matches;
+  // back to the equivalent card in the middle. Single group → no looping.
+  const data = loop ? [...groups, ...groups, ...groups] : groups;
 
   // Live (per-frame) dot tracking so the indicator follows the finger, not just
   // the settle. Only commit state when the centered index actually changes.
@@ -359,13 +433,13 @@ const LiveMatchesStrip = ({ navigation }) => {
           <Text style={styles.headerTitle}>Live &amp; Recent</Text>
         </View>
         <Text style={styles.headerCount}>
-          {N} {N === 1 ? 'match' : 'matches'}
+          {matches.length} {matches.length === 1 ? 'match' : 'matches'}
         </Text>
       </View>
       <FlatList
         ref={listRef}
         data={data}
-        keyExtractor={(m, i) => `${m._id}_${i}`}
+        keyExtractor={(g, i) => `${g.key}_${i}`}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
@@ -378,15 +452,15 @@ const LiveMatchesStrip = ({ navigation }) => {
         onScroll={onScroll}
         onMomentumScrollEnd={onMomentumEnd}
         renderItem={({ item, index }) => (
-          <LiveMatchCard match={item} index={index % N} cardWidth={CARD_W} onPress={onCardPress} navigation={navigation} />
+          <TournamentLiveCard group={item} index={index % N} cardWidth={CARD_W} onPress={onCardPress} navigation={navigation} />
         )}
       />
 
-      {/* Pagination dots */}
+      {/* Pagination dots — one per tournament */}
       {loop ? (
         <View style={styles.dotsRow}>
-          {matches.map((m, i) => (
-            <View key={m._id} style={[styles.dot, i === activeIndex && styles.dotActive]} />
+          {groups.map((g, i) => (
+            <View key={g.key} style={[styles.dot, i === activeIndex && styles.dotActive]} />
           ))}
         </View>
       ) : null}
@@ -474,6 +548,21 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   situationText: { flex: 1, color: '#fde047', fontSize: 12, fontWeight: '800' },
+
+  // In-card match pager (one card per tournament, step through its matches)
+  pagerRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 14,
+    marginTop: 12, paddingTop: 10,
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  pagerBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  pagerArrow: { color: '#fff', fontSize: 18, fontWeight: '900', marginTop: -2 },
+  pagerLabel: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '800', minWidth: 96, textAlign: 'center' },
 
   actionRow: {
     flexDirection: 'row', gap: 10,

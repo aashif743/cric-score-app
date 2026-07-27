@@ -20,6 +20,18 @@ const propagateTeamNameToTournament = async (tournamentId, oldName, newName) => 
 
   const tournament = await Tournament.findById(tournamentId);
   if (tournament) {
+    // SAFETY GUARD: never rename a team to a name another team already uses.
+    // That isn't a rename — it's a merge that collapses two teams into one and
+    // silently drops a team from the groups/standings. This path is reached
+    // directly from updateMatch (which bypasses the rename endpoint's own
+    // conflict check) when a tournament match is started with the batting/bowling
+    // teams swapped, so the fixture's teamA/teamB names look "changed". Refuse it.
+    const clashes = (tournament.teamNames || []).some(
+      (n) => n && n !== oldName && n.trim().toLowerCase() === newName.trim().toLowerCase(),
+    );
+    if (clashes) {
+      return { tournamentUpdated: false, matchesUpdated: 0, skipped: 'name-already-exists' };
+    }
     const idx = tournament.teamNames.indexOf(oldName);
     if (idx !== -1) {
       tournament.teamNames[idx] = newName;

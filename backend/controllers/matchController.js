@@ -369,17 +369,27 @@ exports.updateMatch = async (req, res) => {
     console.log('=== MATCH SAVED SUCCESSFULLY ===');
     console.log('Has currentState:', !!updatedMatch.currentState);
 
-    // Propagate team name changes to tournament if applicable
+    // Propagate genuine team-NAME edits to the tournament. But if the two names
+    // were simply swapped (batting/bowling first flipped), that's NOT a rename —
+    // propagating it would merge two teams and drop one from the group. Detect a
+    // pure swap and skip; propagateTeamNameToTournament also guards against
+    // renaming onto an existing name as a final safety net.
     if (existingMatch.tournament) {
-      if (teamA && existingMatch.teamA?.name && teamA.name !== existingMatch.teamA.name) {
-        propagateTeamNameToTournament(existingMatch.tournament, existingMatch.teamA.name, teamA.name).catch(e =>
-          console.error('Tournament propagation error (teamA):', e.message)
-        );
-      }
-      if (teamB && existingMatch.teamB?.name && teamB.name !== existingMatch.teamB.name) {
-        propagateTeamNameToTournament(existingMatch.tournament, existingMatch.teamB.name, teamB.name).catch(e =>
-          console.error('Tournament propagation error (teamB):', e.message)
-        );
+      const oldA = existingMatch.teamA?.name;
+      const oldB = existingMatch.teamB?.name;
+      const isSwap = teamA && teamB && oldA && oldB &&
+        teamA.name === oldB && teamB.name === oldA;
+      if (!isSwap) {
+        if (teamA && oldA && teamA.name !== oldA) {
+          propagateTeamNameToTournament(existingMatch.tournament, oldA, teamA.name).catch(e =>
+            console.error('Tournament propagation error (teamA):', e.message)
+          );
+        }
+        if (teamB && oldB && teamB.name !== oldB) {
+          propagateTeamNameToTournament(existingMatch.tournament, oldB, teamB.name).catch(e =>
+            console.error('Tournament propagation error (teamB):', e.message)
+          );
+        }
       }
     }
 

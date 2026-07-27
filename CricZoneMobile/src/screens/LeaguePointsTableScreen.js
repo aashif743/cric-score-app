@@ -15,6 +15,7 @@ import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import GradientHeader from '../components/GradientHeader';
 import TournamentTopTabs from '../components/TournamentTopTabs';
+import PointsTableView from '../components/PointsTableView';
 import { computeGroupStandings, formatNRR, shortCode } from '../utils/leagueStandings';
 
 const groupLetter = (i) => String.fromCharCode(65 + i);
@@ -178,76 +179,9 @@ const LeaguePointsTableScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         </View>
       ) : (
-        <>
-          {/* Group tabs */}
-          {groups.length > 1 && (
-            <View style={styles.tabStripWrap}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.tabStrip}
-              >
-                {groups.map((_, i) => {
-                  const isActive = activeGroup === i;
-                  return (
-                    <TouchableOpacity
-                      key={i}
-                      activeOpacity={0.7}
-                      onPress={() => setActiveGroup(i)}
-                      style={[styles.tab, isActive && styles.tabActive]}
-                    >
-                      <Text style={[styles.tabText, isActive && styles.tabTextActive]} numberOfLines={1}>
-                        Group {groupLetter(i)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          )}
-
-          {/* The table itself — column header + rows in a card */}
-          <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
-            <View style={styles.tableCard}>
-              <HeaderRow />
-              {activeStandings.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyTitle}>No standings yet</Text>
-                  <Text style={styles.emptyText}>Play some group matches to populate the table.</Text>
-                </View>
-              ) : (
-                activeStandings.map((row, idx) => {
-                  const rank = idx + 1;
-                  // Highlight every row in the "qualifying" slot so the user
-                  // can see at a glance who would advance right now.
-                  const isQualifyingSlot = advance > 0 && rank <= advance;
-                  const isLastQualifyingSlot = advance > 0 && rank === advance;
-                  return (
-                    <TableRow
-                      key={row.team}
-                      row={row}
-                      rank={rank}
-                      index={idx}
-                      qualified={showQE && rank <= advance}
-                      eliminated={showQE && rank > advance}
-                      isQualifyingSlot={isQualifyingSlot}
-                      isLastQualifyingSlot={isLastQualifyingSlot}
-                    />
-                  );
-                })
-              )}
-            </View>
-
-            {advance > 0 && (
-              <View style={styles.qualifyNote}>
-                <View style={styles.qualifyDot} />
-                <Text style={styles.qualifyText}>
-                  Top {advance} {advance === 1 ? 'team' : 'teams'} will qualify for next round
-                </Text>
-              </View>
-            )}
-          </ScrollView>
-        </>
+        // Shared table (smart full names, no logos) — same component the owner
+        // sees, so the public view is consistent. Read-only here (no isOwner).
+        <PointsTableView tournament={tournament} />
       )}
     </SafeAreaView>
   );
