@@ -12,6 +12,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import GradientHeader from '../components/GradientHeader';
+import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
 
 // --- Layout constants ------------------------------------------------------
 const CARD_W = 168;
@@ -67,7 +68,7 @@ const buildBracket = (teamNames) => {
 };
 
 // --- Small pieces ----------------------------------------------------------
-const TeamLine = ({ name, seed, isWinner }) => {
+const TeamLine = ({ name, seed, isWinner, label }) => {
   const tbd = !name || name === 'TBD';
   return (
     <View style={styles.teamLine}>
@@ -75,7 +76,7 @@ const TeamLine = ({ name, seed, isWinner }) => {
         <Text style={styles.seedBadgeText}>{seed ?? '–'}</Text>
       </View>
       <Text style={[styles.teamName, isWinner && styles.teamNameWin, tbd && styles.teamNameTBD]} numberOfLines={1}>
-        {name || 'TBD'}
+        {tbd ? (label || 'TBD') : name}
       </Text>
     </View>
   );
@@ -88,7 +89,7 @@ const ByeLine = () => (
   </View>
 );
 
-const MatchNode = ({ match, x, y, seedOf }) => {
+const MatchNode = ({ match, x, y, seedOf, labelA, labelB }) => {
   const win = winnerName(match);
   const isLive = match.status === 'in_progress' || match.status === 'innings_break';
   const accent = match.status === 'completed' ? '#10b981' : isLive ? '#dc2626' : '#cbd5e1';
@@ -96,9 +97,9 @@ const MatchNode = ({ match, x, y, seedOf }) => {
     <View style={[styles.node, { left: x, top: y, width: CARD_W, height: MATCH_H }]}>
       <View style={[styles.nodeAccent, { backgroundColor: accent }]} />
       <View style={styles.nodeBody}>
-        <TeamLine name={match.teamA?.name} seed={seedOf(match.teamA?.name)} isWinner={win && win === match.teamA?.name} />
+        <TeamLine name={match.teamA?.name} seed={seedOf(match.teamA?.name)} isWinner={win && win === match.teamA?.name} label={labelA} />
         <View style={styles.nodeDivider} />
-        <TeamLine name={match.teamB?.name} seed={seedOf(match.teamB?.name)} isWinner={win && win === match.teamB?.name} />
+        <TeamLine name={match.teamB?.name} seed={seedOf(match.teamB?.name)} isWinner={win && win === match.teamB?.name} label={labelB} />
       </View>
       {isLive ? <View style={styles.liveDotWrap}><View style={styles.liveDot} /></View> : null}
     </View>
@@ -154,6 +155,8 @@ const FullBracketScreen = ({ navigation, route }) => {
     return i >= 0 ? i + 1 : null;
   };
   const matchAt = (round, slot) => matches.find((m) => m.round === round && m.bracketSlot === slot);
+  const koGameNos = knockoutGameNumbers(matches);
+  const lbl = (m, slot) => (m && m._id ? slotSourceLabel(m, slot, matches, koGameNos) : 'TBD');
 
   // Standard bracket geometry: parents sit centred between their two children.
   const centreY = (round, slot) => PAD + 24 + PITCH * (2 ** (round - 1)) * ((slot - 1) + 0.5);
@@ -274,7 +277,7 @@ const FullBracketScreen = ({ navigation, route }) => {
                 return Array.from({ length: count }, (_, i) => i + 1).map((s) => {
                   const m = matchAt(r, s) || { teamA: { name: 'TBD' }, teamB: { name: 'TBD' } };
                   return (
-                    <MatchNode key={`m_${r}_${s}`} match={m} seedOf={seedOf} gameNo={bracket.gameNo[`${r}_${s}`]} x={colX(r)} y={centreY(r, s) - MATCH_H / 2} />
+                    <MatchNode key={`m_${r}_${s}`} match={m} seedOf={seedOf} gameNo={bracket.gameNo[`${r}_${s}`]} x={colX(r)} y={centreY(r, s) - MATCH_H / 2} labelA={lbl(m, 'A')} labelB={lbl(m, 'B')} />
                   );
                 });
               })}

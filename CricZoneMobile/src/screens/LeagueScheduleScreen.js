@@ -21,6 +21,8 @@ import TournamentTopTabs from '../components/TournamentTopTabs';
 import PointsTableView from '../components/PointsTableView';
 import TournamentStatsView from '../components/TournamentStatsView';
 import QualifierBracket from '../components/QualifierBracket';
+import BracketTeamPicker from '../components/BracketTeamPicker';
+import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
 
 // --- Small helpers ---------------------------------------------------------
 
@@ -276,7 +278,7 @@ const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, isOwner }) =>
 
 // --- Knockout match card (bracket-style, polished) -------------------------
 
-const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner }) => {
+const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner, koMatches, gameNoMap, onEditSlot }) => {
   const isCompleted = match.status === 'completed';
   const isLive = match.status === 'in_progress' || match.status === 'innings_break';
   const winner = winnerOf(match);
@@ -285,6 +287,13 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
   const bothKnown = teamAName !== 'TBD' && teamBName !== 'TBD';
   const scores = teamScores(match);
   const showScores = isCompleted || isLive;
+  // For an unfilled slot, show WHO will play there (e.g. "Group A 1st").
+  const labelA = teamAName === 'TBD' ? slotSourceLabel(match, 'A', koMatches || [], gameNoMap) : teamAName;
+  const labelB = teamBName === 'TBD' ? slotSourceLabel(match, 'B', koMatches || [], gameNoMap) : teamBName;
+  // Owner can set a slot's team while the match hasn't started.
+  const canEdit = isOwner && onEditSlot && match.status === 'scheduled';
+  const editA = canEdit ? () => onEditSlot(match, 'A') : null;
+  const editB = canEdit ? () => onEditSlot(match, 'B') : null;
 
   const buttonLabel = isCompleted ? 'View Summary' : isLive ? 'Resume' : (bothKnown ? 'Start Match' : 'Waiting…');
   const buttonDisabled = !isCompleted && !isLive && !bothKnown;
@@ -316,13 +325,19 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
           </View>
 
           <View style={styles.teamsBlock}>
-            <View style={styles.teamRow}>
+            <TouchableOpacity
+              style={styles.teamRow}
+              activeOpacity={editA ? 0.6 : 1}
+              onPress={editA || undefined}
+              disabled={!editA}
+            >
               <View style={[styles.teamBadge, { backgroundColor: teamAName === 'TBD' ? '#cbd5e1' : '#0d3b66' }]}>
                 <Text style={styles.teamBadgeText}>{teamAName === 'TBD' ? '?' : initial(teamAName)}</Text>
               </View>
               <Text style={[styles.teamName, winner === teamAName && styles.teamNameWinner, teamAName === 'TBD' && styles.teamNameTBD]} numberOfLines={1}>
-                {teamAName}
+                {labelA}
               </Text>
+              {editA ? <Text style={styles.slotEditIcon}>✎</Text> : null}
               {showScores && scores.a ? (
                 <View style={styles.scoreBlock}>
                   <Text style={[styles.scoreRuns, winner === teamAName && styles.scoreRunsWinner]}>
@@ -331,14 +346,20 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
                   {scores.a?.overs ? <Text style={styles.scoreOvers}>({scores.a.overs})</Text> : null}
                 </View>
               ) : null}
-            </View>
-            <View style={styles.teamRow}>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.teamRow}
+              activeOpacity={editB ? 0.6 : 1}
+              onPress={editB || undefined}
+              disabled={!editB}
+            >
               <View style={[styles.teamBadge, { backgroundColor: teamBName === 'TBD' ? '#cbd5e1' : '#2d7dd2' }]}>
                 <Text style={styles.teamBadgeText}>{teamBName === 'TBD' ? '?' : initial(teamBName)}</Text>
               </View>
               <Text style={[styles.teamName, winner === teamBName && styles.teamNameWinner, teamBName === 'TBD' && styles.teamNameTBD]} numberOfLines={1}>
-                {teamBName}
+                {labelB}
               </Text>
+              {editB ? <Text style={styles.slotEditIcon}>✎</Text> : null}
               {showScores && scores.b ? (
                 <View style={styles.scoreBlock}>
                   <Text style={[styles.scoreRuns, winner === teamBName && styles.scoreRunsWinner]}>
@@ -347,7 +368,7 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
                   {scores.b?.overs ? <Text style={styles.scoreOvers}>({scores.b.overs})</Text> : null}
                 </View>
               ) : null}
-            </View>
+            </TouchableOpacity>
           </View>
 
           {isCompleted && match.result ? (
@@ -472,6 +493,22 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
   const numKnockoutRounds = knockoutMatches.length
     ? Math.max(...knockoutMatches.map((m) => m.round || 0))
     : 0;
+  const koGameNos = useMemo(() => knockoutGameNumbers(knockoutMatches), [knockoutMatches]);
+
+  // Manual bracket-slot editing (owner): { match, slot } while a picker is open.
+  const [editSlot, setEditSlot] = useState(null);
+  const openEditSlot = (match, slot) => setEditSlot({ match, slot });
+  const doSetBracketTeam = async (name) => {
+    if (!editSlot) return;
+    try {
+      await tournamentService.setBracketTeam(tournament._id, editSlot.match._id, editSlot.slot, name, user.token);
+      setEditSlot(null);
+      fetchData();
+    } catch (err) {
+      setEditSlot(null);
+      Alert.alert('Could not set team', err?.error || 'Please try again.');
+    }
+  };
 
   // Only the tournament creator gets owner actions (Settings, Start/Resume).
   // Visitors who open the schedule from a live card only view.
@@ -707,6 +744,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
             matches={matchesForActiveTab}
             onStart={handleStartMatch}
             isOwner={isOwner}
+            onEditSlot={openEditSlot}
           />
         ) : (
           matchesForActiveTab.map((m, i) => (
@@ -718,12 +756,26 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
               match={m}
               onStart={handleStartMatch}
               isOwner={isOwner}
+              koMatches={knockoutMatches}
+              gameNoMap={koGameNos}
+              onEditSlot={openEditSlot}
             />
           ))
         )}
       </ScrollView>
       </>
       )}
+
+      {editSlot ? (
+        <BracketTeamPicker
+          visible={!!editSlot}
+          onClose={() => setEditSlot(null)}
+          slotLabel={slotSourceLabel(editSlot.match, editSlot.slot, knockoutMatches, koGameNos)}
+          teams={tournament?.teamNames || []}
+          currentName={editSlot.slot === 'A' ? editSlot.match.teamA?.name : editSlot.match.teamB?.name}
+          onPick={doSetBracketTeam}
+        />
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -862,6 +914,7 @@ const styles = StyleSheet.create({
   teamName: { flex: 1, fontSize: 14, fontWeight: '600', color: '#0f172a' },
   teamNameWinner: { color: '#059669', fontWeight: '800' },
   teamNameTBD: { color: '#94a3b8', fontWeight: '500', fontStyle: 'italic' },
+  slotEditIcon: { fontSize: 13, color: '#94a3b8', marginLeft: 6, marginRight: 2 },
 
   scoreBlock: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
   scoreRuns: { fontSize: 15, fontWeight: '800', color: '#0f172a', fontVariant: ['tabular-nums'] },

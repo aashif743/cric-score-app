@@ -16,6 +16,7 @@ router.get("/:id/stats", protect, tournamentController.getTournamentStats);
 router.post("/:id/share", protect, tournamentController.generateShareId);
 router.patch("/:id/rename-team", protect, tournamentController.renameTeam);
 router.patch("/:id/swap-teams", protect, tournamentController.swapTeamGroups);
+router.patch("/:id/bracket-team", protect, tournamentController.setBracketTeam);
 router.patch("/:id/playoff-format", protect, tournamentController.setPlayoffFormat);
 
 module.exports = router;

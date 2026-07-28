@@ -921,6 +921,71 @@ exports.generateShareId = async (req, res) => {
   }
 };
 
+// PATCH /tournaments/:id/bracket-team
+// body: { matchId, slot: 'A' | 'B', teamName }  (teamName '' clears the slot back to TBD)
+// Manually set (or clear) a team in a knockout/playoff bracket slot. Owner-only,
+// and only while that bracket match hasn't started — so the owner can correct or
+// pre-fill who plays a quarter/semi/final or a league 2nd-round match.
+exports.setBracketTeam = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { matchId, slot, teamName } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(matchId || '')) {
+      return res.status(400).json({ success: false, error: "Invalid ID" });
+    }
+    if (slot !== 'A' && slot !== 'B') {
+      return res.status(400).json({ success: false, error: "slot must be 'A' or 'B'" });
+    }
+
+    const tournament = await Tournament.findById(id).lean();
+    if (!tournament) return res.status(404).json({ success: false, error: "Tournament not found" });
+    if (tournament.user.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+
+    const match = await Match.findById(matchId);
+    if (!match || String(match.tournament) !== String(id)) {
+      return res.status(404).json({ success: false, error: "Match not found in this tournament" });
+    }
+    // Bracket matches are the knockout/playoff ones: league playoffs use
+    // stage='knockout'; standalone knockout tournaments leave stage null but
+    // every bracket match has a round. Group matches (stage='group') are not
+    // editable this way.
+    const isBracketMatch = match.stage === 'knockout' || (match.stage !== 'group' && match.round != null);
+    if (!isBracketMatch) {
+      return res.status(400).json({ success: false, error: "Only knockout/playoff matches can be edited this way" });
+    }
+    if (match.status !== 'scheduled') {
+      return res.status(409).json({ success: false, error: "This match has already started — teams can no longer be changed." });
+    }
+
+    const name = (teamName || '').trim() || 'TBD';
+    const sideKey = slot === 'A' ? 'teamA' : 'teamB';
+    // Don't allow both slots to be the same real team.
+    const otherKey = slot === 'A' ? 'teamB' : 'teamA';
+    if (name !== 'TBD' && match[otherKey]?.name === name) {
+      return res.status(409).json({ success: false, error: "The other slot already has this team." });
+    }
+
+    match[sideKey] = { name, shortName: name.substring(0, 3).toUpperCase() };
+    const roster = Array.from({ length: match.playersPerTeam || 11 }, (_, i) => ({
+      name: name === 'TBD' ? `Batsman ${i + 1}` : `${name} Player ${i + 1}`,
+      runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: 'Not Out',
+    }));
+    if (match.innings1) {
+      if (slot === 'A') { match.innings1.battingTeam = name; match.innings1.batting = roster; }
+      else { match.innings1.bowlingTeam = name; match.innings1.bowling = roster; }
+      match.markModified('innings1');
+    }
+    await match.save();
+
+    return res.json({ success: true, data: { matchId, slot, teamName: name } });
+  } catch (error) {
+    console.error("Set bracket team error:", error);
+    res.status(500).json({ success: false, error: "Failed to set the team." });
+  }
+};
+
 // PATCH /tournaments/:id/playoff-format  { playoffFormat: 'knockout' | 'qualifier' }
 // Changes a league tournament's knockout-stage format and rebuilds the playoff
 // matches. Allowed while the playoffs haven't started (group stage may be live).

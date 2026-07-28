@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import Svg, { Polyline } from 'react-native-svg';
+import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
 
 // --- helpers ---------------------------------------------------------------
 const initial = (name) => (name || '?').trim().charAt(0).toUpperCase();
@@ -17,11 +18,11 @@ const winnerOf = (m) => {
 const C_Q2 = '#2563eb';
 const C_FINAL = '#f97316';
 
-// A single team line inside a match node.
-const Slot = ({ name, placeholder, accent, isWinner }) => {
+// A single team line inside a match node. Editable (owner) when onEdit is given.
+const Slot = ({ name, placeholder, accent, isWinner, onEdit }) => {
   const known = isReal(name);
-  return (
-    <View style={styles.slot}>
+  const body = (
+    <>
       <View style={[styles.slotDot, { backgroundColor: known ? accent : '#cbd5e1' }]}>
         <Text style={styles.slotDotText}>{known ? initial(name) : '?'}</Text>
       </View>
@@ -35,31 +36,32 @@ const Slot = ({ name, placeholder, accent, isWinner }) => {
       >
         {known ? name : placeholder}
       </Text>
-      {isWinner ? <View style={styles.winCheck}><View style={styles.winCheckA} /><View style={styles.winCheckB} /></View> : null}
-    </View>
+      {isWinner ? <View style={styles.winCheck}><View style={styles.winCheckA} /><View style={styles.winCheckB} /></View>
+        : onEdit ? <Text style={styles.slotEdit}>✎</Text> : null}
+    </>
   );
+  if (onEdit) {
+    return <TouchableOpacity style={styles.slot} onPress={onEdit} activeOpacity={0.6}>{body}</TouchableOpacity>;
+  }
+  return <View style={styles.slot}>{body}</View>;
 };
 
-// One match box in the bracket.
-const Node = ({ x, y, w, h, label, headerColor, match, slotA, slotB, onPress }) => {
+// One match box in the bracket. Header tap starts/views; slots (owner) edit.
+const Node = ({ x, y, w, h, label, headerColor, match, slotA, slotB, onPress, onEditA, onEditB }) => {
   const win = winnerOf(match);
   const live = match?.status === 'in_progress' || match?.status === 'innings_break';
   return (
-    <TouchableOpacity
-      activeOpacity={0.85}
-      onPress={onPress}
-      style={[styles.node, { left: x, top: y, width: w, height: h }]}
-    >
-      <View style={[styles.nodeHeader, { backgroundColor: headerColor }]}>
+    <View style={[styles.node, { left: x, top: y, width: w, height: h }]}>
+      <TouchableOpacity activeOpacity={0.85} onPress={onPress} style={[styles.nodeHeader, { backgroundColor: headerColor }]}>
         <Text style={styles.nodeHeaderText} numberOfLines={1}>{label}</Text>
         {live ? <View style={styles.liveDot} /> : null}
-      </View>
+      </TouchableOpacity>
       <View style={styles.nodeBody}>
-        <Slot name={slotA.name} placeholder={slotA.placeholder} accent={headerColor} isWinner={win && win === slotA.name} />
+        <Slot name={slotA.name} placeholder={slotA.placeholder} accent={headerColor} isWinner={win && win === slotA.name} onEdit={onEditA} />
         <View style={styles.slotSep} />
-        <Slot name={slotB.name} placeholder={slotB.placeholder} accent={headerColor} isWinner={win && win === slotB.name} />
+        <Slot name={slotB.name} placeholder={slotB.placeholder} accent={headerColor} isWinner={win && win === slotB.name} onEdit={onEditB} />
       </View>
-    </TouchableOpacity>
+    </View>
   );
 };
 
@@ -70,12 +72,18 @@ const Node = ({ x, y, w, h, label, headerColor, match, slotA, slotB, onPress }) 
  *   Eliminator ────(winner)─► Qualifier 2 (B)
  *   Qualifier 2 ───(winner)─────────────► Final (B)
  */
-const QualifierBracket = ({ matches = [], onStart, isOwner }) => {
+const QualifierBracket = ({ matches = [], onStart, isOwner, onEditSlot }) => {
   const byLabel = (label) => matches.find((m) => m.matchLabel === label);
   const q1 = byLabel('Qualifier 1');
   const elim = byLabel('Eliminator');
   const q2 = byLabel('Qualifier 2');
   const final = byLabel('Final');
+
+  const gameNos = knockoutGameNumbers(matches);
+  const lbl = (m, slot) => slotSourceLabel(m, slot, matches, gameNos);
+  // Owner can edit a slot while that match hasn't started.
+  const editFn = (m, slot) =>
+    (isOwner && onEditSlot && m && m.status === 'scheduled') ? () => onEditSlot(m, slot) : undefined;
 
   const canvasW = Math.min(Dimensions.get('window').width - 24, 380);
   const NODE_W = Math.min(112, (canvasW - 8) / 3);
@@ -135,34 +143,36 @@ const QualifierBracket = ({ matches = [], onStart, isOwner }) => {
         <Node
           x={q1x} y={q1y} w={NODE_W} h={NODE_H}
           label="QUALIFIER 1" headerColor="#0d3b66" match={q1}
-          slotA={{ name: q1?.teamA?.name, placeholder: 'TBD' }}
-          slotB={{ name: q1?.teamB?.name, placeholder: 'TBD' }}
-          onPress={tap(q1)}
+          slotA={{ name: q1?.teamA?.name, placeholder: lbl(q1, 'A') }}
+          slotB={{ name: q1?.teamB?.name, placeholder: lbl(q1, 'B') }}
+          onPress={tap(q1)} onEditA={editFn(q1, 'A')} onEditB={editFn(q1, 'B')}
         />
         <Node
           x={q1x} y={elimy} w={NODE_W} h={NODE_H}
           label="ELIMINATOR" headerColor="#0d3b66" match={elim}
-          slotA={{ name: elim?.teamA?.name, placeholder: 'TBD' }}
-          slotB={{ name: elim?.teamB?.name, placeholder: 'TBD' }}
-          onPress={tap(elim)}
+          slotA={{ name: elim?.teamA?.name, placeholder: lbl(elim, 'A') }}
+          slotB={{ name: elim?.teamB?.name, placeholder: lbl(elim, 'B') }}
+          onPress={tap(elim)} onEditA={editFn(elim, 'A')} onEditB={editFn(elim, 'B')}
         />
         <Node
           x={q2x} y={q2y} w={NODE_W} h={NODE_H}
           label="QUALIFIER 2" headerColor={C_Q2} match={q2}
-          slotA={{ name: q2?.teamA?.name, placeholder: 'Q1 Loser' }}
-          slotB={{ name: q2?.teamB?.name, placeholder: 'Elim Winner' }}
-          onPress={tap(q2)}
+          slotA={{ name: q2?.teamA?.name, placeholder: lbl(q2, 'A') }}
+          slotB={{ name: q2?.teamB?.name, placeholder: lbl(q2, 'B') }}
+          onPress={tap(q2)} onEditA={editFn(q2, 'A')} onEditB={editFn(q2, 'B')}
         />
         <Node
           x={finalx} y={finaly} w={NODE_W} h={NODE_H}
           label="FINAL" headerColor={C_FINAL} match={final}
-          slotA={{ name: final?.teamA?.name, placeholder: 'Q1 Winner' }}
-          slotB={{ name: final?.teamB?.name, placeholder: 'Q2 Winner' }}
-          onPress={tap(final)}
+          slotA={{ name: final?.teamA?.name, placeholder: lbl(final, 'A') }}
+          slotB={{ name: final?.teamB?.name, placeholder: lbl(final, 'B') }}
+          onPress={tap(final)} onEditA={editFn(final, 'A')} onEditB={editFn(final, 'B')}
         />
       </View>
 
-      <Text style={styles.hint}>Tap a match to {isOwner ? 'start or view it' : 'view it'}.</Text>
+      <Text style={styles.hint}>
+        Tap a header to {isOwner ? 'start/view' : 'view'}{isOwner ? ' · tap a team to set it' : ''}.
+      </Text>
     </View>
   );
 };
@@ -209,6 +219,7 @@ const styles = StyleSheet.create({
   slotName: { flex: 1, fontSize: 12, fontWeight: '700', color: '#1e293b' },
   slotNamePlaceholder: { color: '#94a3b8', fontWeight: '600', fontStyle: 'italic', fontSize: 11 },
   slotNameWin: { color: '#059669', fontWeight: '900' },
+  slotEdit: { fontSize: 11, color: '#94a3b8', marginLeft: 2 },
   slotSep: { height: 1, backgroundColor: '#f1f5f9' },
 
   winCheck: { width: 14, height: 14, marginLeft: 2, position: 'relative' },

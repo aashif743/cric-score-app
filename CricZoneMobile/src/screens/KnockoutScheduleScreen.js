@@ -1,4 +1,4 @@
-import React, { useState, useContext, useCallback } from 'react';
+import React, { useState, useContext, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -13,6 +14,8 @@ import Svg, { Path } from 'react-native-svg';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import GradientHeader from '../components/GradientHeader';
+import BracketTeamPicker from '../components/BracketTeamPicker';
+import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
 
 // Clean line-style settings gear (matches the league schedule screen).
 const SettingsIcon = ({ size = 20, color = '#475569' }) => (
@@ -89,6 +92,22 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
   // just view the bracket.
   const myId = user?.id || user?._id;
   const isOwner = !!(tournament?.user && myId && String(tournament.user) === String(myId));
+
+  // Bracket-slot source labels + manual editing (owner).
+  const koGameNos = useMemo(() => knockoutGameNumbers(matches), [matches]);
+  const [editSlot, setEditSlot] = useState(null);
+  const openEditSlot = (match, slot) => setEditSlot({ match, slot });
+  const doSetBracketTeam = async (name) => {
+    if (!editSlot) return;
+    try {
+      await tournamentService.setBracketTeam(tournament._id, editSlot.match._id, editSlot.slot, name, user.token);
+      setEditSlot(null);
+      fetchData();
+    } catch (err) {
+      setEditSlot(null);
+      Alert.alert('Could not set team', err?.error || 'Please try again.');
+    }
+  };
 
   // Seed number for a team = its position in the entry order (seed 1 first).
   const seedOf = (name) => {
@@ -174,6 +193,12 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
     const teamBName = match.teamB?.name || 'TBD';
     const bothKnown = teamAName !== 'TBD' && teamBName !== 'TBD';
     const showLine = idx > 0;
+    // For an unfilled slot show WHO will play there (e.g. "Winner of Match 2").
+    const labelA = teamAName === 'TBD' ? slotSourceLabel(match, 'A', matches, koGameNos) : teamAName;
+    const labelB = teamBName === 'TBD' ? slotSourceLabel(match, 'B', matches, koGameNos) : teamBName;
+    const canEdit = isOwner && match.status === 'scheduled';
+    const editA = canEdit ? () => openEditSlot(match, 'A') : null;
+    const editB = canEdit ? () => openEditSlot(match, 'B') : null;
 
     const buttonLabel = isCompleted ? 'View Summary' : 'Start Match';
     const buttonDisabled = !isCompleted && !bothKnown;
@@ -189,18 +214,24 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
 
           {/* Left column: Team A / button / Team B */}
           <View style={styles.matchCenter}>
-            <View style={[
-              styles.teamBox,
-              teamAName === 'TBD' && styles.teamBoxTBD,
-              winner === teamAName && styles.teamBoxWinner,
-            ]}>
+            <TouchableOpacity
+              style={[
+                styles.teamBox,
+                teamAName === 'TBD' && styles.teamBoxTBD,
+                winner === teamAName && styles.teamBoxWinner,
+              ]}
+              activeOpacity={editA ? 0.6 : 1}
+              onPress={editA || undefined}
+              disabled={!editA}
+            >
               <View style={[styles.seedBadge, teamAName === 'TBD' && styles.seedBadgeTBD, winner === teamAName && styles.seedBadgeWin]}>
                 <Text style={[styles.seedBadgeText, winner === teamAName && styles.seedBadgeTextWin]}>{seedOf(teamAName) ?? '–'}</Text>
               </View>
               <Text style={[styles.teamBoxText, teamAName === 'TBD' && styles.teamBoxTextTBD, winner === teamAName && styles.teamBoxTextWin]} numberOfLines={1}>
-                {teamAName}
+                {labelA}
               </Text>
-            </View>
+              {editA ? <Text style={styles.slotEditIcon}>✎</Text> : null}
+            </TouchableOpacity>
             {(isOwner || isCompleted) ? (
               <TouchableOpacity
                 style={[
@@ -236,18 +267,24 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
                 <Text numberOfLines={1} style={[styles.actionButtonText, styles.actionButtonTextDisabled]}>Upcoming</Text>
               </View>
             )}
-            <View style={[
-              styles.teamBox,
-              teamBName === 'TBD' && styles.teamBoxTBD,
-              winner === teamBName && styles.teamBoxWinner,
-            ]}>
+            <TouchableOpacity
+              style={[
+                styles.teamBox,
+                teamBName === 'TBD' && styles.teamBoxTBD,
+                winner === teamBName && styles.teamBoxWinner,
+              ]}
+              activeOpacity={editB ? 0.6 : 1}
+              onPress={editB || undefined}
+              disabled={!editB}
+            >
               <View style={[styles.seedBadge, teamBName === 'TBD' && styles.seedBadgeTBD, winner === teamBName && styles.seedBadgeWin]}>
                 <Text style={[styles.seedBadgeText, winner === teamBName && styles.seedBadgeTextWin]}>{seedOf(teamBName) ?? '–'}</Text>
               </View>
               <Text style={[styles.teamBoxText, teamBName === 'TBD' && styles.teamBoxTextTBD, winner === teamBName && styles.teamBoxTextWin]} numberOfLines={1}>
-                {teamBName}
+                {labelB}
               </Text>
-            </View>
+              {editB ? <Text style={styles.slotEditIcon}>✎</Text> : null}
+            </TouchableOpacity>
           </View>
 
           {/* Bracket connector — both teams join into the winner */}
@@ -344,6 +381,17 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
           </ScrollView>
         </>
       )}
+
+      {editSlot ? (
+        <BracketTeamPicker
+          visible={!!editSlot}
+          onClose={() => setEditSlot(null)}
+          slotLabel={slotSourceLabel(editSlot.match, editSlot.slot, matches, koGameNos)}
+          teams={tournament?.teamNames || []}
+          currentName={editSlot.slot === 'A' ? editSlot.match.teamA?.name : editSlot.match.teamB?.name}
+          onPick={doSetBracketTeam}
+        />
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -514,6 +562,7 @@ const styles = StyleSheet.create({
   },
   teamBoxText: { flex: 1, fontSize: 14, fontWeight: '700', color: '#1e293b' },
   teamBoxTextTBD: { color: '#94a3b8', fontWeight: '500', fontSize: 13 },
+  slotEditIcon: { fontSize: 12, color: '#94a3b8', marginLeft: 4 },
   teamBoxTextWin: { color: '#047857', fontWeight: '800' },
 
   // Seed number badge shown next to each team.

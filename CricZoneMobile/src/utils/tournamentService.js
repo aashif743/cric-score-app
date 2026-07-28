@@ -94,6 +94,18 @@ const tournamentService = {
     return response.data;
   },
 
+  // Manually set (or clear) a team in a knockout/playoff bracket slot.
+  // teamName '' clears the slot back to TBD. Owner-only; scheduled matches only.
+  setBracketTeam: async (id, matchId, slot, teamName, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(
+      `/tournaments/${id}/bracket-team`,
+      { matchId, slot, teamName },
+      config,
+    );
+    return response.data;
+  },
+
   // Switch the league playoff format ('knockout' | 'qualifier'). Rebuilds the
   // playoff matches; allowed while the playoffs haven't started.
   setPlayoffFormat: async (id, playoffFormat, token) => {
