@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing,
-  Modal, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
+  Modal, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
   TouchableWithoutFeedback,
 } from 'react-native';
 import { computeGroupStandings, formatNRR } from '../utils/leagueStandings';
 import tournamentService from '../utils/tournamentService';
+import AutocompleteInput from './AutocompleteInput';
 
 const groupLetter = (i) => String.fromCharCode(65 + i);
 
@@ -127,23 +128,9 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
   const [mode, setMode] = useState('edit');          // 'edit' | 'swap'
   const [renameValue, setRenameValue] = useState('');
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef(null);
 
   const openEdit = (name) => { setEditTeam(name); setMode('edit'); setRenameValue(name); };
   const closeEdit = () => { if (busy) return; setEditTeam(null); setMode('edit'); };
-
-  // When the editor opens, focus the field and highlight the whole name so the
-  // user can just start typing to replace it. selectTextOnFocus alone doesn't
-  // fire reliably on iOS auto-focus, so we set the selection explicitly.
-  useEffect(() => {
-    if (!editTeam || mode !== 'edit') return undefined;
-    const len = (renameValue || '').length;
-    const t = setTimeout(() => {
-      inputRef.current?.focus?.();
-      inputRef.current?.setNativeProps?.({ selection: { start: 0, end: len } });
-    }, 160);
-    return () => clearTimeout(t);
-  }, [editTeam, mode]);
 
   // Teams in the OTHER groups — the valid swap partners for the edited team.
   const swapCandidates = useMemo(() => {
@@ -288,21 +275,20 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
                 <>
                   <Text style={styles.modalTitle}>Edit team</Text>
 
-                  {/* Rename — pre-filled + selected; tap to bring up the keyboard */}
+                  {/* Rename — pre-filled + selected; shows team-name suggestions */}
                   <View style={styles.renameRow}>
-                    <TextInput
-                      ref={inputRef}
-                      style={styles.renameInput}
+                    <AutocompleteInput
                       value={renameValue}
                       onChangeText={setRenameValue}
+                      type="team"
                       placeholder="Team name"
-                      placeholderTextColor="#94a3b8"
+                      style={styles.renameAutocomplete}
+                      inputStyle={styles.renameInput}
                       maxLength={24}
                       autoFocus
                       selectTextOnFocus
                       editable={!busy}
                       returnKeyType="done"
-                      onSubmitEditing={doRename}
                     />
                     <TouchableOpacity
                       style={[styles.saveBtn, busy && styles.saveBtnBusy]}
@@ -442,10 +428,12 @@ const styles = StyleSheet.create({
   editHint: { fontSize: 12, color: '#94a3b8', marginLeft: 4 },
   editTip: { textAlign: 'center', fontSize: 12, color: '#94a3b8', marginTop: 12, fontWeight: '600' },
 
-  // Edit sheet
+  // Edit sheet — anchored near the top so the suggestions dropdown (which opens
+  // below the input) stays visible above the keyboard instead of behind it.
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(15,23,42,0.55)',
-    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 26,
+    justifyContent: 'flex-start', alignItems: 'center',
+    paddingHorizontal: 26, paddingTop: 90,
   },
   modalCard: {
     width: '100%', maxWidth: 380, backgroundColor: '#fff', borderRadius: 22, padding: 20,
@@ -456,10 +444,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1, textTransform: 'uppercase', marginBottom: 14,
   },
 
-  // Rename row: input + inline Save (stays above the keyboard)
-  renameRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // Rename row: autocomplete input + inline Save (stays above the keyboard)
+  renameRow: { flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 10 },
+  renameAutocomplete: { flex: 1 },
   renameInput: {
-    flex: 1, height: 54, borderWidth: 2, borderColor: '#2563eb', borderRadius: 14,
+    height: 54, borderWidth: 2, borderColor: '#2563eb', borderRadius: 14,
     paddingHorizontal: 16, fontSize: 17, fontWeight: '800', color: '#0f172a',
     backgroundColor: '#f8fbff',
   },
