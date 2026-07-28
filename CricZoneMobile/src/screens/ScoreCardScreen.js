@@ -247,6 +247,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [showMatchEndModal, setShowMatchEndModal] = useState(false); // For 2nd innings end confirmation
   const [pendingMatchEnd, setPendingMatchEnd] = useState(null); // Store match end data temporarily
+  // Tie handling: on a tie we offer "keep tie" (group/quick only) or a Super Over.
+  const [showTieModal, setShowTieModal] = useState(false);
+  const [showSuperOverConfig, setShowSuperOverConfig] = useState(false);
+  const [soOvers, setSoOvers] = useState(1);
+  const [soBalls, setSoBalls] = useState(6);
   // When a ball ENDS the innings/match, we defer building the final snapshot to
   // an effect that runs AFTER React commits that ball's state updates — so the
   // last ball's runs/wickets/batsman/bowler figures are included. Building the
@@ -2384,9 +2389,36 @@ const ScoreCardScreen = ({ navigation, route }) => {
       matchSummary: { winner, margin, playerOfMatch: '', netRunRates: {} },
     };
 
-    // Store the data and show confirmation modal
+    // Store the data. A tie opens the tie chooser (keep-tie / super over) instead
+    // of the normal confirmation modal.
     setPendingMatchEnd(matchEndData);
-    setShowMatchEndModal(true);
+    if (result === 'Match Tied') {
+      setShowTieModal(true);
+    } else {
+      setShowMatchEndModal(true);
+    }
+  };
+
+  // Is this a knockout/playoff match (must be decided — no keeping a tie)?
+  const isKnockoutMatch = () => {
+    const st = matchData?.stage;
+    return st === 'knockout' || (matchData?.round != null && st !== 'group');
+  };
+
+  // Owner chose "Play Super Over" — collect overs/balls, then launch the scorer.
+  const startSuperOver = () => {
+    setShowSuperOverConfig(false);
+    setShowTieModal(false);
+    // The side that bowled the 2nd innings (i.e. batted 1st) bats first.
+    const battingOrder = [getBowlingTeam(), getBattingTeam()];
+    navigation.navigate('SuperOver', {
+      matchId: matchData?._id,
+      battingOrder,
+      overs: soOvers,
+      ballsPerOver: soBalls,
+      mainMatchData: pendingMatchEnd,
+      tournamentName: tournamentData?.tournamentName || matchData?.tournamentName,
+    });
   };
 
   // Confirm and finalize match end
@@ -4302,6 +4334,73 @@ const ScoreCardScreen = ({ navigation, route }) => {
         </View>
       </Modal>
 
+      {/* Tie chooser: keep tie (group/quick only) or play a Super Over */}
+      <Modal visible={showTieModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={tieStyles.card}>
+            <Text style={tieStyles.badge}>MATCH TIED</Text>
+            <Text style={tieStyles.score}>
+              {getBattingTeam()} {match.runs}/{match.wickets} · scores level
+            </Text>
+            <Text style={tieStyles.hint}>
+              {isKnockoutMatch()
+                ? 'A knockout match must have a winner. Play a Super Over to decide it.'
+                : 'How do you want to resolve this tie?'}
+            </Text>
+
+            <TouchableOpacity
+              style={tieStyles.superBtn}
+              onPress={() => { setShowTieModal(false); setShowSuperOverConfig(true); }}
+              activeOpacity={0.85}
+            >
+              <Text style={tieStyles.superIcon}>⚡</Text>
+              <Text style={tieStyles.superText}>Play Super Over</Text>
+            </TouchableOpacity>
+
+            {!isKnockoutMatch() ? (
+              <TouchableOpacity style={tieStyles.keepBtn} onPress={confirmMatchEnd} activeOpacity={0.8}>
+                <Text style={tieStyles.keepText}>Keep as a Tie</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Super Over configuration: overs + balls (default 1 over, 6 balls) */}
+      <Modal visible={showSuperOverConfig} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={tieStyles.card}>
+            <Text style={tieStyles.title}>Super Over</Text>
+            <Text style={tieStyles.hint}>Choose the length of the super over.</Text>
+
+            <View style={tieStyles.stepRow}>
+              <Text style={tieStyles.stepLabel}>Overs</Text>
+              <View style={tieStyles.stepper}>
+                <TouchableOpacity style={tieStyles.stepBtn} onPress={() => setSoOvers((v) => Math.max(1, v - 1))}><Text style={tieStyles.stepBtnText}>−</Text></TouchableOpacity>
+                <Text style={tieStyles.stepValue}>{soOvers}</Text>
+                <TouchableOpacity style={tieStyles.stepBtn} onPress={() => setSoOvers((v) => Math.min(5, v + 1))}><Text style={tieStyles.stepBtnText}>+</Text></TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={tieStyles.stepRow}>
+              <Text style={tieStyles.stepLabel}>Balls / over</Text>
+              <View style={tieStyles.stepper}>
+                <TouchableOpacity style={tieStyles.stepBtn} onPress={() => setSoBalls((v) => Math.max(1, v - 1))}><Text style={tieStyles.stepBtnText}>−</Text></TouchableOpacity>
+                <Text style={tieStyles.stepValue}>{soBalls}</Text>
+                <TouchableOpacity style={tieStyles.stepBtn} onPress={() => setSoBalls((v) => Math.min(12, v + 1))}><Text style={tieStyles.stepBtnText}>+</Text></TouchableOpacity>
+              </View>
+            </View>
+
+            <TouchableOpacity style={tieStyles.superBtn} onPress={startSuperOver} activeOpacity={0.85}>
+              <Text style={tieStyles.superText}>Start Super Over</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={tieStyles.keepBtn} onPress={() => { setShowSuperOverConfig(false); setShowTieModal(true); }} activeOpacity={0.8}>
+              <Text style={tieStyles.keepText}>Back</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
 
       {/* Wide Ball Modal */}
       <Modal visible={showWideModal} transparent animationType="fade">
@@ -5389,6 +5488,41 @@ const ScoreCardScreen = ({ navigation, route }) => {
 // Styles for the redesigned Innings Complete / Match End modals.
 // Green primary action (forward), neutral continue, red destructive undo —
 // so the user can read it at a glance without thinking.
+const tieStyles = StyleSheet.create({
+  card: {
+    backgroundColor: '#fff', borderRadius: 22, padding: 22, width: '100%', maxWidth: 380,
+    shadowColor: '#0f172a', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.28, shadowRadius: 28, elevation: 14,
+  },
+  badge: {
+    alignSelf: 'center', backgroundColor: '#fef3c7', color: '#b45309',
+    fontSize: 12, fontWeight: '900', letterSpacing: 1, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 5, overflow: 'hidden',
+  },
+  title: { fontSize: 20, fontWeight: '900', color: '#0f172a', textAlign: 'center', marginBottom: 6 },
+  score: { fontSize: 15, fontWeight: '800', color: '#1e293b', textAlign: 'center', marginTop: 12 },
+  hint: { fontSize: 13, fontWeight: '600', color: '#64748b', textAlign: 'center', marginTop: 8, marginBottom: 18, lineHeight: 19 },
+
+  superBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 54, borderRadius: 14, backgroundColor: '#ea580c', marginBottom: 10,
+    shadowColor: '#c2410c', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4,
+  },
+  superIcon: { fontSize: 18 },
+  superText: { fontSize: 16, fontWeight: '900', color: '#fff', letterSpacing: 0.3 },
+  keepBtn: { height: 48, borderRadius: 14, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center' },
+  keepText: { fontSize: 15, fontWeight: '800', color: '#475569' },
+
+  stepRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  stepLabel: { fontSize: 15, fontWeight: '800', color: '#1e293b' },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  stepBtn: {
+    width: 40, height: 40, borderRadius: 12, backgroundColor: '#eff6ff',
+    borderWidth: 1.5, borderColor: '#bfdbfe', justifyContent: 'center', alignItems: 'center',
+  },
+  stepBtnText: { fontSize: 22, fontWeight: '900', color: '#2563eb', marginTop: -2 },
+  stepValue: { fontSize: 20, fontWeight: '900', color: '#0f172a', minWidth: 28, textAlign: 'center', fontVariant: ['tabular-nums'] },
+});
+
 const inningsModalStyles = StyleSheet.create({
   card: {
     backgroundColor: '#ffffff',

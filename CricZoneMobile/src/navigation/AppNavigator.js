@@ -10,6 +10,7 @@ import { colors } from '../utils/theme';
 import AuthScreen from '../screens/AuthScreen';
 import MatchSetupScreen from '../screens/MatchSetupScreen';
 import ScoreCardScreen from '../screens/ScoreCardScreen';
+import SuperOverScreen from '../screens/SuperOverScreen';
 import FullScorecardScreen from '../screens/FullScorecardScreen';
 import TournamentListScreen from '../screens/TournamentListScreen';
 import TournamentFormatListScreen from '../screens/TournamentFormatListScreen';
@@ -53,6 +54,7 @@ const AppNavigator = () => {
             <Stack.Screen name="MainTabs" component={BottomTabNavigator} />
             <Stack.Screen name="MatchSetup" component={MatchSetupScreen} />
             <Stack.Screen name="ScoreCard" component={ScoreCardScreen} />
+            <Stack.Screen name="SuperOver" component={SuperOverScreen} />
             <Stack.Screen name="FullScorecard" component={FullScorecardScreen} />
             <Stack.Screen name="TournamentList" component={TournamentListScreen} />
             <Stack.Screen name="TournamentFormatList" component={TournamentFormatListScreen} />
@@ -71,6 +73,7 @@ const AppNavigator = () => {
             <Stack.Screen name="Auth" component={AuthScreen} />
             <Stack.Screen name="MatchSetup" component={MatchSetupScreen} />
             <Stack.Screen name="ScoreCard" component={ScoreCardScreen} />
+            <Stack.Screen name="SuperOver" component={SuperOverScreen} />
             <Stack.Screen name="FullScorecard" component={FullScorecardScreen} />
           </>
         )}

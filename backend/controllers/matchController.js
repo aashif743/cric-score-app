@@ -533,7 +533,7 @@ exports.endMatch = async (req, res) => {
     });
 
     const { id } = req.params;
-    const { innings1, innings2, result, matchSummary, teamA, teamB } = req.body;
+    const { innings1, innings2, result, matchSummary, teamA, teamB, superOver } = req.body;
 
     // Validate required data
     if (!innings1 || !result) {
@@ -614,6 +614,7 @@ exports.endMatch = async (req, res) => {
       netRunRates: matchSummary?.netRunRates || {}
     };
     match.liveState = null;
+    if (superOver) match.superOver = superOver;
 
     // Persist team names if provided
     if (teamA) {

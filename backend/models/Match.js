@@ -279,6 +279,13 @@ const MatchSchema = new mongoose.Schema({
     margin: String,
     netRunRates: mongoose.Schema.Types.Mixed
   },
+  // Super Over tie-breaker result (when a tied match is decided by a super over).
+  // Stored for display; the decided winner is also written to matchSummary.winner
+  // so knockout advancement and standings work unchanged.
+  superOver: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
   liveState: {
     type: mongoose.Schema.Types.Mixed,
     default: null
