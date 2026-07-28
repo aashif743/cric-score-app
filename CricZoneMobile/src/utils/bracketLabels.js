@@ -9,11 +9,21 @@ export const ordinal = (n) => {
 };
 
 // "A1" -> "Group A 1st", "B2" -> "Group B 2nd". Returns null if not a group src.
-export const groupSourceLabel = (src) => {
+// short=true gives a compact form ("A 1st") for tight bracket nodes.
+export const groupSourceLabel = (src, short = false) => {
   if (!src || typeof src !== 'string') return null;
   const m = /^([A-Z])(\d+)$/.exec(src.trim());
   if (!m) return null;
-  return `Group ${m[1]} ${ordinal(parseInt(m[2], 10))}`;
+  const pos = ordinal(parseInt(m[2], 10));
+  return short ? `${m[1]} ${pos}` : `Group ${m[1]} ${pos}`;
+};
+
+// Compact match label used in tight nodes: "Qualifier 1"->"Q1", "Eliminator"->
+// "Elim", "Qualifier 2"->"Q2", "Final"->"Final", "Semifinal"->"SF".
+const abbrevMatchLabel = (label) => {
+  if (!label) return null;
+  const map = { 'Qualifier 1': 'Q1', 'Qualifier 2': 'Q2', 'Eliminator': 'Elim', 'Final': 'Final', 'Semifinal': 'SF' };
+  return map[label] || label;
 };
 
 // Number knockout matches in play order (round asc, then slot asc) → 1..N, so a
@@ -34,13 +44,14 @@ export const knockoutGameNumbers = (koMatches = []) => {
 //   slot        'A' | 'B'
 //   koMatches   all knockout-stage matches of the tournament
 //   gameNoMap   result of knockoutGameNumbers(koMatches) (optional)
-export const slotSourceLabel = (match, slot, koMatches = [], gameNoMap = null) => {
+export const slotSourceLabel = (match, slot, koMatches = [], gameNoMap = null, opts = {}) => {
   if (!match) return 'TBD';
+  const short = !!opts.short;
   const gameNo = gameNoMap || knockoutGameNumbers(koMatches);
 
-  // 1) League group source ("A1" → "Group A 1st").
+  // 1) League group source ("A1" → "Group A 1st" / short "A 1st").
   const src = slot === 'A' ? match.liveState?.sourceA : match.liveState?.sourceB;
-  const g = groupSourceLabel(src);
+  const g = groupSourceLabel(src, short);
   if (g) return g;
 
   // 2) A match whose WINNER advances into this slot.
@@ -48,6 +59,7 @@ export const slotSourceLabel = (match, slot, koMatches = [], gameNoMap = null) =
     (m) => String(m.nextMatchId) === String(match._id) && m.nextMatchSlot === slot,
   );
   if (winFeeder) {
+    if (short) return `${abbrevMatchLabel(winFeeder.matchLabel) || `M${gameNo[String(winFeeder._id)] ?? '?'}`} Winner`;
     const lbl = winFeeder.matchLabel || `Match ${gameNo[String(winFeeder._id)] ?? '?'}`;
     return `Winner of ${lbl}`;
   }
@@ -57,6 +69,7 @@ export const slotSourceLabel = (match, slot, koMatches = [], gameNoMap = null) =
     (m) => String(m.loserNextMatchId) === String(match._id) && m.loserNextMatchSlot === slot,
   );
   if (loseFeeder) {
+    if (short) return `${abbrevMatchLabel(loseFeeder.matchLabel) || `M${gameNo[String(loseFeeder._id)] ?? '?'}`} Loser`;
     const lbl = loseFeeder.matchLabel || `Match ${gameNo[String(loseFeeder._id)] ?? '?'}`;
     return `Loser of ${lbl}`;
   }

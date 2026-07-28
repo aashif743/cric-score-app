@@ -80,7 +80,7 @@ const QualifierBracket = ({ matches = [], onStart, isOwner, onEditSlot }) => {
   const final = byLabel('Final');
 
   const gameNos = knockoutGameNumbers(matches);
-  const lbl = (m, slot) => slotSourceLabel(m, slot, matches, gameNos);
+  const lbl = (m, slot) => slotSourceLabel(m, slot, matches, gameNos, { short: true });
   // Owner can edit a slot while that match hasn't started.
   const editFn = (m, slot) =>
     (isOwner && onEditSlot && m && m.status === 'scheduled') ? () => onEditSlot(m, slot) : undefined;
