@@ -247,6 +247,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [showMatchEndModal, setShowMatchEndModal] = useState(false); // For 2nd innings end confirmation
   const [pendingMatchEnd, setPendingMatchEnd] = useState(null); // Store match end data temporarily
+  // When a ball ENDS the innings/match, we defer building the final snapshot to
+  // an effect that runs AFTER React commits that ball's state updates — so the
+  // last ball's runs/wickets/batsman/bowler figures are included. Building the
+  // snapshot synchronously (as before) read stale pre-ball state and dropped
+  // the match-ending ball from the scorecard, stats and public live score.
+  const [endRequest, setEndRequest] = useState(null); // { kind:'innings'|'match', result?, runs, wickets, balls }
   const [showWideModal, setShowWideModal] = useState(false);
   const [showNoBallModal, setShowNoBallModal] = useState(false);
   const [showByeModal, setShowByeModal] = useState(false);
@@ -2092,46 +2098,58 @@ const ScoreCardScreen = ({ navigation, route }) => {
       matchSettingsTotalOvers: matchSettings?.totalOvers,
     });
 
-    // Build current data snapshot with pending updates
-    const buildMatchSnapshot = () => {
-      // Calculate overs from balls
-      const completedOvers = Math.floor(balls / settings.ballsPerOver);
-      const ballsInCurrentOver = balls % settings.ballsPerOver;
-      const oversString = `${completedOvers}.${ballsInCurrentOver}`;
+    // Defer the actual end handling to the effect below so the snapshot is built
+    // from state that INCLUDES this last ball (React hasn't committed the ball's
+    // setState calls yet at this synchronous point). We only record WHAT to do;
+    // the snapshot is built after commit.
+    if (endRequest) return; // already pending — don't double-trigger
 
-      // Apply pending bowler update to allBowlers
-      let updatedBowlers = allBowlers.map(b => ({ ...b }));
-      if (pendingBowlerUpdate) {
-        updatedBowlers = updatedBowlers.map(b =>
-          b.id === pendingBowlerUpdate.id ? { ...pendingBowlerUpdate } : b
-        );
+    // First innings
+    if (match.innings === 1) {
+      if (balls >= maxBalls || wickets >= settings.playersPerTeam - 1) {
+        setEndRequest({ kind: 'innings', runs, wickets, balls });
       }
-
-      // Apply pending batsman update to allBatsmen
-      let updatedBatsmen = allBatsmen.map(b => ({ ...b }));
-      if (pendingBatsmanUpdate) {
-        updatedBatsmen = updatedBatsmen.map(b =>
-          b.id === pendingBatsmanUpdate.id ? { ...pendingBatsmanUpdate } : b
-        );
+    } else {
+      // Second innings - chasing
+      if (runs >= match.target) {
+        setEndRequest({
+          kind: 'match',
+          result: `${getBattingTeam()} won by ${settings.playersPerTeam - 1 - wickets} wickets`,
+          runs, wickets, balls,
+        });
+      } else if (balls >= maxBalls || wickets >= settings.playersPerTeam - 1) {
+        const result = runs === match.target - 1
+          ? 'Match Tied'
+          : `${getBowlingTeam()} won by ${match.target - 1 - runs} runs`;
+        setEndRequest({ kind: 'match', result, runs, wickets, balls });
       }
+    }
+    } catch (error) {
+      console.error('Error in checkMatchEndConditions:', error);
+    }
+  };
 
-      // overHistory may be missing the just-completed over because
-      // setOverHistory hasn't flushed yet. Pull it from the ref if needed.
-      const liveOverHistory = overHistory.map(o => ({ ...o, balls: [...o.balls] }));
-      const pendingOver = lastCompletedOverRef.current;
-      if (
-        pendingOver &&
-        !liveOverHistory.some(o => o.overNumber === pendingOver.overNumber && o.bowlerName === pendingOver.bowlerName)
-      ) {
-        liveOverHistory.push({ ...pendingOver, balls: [...pendingOver.balls] });
-      }
+  // Build the final innings snapshot from the CURRENT (committed) state. Called
+  // from the deferred-end effect, by which point the last ball's updates to
+  // batsmen/bowlers/extras/overs are all in state.
+  const buildEndSnapshot = (runs, wickets, balls) => {
+    const completedOvers = Math.floor(balls / settings.ballsPerOver);
+    const ballsInCurrentOver = balls % settings.ballsPerOver;
+    const oversString = `${completedOvers}.${ballsInCurrentOver}`;
 
-      // If the match ended mid-over (chase completed before the over rolled,
-      // all-out before 6 legal balls, etc.) the in-progress over has no entry
-      // in `overHistory`. Reconstruct it from the partial-over mirror.
-      const partial = partialOverRef.current;
-      if (partial && partial.balls.length > 0) {
-        const partialOverNumber = Math.floor(balls / settings.ballsPerOver) + 1;
+    const liveOverHistory = overHistory.map(o => ({ ...o, balls: [...o.balls] }));
+    const pendingOver = lastCompletedOverRef.current;
+    if (
+      pendingOver &&
+      !liveOverHistory.some(o => o.overNumber === pendingOver.overNumber && o.bowlerName === pendingOver.bowlerName)
+    ) {
+      liveOverHistory.push({ ...pendingOver, balls: [...pendingOver.balls] });
+    }
+    // Match ended mid-over → reconstruct the in-progress over from the mirror.
+    const partial = partialOverRef.current;
+    if (partial && partial.balls.length > 0) {
+      const partialOverNumber = Math.floor(balls / settings.ballsPerOver) + 1;
+      if (!liveOverHistory.some(o => o.overNumber === partialOverNumber && o.bowlerName === currentBowler.name)) {
         liveOverHistory.push({
           overNumber: partialOverNumber,
           bowlerName: currentBowler.name,
@@ -2140,47 +2158,35 @@ const ScoreCardScreen = ({ navigation, route }) => {
           wickets: partial.wickets,
         });
       }
+    }
 
-      return {
-        runs,
-        wickets,
-        balls,
-        overs: oversString,
-        batting: updatedBatsmen,
-        bowling: updatedBowlers,
-        extras: { ...extras },
-        fallOfWickets: fallOfWickets.map(f => ({ ...f })),
-        overHistory: liveOverHistory,
-      };
+    return {
+      runs,
+      wickets,
+      balls,
+      overs: oversString,
+      batting: allBatsmen.map(b => ({ ...b })),
+      bowling: allBowlers.map(b => ({ ...b })),
+      extras: { ...extras },
+      fallOfWickets: fallOfWickets.map(f => ({ ...f })),
+      overHistory: liveOverHistory,
     };
-
-    // First innings
-    if (match.innings === 1) {
-      if (balls >= maxBalls || wickets >= settings.playersPerTeam - 1) {
-        handleEndInnings(buildMatchSnapshot());
-      }
-    } else {
-      // Second innings - chasing
-      // Target is runs needed to win (first innings score + 1)
-      // Team wins when they reach or exceed the target
-      if (runs >= match.target) {
-        // Team chasing wins
-        handleMatchEnd(`${getBattingTeam()} won by ${settings.playersPerTeam - 1 - wickets} wickets`, buildMatchSnapshot());
-      } else if (balls >= maxBalls || wickets >= settings.playersPerTeam - 1) {
-        // Innings over but target not reached
-        if (runs === match.target - 1) {
-          // Scores are level - it's a tie
-          handleMatchEnd('Match Tied', buildMatchSnapshot());
-        } else {
-          // Team batting first wins
-          handleMatchEnd(`${getBowlingTeam()} won by ${match.target - 1 - runs} runs`, buildMatchSnapshot());
-        }
-      }
-    }
-    } catch (error) {
-      console.error('Error in checkMatchEndConditions:', error);
-    }
   };
+
+  // Runs after the match-ending ball's state has committed. Builds the snapshot
+  // from fresh state (so the last ball is included) and fires the end handler.
+  useEffect(() => {
+    if (!endRequest) return;
+    const req = endRequest;
+    const snap = buildEndSnapshot(req.runs, req.wickets, req.balls);
+    setEndRequest(null);
+    if (req.kind === 'innings') {
+      handleEndInnings(snap);
+    } else {
+      handleMatchEnd(req.result, snap);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endRequest, allBatsmen, allBowlers, extras, fallOfWickets, overHistory, currentBowler]);
 
   // Handle end of innings
   const handleEndInnings = (matchSnapshot = null) => {
