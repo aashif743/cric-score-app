@@ -2423,33 +2423,49 @@ const ScoreCardScreen = ({ navigation, route }) => {
     });
   };
 
+  // Persist the completed match to the server. On failure (e.g. flaky network)
+  // we ALERT the user with a Retry instead of failing silently — otherwise the
+  // result looks saved locally but the tournament fixture stays unfinished
+  // ("Continue, no scores"), which is unacceptable for a real tournament.
+  const saveEndToServer = (endData, matchId) => {
+    if (!(user?.token && matchId && !String(matchId).startsWith('guest_'))) return;
+    matchService.endMatch(matchId, endData, user.token)
+      .then(() => { try { emitSocketUpdate(); } catch (_) {} })
+      .catch((err) => {
+        console.error('End-match save failed:', err);
+        Alert.alert(
+          'Result not saved',
+          'The match result could not be saved to the server. Check your connection and tap Retry — otherwise the match may still show as unfinished in the tournament.',
+          [
+            { text: 'Retry', onPress: () => saveEndToServer(endData, matchId) },
+            { text: 'Later', style: 'cancel' },
+          ],
+          { cancelable: false },
+        );
+      });
+  };
+
   // Confirm and finalize match end
   const confirmMatchEnd = async () => {
     if (!pendingMatchEnd) return;
 
-    // Navigate immediately for instant feedback
+    // Cancel any pending in-progress live-sync so it can't fire AFTER the
+    // completion and flip the match back to in_progress.
+    if (liveSyncTimeoutRef.current) {
+      clearTimeout(liveSyncTimeoutRef.current);
+      liveSyncTimeoutRef.current = null;
+    }
+
+    // Snapshot the id + payload before navigating away (the component unmounts).
+    const endData = pendingMatchEnd;
+    const matchId = matchData?._id;
+
+    // Navigate immediately for instant feedback…
     setShowMatchEndModal(false);
     navigation.replace('FullScorecard', { matchData: { ...matchData, ...pendingMatchEnd } });
 
-    // Save to server in the background (non-blocking)
-    try {
-      if (liveSyncTimeoutRef.current) {
-        clearTimeout(liveSyncTimeoutRef.current);
-        liveSyncTimeoutRef.current = null;
-      }
-      if (user?.token && matchData?._id && !matchData._id.startsWith('guest_')) {
-        matchService.endMatch(matchData._id, pendingMatchEnd, user.token)
-          .then(() => {
-            console.log('Match saved to server in background');
-            emitSocketUpdate();
-          })
-          .catch((err) => {
-            console.error('Background save failed:', err);
-          });
-      }
-    } catch (error) {
-      console.error('Failed to initiate background save:', error);
-    }
+    // …then persist, with a retry prompt on failure (never silent).
+    saveEndToServer(endData, matchId);
   };
 
   // Save current match progress (for leaving mid-match)

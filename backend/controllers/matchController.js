@@ -801,6 +801,9 @@ const computeGroupStandings = (matches, teamNames) => {
 // but operates on stage='knockout' league matches looked up by source label.
 const fillKnockoutSlot = async (knockoutMatch, slotKey /* 'A' | 'B' */, teamName) => {
   if (!teamName) return;
+  // Never touch a match that has already started/finished — filling a slot
+  // rebuilds the innings roster, which would wipe a played match's scores.
+  if (knockoutMatch.status !== 'scheduled') return;
   const sideKey = slotKey === 'A' ? 'teamA' : 'teamB';
   if (knockoutMatch[sideKey]?.name && knockoutMatch[sideKey].name !== 'TBD') return;
   knockoutMatch[sideKey] = { name: teamName, shortName: teamName.substring(0, 3).toUpperCase() };
