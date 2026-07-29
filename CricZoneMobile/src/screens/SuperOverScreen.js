@@ -3,16 +3,16 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { CommonActions } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
 import GradientHeader from '../components/GradientHeader';
 
 // Super Over rules used here (standard, simplified):
 //  • Each team faces `overs × ballsPerOver` legal balls.
-//  • A team is all out after 2 wickets.
+//  • A team is all out after `maxWickets` wickets (default 2).
 //  • Wide / No-ball add 1 run and are re-bowled (don't use a ball).
 //  • The side batting second wins the instant it passes the first side's score.
-const MAX_WICKETS = 2;
 
 const emptyInnings = (team) => ({ team, runs: 0, wickets: 0, balls: 0, log: [] });
 
@@ -23,10 +23,12 @@ const SuperOverScreen = ({ navigation, route }) => {
     battingOrder = [],          // [firstBatTeam, secondBatTeam]
     overs = 1,
     ballsPerOver = 6,
+    maxWickets = 2,
     mainMatchData = {},          // the tied match payload to finalise with
     tournamentName,
   } = route.params || {};
 
+  const MAX_WICKETS = Math.max(1, maxWickets);
   const maxBalls = Math.max(1, overs * ballsPerOver);
   const [first, second] = battingOrder;
 
@@ -119,7 +121,18 @@ const SuperOverScreen = ({ navigation, route }) => {
       if (user?.token && matchId && !String(matchId).startsWith('guest_')) {
         await matchService.endMatch(matchId, payload, user.token);
       }
-      navigation.replace('FullScorecard', { matchId, matchData: { _id: matchId, ...payload } });
+      // Rebuild the stack so the match-ended scorecard sits directly on top of
+      // wherever the match was launched from (the tournament schedule / home).
+      // This removes the now-finished ScoreCard + this SuperOver + any MatchSetup
+      // so the back button returns to the tournament — and the stale scorer can't
+      // re-save the match as in-progress and undo the completion.
+      navigation.dispatch((state) => {
+        const kept = state.routes.filter(
+          (r) => !['SuperOver', 'ScoreCard', 'MatchSetup'].includes(r.name),
+        );
+        kept.push({ name: 'FullScorecard', params: { matchId, matchData: { _id: matchId, ...payload } } });
+        return CommonActions.reset({ ...state, routes: kept, index: kept.length - 1 });
+      });
     } catch (err) {
       setSaving(false);
       Alert.alert('Could not save', err?.error || 'Please try again.');

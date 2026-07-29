@@ -252,6 +252,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [showSuperOverConfig, setShowSuperOverConfig] = useState(false);
   const [soOvers, setSoOvers] = useState(1);
   const [soBalls, setSoBalls] = useState(6);
+  const [soWickets, setSoWickets] = useState(2);
   // When a ball ENDS the innings/match, we defer building the final snapshot to
   // an effect that runs AFTER React commits that ball's state updates — so the
   // last ball's runs/wickets/batsman/bowler figures are included. Building the
@@ -2416,6 +2417,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       battingOrder,
       overs: soOvers,
       ballsPerOver: soBalls,
+      maxWickets: soWickets,
       mainMatchData: pendingMatchEnd,
       tournamentName: matchData?.tournamentName || matchSettings?.tournamentName || '',
     });
@@ -4388,6 +4390,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
                 <TouchableOpacity style={tieStyles.stepBtn} onPress={() => setSoBalls((v) => Math.max(1, v - 1))}><Text style={tieStyles.stepBtnText}>−</Text></TouchableOpacity>
                 <Text style={tieStyles.stepValue}>{soBalls}</Text>
                 <TouchableOpacity style={tieStyles.stepBtn} onPress={() => setSoBalls((v) => Math.min(12, v + 1))}><Text style={tieStyles.stepBtnText}>+</Text></TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={tieStyles.stepRow}>
+              <Text style={tieStyles.stepLabel}>Wickets</Text>
+              <View style={tieStyles.stepper}>
+                <TouchableOpacity style={tieStyles.stepBtn} onPress={() => setSoWickets((v) => Math.max(1, v - 1))}><Text style={tieStyles.stepBtnText}>−</Text></TouchableOpacity>
+                <Text style={tieStyles.stepValue}>{soWickets}</Text>
+                <TouchableOpacity style={tieStyles.stepBtn} onPress={() => setSoWickets((v) => Math.min(10, v + 1))}><Text style={tieStyles.stepBtnText}>+</Text></TouchableOpacity>
               </View>
             </View>
 
