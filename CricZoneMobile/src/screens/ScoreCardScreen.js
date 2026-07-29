@@ -2417,7 +2417,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       overs: soOvers,
       ballsPerOver: soBalls,
       mainMatchData: pendingMatchEnd,
-      tournamentName: tournamentData?.tournamentName || matchData?.tournamentName,
+      tournamentName: matchData?.tournamentName || matchSettings?.tournamentName || '',
     });
   };
 
