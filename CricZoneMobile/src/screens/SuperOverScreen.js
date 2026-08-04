@@ -1,6 +1,7 @@
 import React, { useState, useContext, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
+  Modal, TouchableWithoutFeedback,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CommonActions } from '@react-navigation/native';
@@ -30,18 +31,33 @@ const SuperOverScreen = ({ navigation, route }) => {
 
   const MAX_WICKETS = Math.max(1, maxWickets);
   const maxBalls = Math.max(1, overs * ballsPerOver);
-  const [first, second] = battingOrder;
+
+  // Which of the two teams bats first — editable until the first ball is bowled.
+  const [battingFirstIdx, setBattingFirstIdx] = useState(0);
+  const firstBat = battingOrder[battingFirstIdx];
+  const secondBat = battingOrder[1 - battingFirstIdx];
 
   // innings[0] = first team's super over, innings[1] = second team's chase.
-  const [innings, setInnings] = useState([emptyInnings(first), emptyInnings(second)]);
+  const [innings, setInnings] = useState([emptyInnings(firstBat), emptyInnings(secondBat)]);
   const [phase, setPhase] = useState(0);     // 0 = first batting, 1 = chase, 2 = decided
   const [history, setHistory] = useState([]); // for undo
   const [saving, setSaving] = useState(false);
   const [round, setRound] = useState(1);      // super-over number (re-tie → next round)
+  const [extraModal, setExtraModal] = useState(null); // 'Wd' | 'Nb' | null
+  const [wicketModal, setWicketModal] = useState(false);
 
   const cur = innings[phase] || innings[1];
   const target = phase === 1 ? innings[0].runs + 1 : null;
   const ballsLeft = Math.max(0, maxBalls - (cur?.balls || 0));
+  // Batting order can only be changed before the very first ball.
+  const canChooseOrder = phase === 0 && innings[0].balls === 0 && innings[0].log.length === 0 && round === 1;
+
+  const chooseFirst = (idx) => {
+    if (!canChooseOrder || idx === battingFirstIdx) return;
+    setBattingFirstIdx(idx);
+    setInnings([emptyInnings(battingOrder[idx]), emptyInnings(battingOrder[1 - idx])]);
+    setHistory([]);
+  };
 
   const snapshot = () => ({ innings: JSON.parse(JSON.stringify(innings)), phase });
   const pushHistory = () => setHistory((h) => [...h.slice(-40), snapshot()]);
@@ -49,6 +65,10 @@ const SuperOverScreen = ({ navigation, route }) => {
   const inningsOver = (inn) => inn.balls >= maxBalls || inn.wickets >= MAX_WICKETS;
 
   // Apply a scoring event to the current innings, then check for transitions.
+  //  run     : { type:'run', runs }                 → runs, uses a ball
+  //  wicket  : { type:'wicket' }                     → wicket, uses a ball
+  //  runout  : { type:'runout', runs }               → runs completed + wicket, uses a ball
+  //  extra   : { type:'extra', label:'Wd'|'Nb', runs}→ 1 + extra runs, re-bowled (no ball used)
   const applyEvent = (evt) => {
     if (phase === 2 || saving) return;
     pushHistory();
@@ -59,8 +79,12 @@ const SuperOverScreen = ({ navigation, route }) => {
         inn.runs += evt.runs; inn.balls += 1; inn.log.push(String(evt.runs));
       } else if (evt.type === 'wicket') {
         inn.wickets += 1; inn.balls += 1; inn.log.push('W');
+      } else if (evt.type === 'runout') {
+        inn.runs += (evt.runs || 0); inn.wickets += 1; inn.balls += 1;
+        inn.log.push(evt.runs ? `${evt.runs}+W` : 'W');
       } else if (evt.type === 'extra') {
-        inn.runs += 1; inn.log.push(evt.label); // wide / no-ball: +1, no ball used
+        const add = 1 + (evt.runs || 0);
+        inn.runs += add; inn.log.push(evt.runs ? `${evt.label}+${evt.runs}` : evt.label);
       }
 
       // Decide transitions off the freshly-updated innings.
@@ -73,6 +97,8 @@ const SuperOverScreen = ({ navigation, route }) => {
       return next;
     });
   };
+
+  const applyAndClose = (evt) => { applyEvent(evt); setExtraModal(null); setWicketModal(false); };
 
   const undo = () => {
     if (!history.length || saving) return;
@@ -91,7 +117,7 @@ const SuperOverScreen = ({ navigation, route }) => {
   }, [phase, innings]);
 
   const playAnother = () => {
-    setInnings([emptyInnings(first), emptyInnings(second)]);
+    setInnings([emptyInnings(firstBat), emptyInnings(secondBat)]);
     setPhase(0);
     setHistory([]);
     setRound((r) => r + 1);
@@ -175,6 +201,25 @@ const SuperOverScreen = ({ navigation, route }) => {
           })}
         </View>
 
+        {/* Batting order — editable until the first ball */}
+        {canChooseOrder ? (
+          <View style={styles.orderWrap}>
+            <Text style={styles.orderLabel}>Who bats first?</Text>
+            <View style={styles.orderRow}>
+              {battingOrder.map((t, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={[styles.orderChip, battingFirstIdx === i && styles.orderChipActive]}
+                  onPress={() => chooseFirst(i)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.orderChipText, battingFirstIdx === i && styles.orderChipTextActive]} numberOfLines={1}>{t}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         {/* Situation banner */}
         {phase === 2 ? (
           result?.tie ? (
@@ -213,15 +258,16 @@ const SuperOverScreen = ({ navigation, route }) => {
             <View style={styles.padRow}>
               <RunBtn label="4" style={styles.btnBoundary} textStyle={styles.btnBoundaryText} onPress={() => applyEvent({ type: 'run', runs: 4 })} />
               <RunBtn label="6" style={styles.btnBoundary} textStyle={styles.btnBoundaryText} onPress={() => applyEvent({ type: 'run', runs: 6 })} />
-              <RunBtn label="Wd" style={styles.btnExtra} textStyle={styles.btnExtraText} onPress={() => applyEvent({ type: 'extra', label: 'Wd' })} />
-              <RunBtn label="Nb" style={styles.btnExtra} textStyle={styles.btnExtraText} onPress={() => applyEvent({ type: 'extra', label: 'Nb' })} />
+              <RunBtn label="Wd" style={styles.btnExtra} textStyle={styles.btnExtraText} onPress={() => setExtraModal('Wd')} />
+              <RunBtn label="Nb" style={styles.btnExtra} textStyle={styles.btnExtraText} onPress={() => setExtraModal('Nb')} />
             </View>
             <View style={styles.padRow}>
-              <RunBtn label="WICKET" style={[styles.btnWide, styles.btnWicket]} textStyle={styles.btnWicketText} onPress={() => applyEvent({ type: 'wicket' })} />
+              <RunBtn label="WICKET" style={[styles.btnWide, styles.btnWicket]} textStyle={styles.btnWicketText} onPress={() => setWicketModal(true)} />
               <TouchableOpacity style={[styles.btn, styles.btnWide, styles.btnUndo]} onPress={undo} activeOpacity={0.8} disabled={!history.length || saving}>
                 <Text style={[styles.btnText, styles.btnUndoText, !history.length && styles.btnUndoDisabled]}>Undo</Text>
               </TouchableOpacity>
             </View>
+            <Text style={styles.padHint}>Wd / Nb open a runs option · Wicket has run-out</Text>
           </View>
         ) : (
           <View style={styles.finishArea}>
@@ -251,6 +297,57 @@ const SuperOverScreen = ({ navigation, route }) => {
           </View>
         ) : null}
       </ScrollView>
+
+      {/* Wide / No-ball: add the penalty run + any extra runs, re-bowled */}
+      <Modal visible={!!extraModal} transparent animationType="fade" onRequestClose={() => setExtraModal(null)}>
+        <TouchableWithoutFeedback onPress={() => setExtraModal(null)}>
+          <View style={styles.mOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.mCard}>
+                <Text style={styles.mTitle}>{extraModal === 'Wd' ? 'Wide ball' : 'No ball'}</Text>
+                <Text style={styles.mHint}>
+                  +1 {extraModal === 'Wd' ? 'wide' : 'no-ball'} run · add any runs {extraModal === 'Wd' ? 'run (byes)' : 'off the bat'}
+                </Text>
+                <View style={styles.mGrid}>
+                  {[0, 1, 2, 3, 4, extraModal === 'Nb' ? 6 : 5].map((r) => (
+                    <TouchableOpacity key={r} style={styles.mBtn} onPress={() => applyAndClose({ type: 'extra', label: extraModal, runs: r })} activeOpacity={0.8}>
+                      <Text style={styles.mBtnText}>+{1 + r}</Text>
+                      <Text style={styles.mBtnSub}>{r === 0 ? 'just extra' : `${r} run${r === 1 ? '' : 's'}`}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity style={styles.mCancel} onPress={() => setExtraModal(null)} activeOpacity={0.7}><Text style={styles.mCancelText}>Cancel</Text></TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Wicket: plain out, or a run-out with the runs completed */}
+      <Modal visible={wicketModal} transparent animationType="fade" onRequestClose={() => setWicketModal(false)}>
+        <TouchableWithoutFeedback onPress={() => setWicketModal(false)}>
+          <View style={styles.mOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.mCard}>
+                <Text style={styles.mTitle}>Wicket</Text>
+                <TouchableOpacity style={styles.mOutBtn} onPress={() => applyAndClose({ type: 'wicket' })} activeOpacity={0.85}>
+                  <Text style={styles.mOutText}>Out (0 runs)</Text>
+                </TouchableOpacity>
+                <Text style={styles.mHint}>Run out — runs completed before the wicket:</Text>
+                <View style={styles.mGrid}>
+                  {[0, 1, 2, 3].map((r) => (
+                    <TouchableOpacity key={r} style={styles.mBtn} onPress={() => applyAndClose({ type: 'runout', runs: r })} activeOpacity={0.8}>
+                      <Text style={styles.mBtnText}>{r}</Text>
+                      <Text style={styles.mBtnSub}>run out</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity style={styles.mCancel} onPress={() => setWicketModal(false)} activeOpacity={0.7}><Text style={styles.mCancelText}>Cancel</Text></TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -261,6 +358,43 @@ const styles = StyleSheet.create({
 
   roundChip: { alignSelf: 'center', backgroundColor: '#fef3c7', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 5, marginBottom: 12 },
   roundChipText: { fontSize: 12, fontWeight: '900', color: '#b45309', letterSpacing: 0.5 },
+
+  // Batting-order selector
+  orderWrap: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 14, marginBottom: 14,
+    borderWidth: 1, borderColor: '#eef2f7',
+  },
+  orderLabel: { fontSize: 12, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10, textAlign: 'center' },
+  orderRow: { flexDirection: 'row', gap: 10 },
+  orderChip: {
+    flex: 1, height: 46, borderRadius: 12, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: '#f8fafc', borderWidth: 1.5, borderColor: '#e2e8f0',
+  },
+  orderChipActive: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
+  orderChipText: { fontSize: 14, fontWeight: '800', color: '#64748b' },
+  orderChipTextActive: { color: '#1d4ed8' },
+
+  padHint: { textAlign: 'center', fontSize: 11.5, color: '#94a3b8', marginTop: 4, fontWeight: '600' },
+
+  // Extra / wicket modals
+  mOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 26 },
+  mCard: {
+    width: '100%', maxWidth: 380, backgroundColor: '#fff', borderRadius: 22, padding: 20,
+    shadowColor: '#0f172a', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.28, shadowRadius: 28, elevation: 14,
+  },
+  mTitle: { fontSize: 18, fontWeight: '900', color: '#0f172a', textAlign: 'center', marginBottom: 4 },
+  mHint: { fontSize: 12.5, fontWeight: '600', color: '#64748b', textAlign: 'center', marginTop: 6, marginBottom: 12 },
+  mGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
+  mBtn: {
+    width: 96, height: 60, borderRadius: 14, backgroundColor: '#f8fafc',
+    borderWidth: 1.5, borderColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center',
+  },
+  mBtnText: { fontSize: 20, fontWeight: '900', color: '#1e293b' },
+  mBtnSub: { fontSize: 10, fontWeight: '700', color: '#94a3b8', marginTop: 1 },
+  mOutBtn: { height: 50, borderRadius: 14, backgroundColor: '#fef2f2', borderWidth: 1.5, borderColor: '#fecaca', justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
+  mOutText: { fontSize: 15, fontWeight: '900', color: '#dc2626', letterSpacing: 0.3 },
+  mCancel: { height: 44, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+  mCancelText: { fontSize: 15, fontWeight: '800', color: '#64748b' },
 
   scoreRow: { flexDirection: 'row', gap: 12, marginBottom: 14 },
   scoreCard: {
