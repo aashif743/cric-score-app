@@ -23,6 +23,8 @@ import TournamentStatsView from '../components/TournamentStatsView';
 import QualifierBracket from '../components/QualifierBracket';
 import BracketTeamPicker from '../components/BracketTeamPicker';
 import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
+import { computeGroupStandings } from '../utils/leagueStandings';
+import Icon from '../components/Icon';
 
 // --- Small helpers ---------------------------------------------------------
 
@@ -337,7 +339,7 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
               <Text style={[styles.teamName, winner === teamAName && styles.teamNameWinner, teamAName === 'TBD' && styles.teamNameTBD]} numberOfLines={1}>
                 {labelA}
               </Text>
-              {editA ? <Text style={styles.slotEditIcon}>✎</Text> : null}
+              {editA ? <Icon name="edit" size={13} color="#94a3b8" /> : null}
               {showScores && scores.a ? (
                 <View style={styles.scoreBlock}>
                   <Text style={[styles.scoreRuns, winner === teamAName && styles.scoreRunsWinner]}>
@@ -359,7 +361,7 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
               <Text style={[styles.teamName, winner === teamBName && styles.teamNameWinner, teamBName === 'TBD' && styles.teamNameTBD]} numberOfLines={1}>
                 {labelB}
               </Text>
-              {editB ? <Text style={styles.slotEditIcon}>✎</Text> : null}
+              {editB ? <Icon name="edit" size={13} color="#94a3b8" /> : null}
               {showScores && scores.b ? (
                 <View style={styles.scoreBlock}>
                   <Text style={[styles.scoreRuns, winner === teamBName && styles.scoreRunsWinner]}>
@@ -494,6 +496,35 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
     ? Math.max(...knockoutMatches.map((m) => m.round || 0))
     : 0;
   const koGameNos = useMemo(() => knockoutGameNumbers(knockoutMatches), [knockoutMatches]);
+
+  // Every group's fixtures decided? Only then are the qualifiers known.
+  const allGroupsComplete = useMemo(() => {
+    if (!groups.length) return false;
+    return groups.every((_, gIdx) => {
+      const gm = groupMatches.filter((m) => m.group === groupLetter(gIdx));
+      return gm.length > 0 && gm.every((m) => m.status === 'completed' || m.status === 'abandoned');
+    });
+  }, [groups, groupMatches]);
+
+  // Teams eligible to fill a knockout slot = the ones that qualified from the
+  // groups (top `teamsAdvancePerGroup` of each group's standings). The bracket
+  // picker offers only these, not every team — a side that finished out of the
+  // qualifying places can't appear in the 2nd round. Until every group is
+  // decided the qualifiers aren't known, so we fall back to the full team list
+  // (nothing is locked in yet); likewise for formats without groups.
+  const qualifiedTeams = useMemo(() => {
+    const all = tournament?.teamNames || [];
+    const advance = tournament?.teamsAdvancePerGroup || 0;
+    if (advance <= 0 || !groups.length || !allGroupsComplete) return all;
+    const out = [];
+    groups.forEach((teams, gIdx) => {
+      const gm = groupMatches.filter((m) => m.group === groupLetter(gIdx));
+      computeGroupStandings(gm, teams).slice(0, advance).forEach((r) => {
+        if (r.team && !out.includes(r.team)) out.push(r.team);
+      });
+    });
+    return out.length ? out : all;
+  }, [tournament, groups, groupMatches, allGroupsComplete]);
 
   // Manual bracket-slot editing (owner): { match, slot } while a picker is open.
   const [editSlot, setEditSlot] = useState(null);
@@ -771,7 +802,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
           visible={!!editSlot}
           onClose={() => setEditSlot(null)}
           slotLabel={slotSourceLabel(editSlot.match, editSlot.slot, knockoutMatches, koGameNos)}
-          teams={tournament?.teamNames || []}
+          teams={qualifiedTeams}
           currentName={editSlot.slot === 'A' ? editSlot.match.teamA?.name : editSlot.match.teamB?.name}
           onPick={doSetBracketTeam}
         />

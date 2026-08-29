@@ -7,6 +7,7 @@ import DashboardScreen from '../screens/DashboardScreen';
 import TournamentListScreen from '../screens/TournamentListScreen';
 import PastMatchesScreen from '../screens/PastMatchesScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import Icon from './Icon';
 
 const Tab = createBottomTabNavigator();
 
@@ -132,50 +133,15 @@ const LogoButton = ({ onPress }) => {
 };
 
 // ---------------- Icons ----------------
+// Standard Feather-style glyphs (shared Icon set) so the label-less tab bar
+// reads clearly: Home · Tournaments (trophy) · History (clock) · Profile.
 
 const iconColor = (focused) => (focused ? ACTIVE_COLOR : INACTIVE_COLOR);
 
-const HomeIcon = ({ focused }) => {
-  const c = iconColor(focused);
-  return (
-    <View style={iconStyles.box}>
-      <View style={[iconStyles.homeRoof, { borderBottomColor: c }]} />
-      <View style={[iconStyles.homeBody, { backgroundColor: c }]} />
-    </View>
-  );
-};
-
-const TrophyIcon = ({ focused }) => {
-  const c = iconColor(focused);
-  return (
-    <View style={iconStyles.box}>
-      <View style={[iconStyles.trophyCup, { borderColor: c }]} />
-      <View style={[iconStyles.trophyStem, { backgroundColor: c }]} />
-      <View style={[iconStyles.trophyBase, { backgroundColor: c }]} />
-    </View>
-  );
-};
-
-const HistoryIcon = ({ focused }) => {
-  const c = iconColor(focused);
-  return (
-    <View style={iconStyles.box}>
-      <View style={[iconStyles.clockFace, { borderColor: c }]} />
-      <View style={[iconStyles.clockHandV, { backgroundColor: c }]} />
-      <View style={[iconStyles.clockHandH, { backgroundColor: c }]} />
-    </View>
-  );
-};
-
-const ProfileIcon = ({ focused }) => {
-  const c = iconColor(focused);
-  return (
-    <View style={iconStyles.box}>
-      <View style={[iconStyles.profileHead, { backgroundColor: c }]} />
-      <View style={[iconStyles.profileShoulders, { backgroundColor: c }]} />
-    </View>
-  );
-};
+const HomeIcon = ({ focused }) => <Icon name="home" size={24} color={iconColor(focused)} strokeWidth={focused ? 2.4 : 2} />;
+const TrophyIcon = ({ focused }) => <Icon name="trophy" size={24} color={iconColor(focused)} strokeWidth={focused ? 2.4 : 2} />;
+const HistoryIcon = ({ focused }) => <Icon name="clock" size={24} color={iconColor(focused)} strokeWidth={focused ? 2.4 : 2} />;
+const ProfileIcon = ({ focused }) => <Icon name="user" size={24} color={iconColor(focused)} strokeWidth={focused ? 2.4 : 2} />;
 
 // ---------------- Custom Tab Bar ----------------
 

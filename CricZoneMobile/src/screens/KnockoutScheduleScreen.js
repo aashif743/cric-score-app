@@ -15,6 +15,7 @@ import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import GradientHeader from '../components/GradientHeader';
 import BracketTeamPicker from '../components/BracketTeamPicker';
+import Icon from '../components/Icon';
 import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
 
 // Clean line-style settings gear (matches the league schedule screen).
@@ -230,7 +231,7 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
               <Text style={[styles.teamBoxText, teamAName === 'TBD' && styles.teamBoxTextTBD, winner === teamAName && styles.teamBoxTextWin]} numberOfLines={1}>
                 {labelA}
               </Text>
-              {editA ? <Text style={styles.slotEditIcon}>✎</Text> : null}
+              {editA ? <Icon name="edit" size={12} color="#94a3b8" /> : null}
             </TouchableOpacity>
             {(isOwner || isCompleted) ? (
               <TouchableOpacity
@@ -283,7 +284,7 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
               <Text style={[styles.teamBoxText, teamBName === 'TBD' && styles.teamBoxTextTBD, winner === teamBName && styles.teamBoxTextWin]} numberOfLines={1}>
                 {labelB}
               </Text>
-              {editB ? <Text style={styles.slotEditIcon}>✎</Text> : null}
+              {editB ? <Icon name="edit" size={12} color="#94a3b8" /> : null}
             </TouchableOpacity>
           </View>
 

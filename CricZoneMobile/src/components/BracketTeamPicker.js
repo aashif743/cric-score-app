@@ -26,6 +26,11 @@ const BracketTeamPicker = ({ visible, onClose, slotLabel, teams = [], currentNam
 
   const known = currentName && currentName !== 'TBD';
 
+  // Always show the team currently in the slot, even if the caller's list has
+  // been narrowed (e.g. to qualified teams only) and doesn't include it — so a
+  // manual pick can never make the current team disappear from the picker.
+  const list = known && !teams.includes(currentName) ? [currentName, ...teams] : teams;
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableWithoutFeedback onPress={onClose}>
@@ -36,7 +41,7 @@ const BracketTeamPicker = ({ visible, onClose, slotLabel, teams = [], currentNam
               {slotLabel ? <Text style={styles.subtitle} numberOfLines={1}>{slotLabel}</Text> : null}
 
               <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-                {teams.map((name) => {
+                {list.map((name) => {
                   const active = name === currentName;
                   const loading = busy === name;
                   return (

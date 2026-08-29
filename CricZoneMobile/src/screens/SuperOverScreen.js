@@ -280,6 +280,12 @@ const SuperOverScreen = ({ navigation, route }) => {
                 {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.finishBtnText}>Finish &amp; Save Result</Text>}
               </TouchableOpacity>
             )}
+            {/* Deciding ball wrong? Undo it and keep scoring. */}
+            {history.length ? (
+              <TouchableOpacity style={styles.undoLink} onPress={undo} activeOpacity={0.7} disabled={saving}>
+                <Text style={styles.undoLinkText}>↶  Undo last ball</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
 
@@ -446,6 +452,8 @@ const styles = StyleSheet.create({
     height: 56, borderRadius: 16, backgroundColor: '#ea580c', justifyContent: 'center', alignItems: 'center',
   },
   anotherBtnText: { fontSize: 16, fontWeight: '900', color: '#fff' },
+  undoLink: { height: 44, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
+  undoLinkText: { fontSize: 14, fontWeight: '800', color: '#64748b' },
 
   logWrap: { marginTop: 20 },
   logTitle: { fontSize: 12, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },

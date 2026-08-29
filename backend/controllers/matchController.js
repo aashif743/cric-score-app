@@ -236,13 +236,23 @@ exports.getMatchById = async (req, res) => {
       }
     }
 
-    // **KEY LOGIC**: If the match is in progress and has a saved liveState, return that.
-    // Otherwise, return the main match document for viewing a completed scorecard.
-    if (match.status === "in_progress" && match.liveState) {
+    // Return a saved scoring snapshot only if liveState actually holds one.
+    // IMPORTANT: bracket (knockout/playoff) matches stash their source labels in
+    // liveState ({ sourceA, sourceB }) — that is NOT scoring state and has no
+    // teams. Returning it for a freshly-started bracket match handed the
+    // scorecard an object with no teamA/teamB, so it showed "Team A"/"Team B".
+    // Actual scoring progress is persisted in currentState + innings1/innings2 on
+    // the match document, so falling through to the full match is always correct.
+    const ls = match.liveState;
+    const isScoringSnapshot = !!ls && (
+      ls.currentState !== undefined || ls.innings1 !== undefined ||
+      ls.teamA !== undefined || ls.striker !== undefined || ls.runs !== undefined
+    );
+    if (match.status === "in_progress" && isScoringSnapshot) {
         console.log(`Resuming match ${id} from saved liveState.`);
-        res.json({ success: true, data: match.liveState });
+        res.json({ success: true, data: ls });
     } else {
-        console.log(`Loading completed match ${id} data.`);
+        console.log(`Loading match ${id} document.`);
         res.json({ success: true, data: match });
     }
 

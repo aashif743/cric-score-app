@@ -21,7 +21,7 @@ const Rise = ({ delay = 0, children, style }) => {
   return <Animated.View style={[style, { opacity, transform: [{ translateY: ty }] }]}>{children}</Animated.View>;
 };
 
-const PlayerRow = ({ rank, name, team, value, accent, delay }) => {
+const PlayerRow = ({ rank, name, team, matches, value, accent, delay }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const tx = useRef(new Animated.Value(18)).current;
 
@@ -41,7 +41,14 @@ const PlayerRow = ({ rank, name, team, value, accent, delay }) => {
       </View>
       <View style={styles.rowMid}>
         <Text style={styles.rowName} numberOfLines={1}>{name}</Text>
-        {team ? <Text style={styles.rowTeam} numberOfLines={1}>{team}</Text> : null}
+        <View style={styles.rowSub}>
+          {team ? <Text style={styles.rowTeam} numberOfLines={1}>{team}</Text> : null}
+          {matches ? (
+            <Text style={styles.rowMatches}>
+              {team ? '  ·  ' : ''}{matches} {matches === 1 ? 'match' : 'matches'}
+            </Text>
+          ) : null}
+        </View>
       </View>
       <Text style={[styles.rowValue, { color: accent }]}>{value}</Text>
     </Animated.View>
@@ -64,6 +71,7 @@ const Leaderboard = ({ title, accent, unit, players, valueOf, delay }) => (
         rank={i + 1}
         name={p.name}
         team={p.team}
+        matches={p.innings}
         value={valueOf(p)}
         accent={accent}
         delay={delay + 80 + i * 70}
@@ -215,7 +223,9 @@ const styles = StyleSheet.create({
   rankText: { fontSize: 12, fontWeight: '900', color: '#94a3b8', fontVariant: ['tabular-nums'] },
   rowMid: { flex: 1 },
   rowName: { fontSize: 14.5, fontWeight: '800', color: '#1e293b' },
-  rowTeam: { fontSize: 11, fontWeight: '600', color: '#94a3b8', marginTop: 1 },
+  rowSub: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
+  rowTeam: { fontSize: 11, fontWeight: '600', color: '#94a3b8', flexShrink: 1 },
+  rowMatches: { fontSize: 10.5, fontWeight: '700', color: '#cbd5e1' },
   rowValue: { fontSize: 22, fontWeight: '900', fontVariant: ['tabular-nums'], minWidth: 40, textAlign: 'right' },
 
   // Highlights

@@ -21,6 +21,7 @@ import ViewShot, { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system';
+import Icon from '../components/Icon';
 
 // Import logo
 const criczoneLogo = require('../../assets/logo/criczone_icon.png');
@@ -47,87 +48,22 @@ const colors = {
   gold: '#fbbf24',
 };
 
-// Custom Icon Components
+// Icon components — standard Feather-style glyphs via the shared Icon set, so
+// every button reads clearly. Cricket-specific bat/ball stay custom below.
 const BackIcon = ({ size = 24, color = colors.textPrimary }) => (
-  <View style={[styles.iconContainer, { width: size, height: size }]}>
-    <View style={{
-      width: size * 0.5,
-      height: size * 0.5,
-      borderLeftWidth: 3,
-      borderBottomWidth: 3,
-      borderColor: color,
-      transform: [{ rotate: '45deg' }],
-      marginLeft: size * 0.15,
-    }} />
-  </View>
+  <Icon name="arrow-left" size={size} color={color} />
 );
 
 const PlusIcon = ({ size = 24, color = colors.surface }) => (
-  <View style={[styles.iconContainer, { width: size, height: size }]}>
-    <View style={{
-      width: size * 0.6,
-      height: 3,
-      backgroundColor: color,
-      borderRadius: 1.5,
-      position: 'absolute',
-    }} />
-    <View style={{
-      width: 3,
-      height: size * 0.6,
-      backgroundColor: color,
-      borderRadius: 1.5,
-      position: 'absolute',
-    }} />
-  </View>
+  <Icon name="plus" size={size} color={color} />
 );
 
 const HomeIcon = ({ size = 24, color = colors.primary }) => (
-  <View style={[styles.iconContainer, { width: size, height: size }]}>
-    <View style={{
-      width: 0,
-      height: 0,
-      borderLeftWidth: size * 0.45,
-      borderRightWidth: size * 0.45,
-      borderBottomWidth: size * 0.35,
-      borderLeftColor: 'transparent',
-      borderRightColor: 'transparent',
-      borderBottomColor: color,
-    }} />
-    <View style={{
-      width: size * 0.65,
-      height: size * 0.45,
-      backgroundColor: color,
-      marginTop: -2,
-      borderBottomLeftRadius: size * 0.05,
-      borderBottomRightRadius: size * 0.05,
-    }} />
-  </View>
+  <Icon name="home" size={size} color={color} />
 );
 
 const TrophyIcon = ({ size = 24, color = colors.gold }) => (
-  <View style={[styles.iconContainer, { width: size, height: size }]}>
-    <View style={{
-      width: size * 0.7,
-      height: size * 0.5,
-      borderWidth: 2.5,
-      borderColor: color,
-      borderBottomLeftRadius: size * 0.35,
-      borderBottomRightRadius: size * 0.35,
-      borderTopWidth: 0,
-    }} />
-    <View style={{
-      width: size * 0.15,
-      height: size * 0.2,
-      backgroundColor: color,
-      marginTop: -2,
-    }} />
-    <View style={{
-      width: size * 0.4,
-      height: size * 0.1,
-      backgroundColor: color,
-      borderRadius: size * 0.02,
-    }} />
-  </View>
+  <Icon name="trophy" size={size} color={color} />
 );
 
 const CricketBatIcon = ({ size = 24, color = colors.primary }) => (
@@ -172,115 +108,15 @@ const BallIcon = ({ size = 24, color = colors.error }) => (
 );
 
 const ErrorIcon = ({ size = 60, color = colors.error }) => (
-  <View style={[styles.iconContainer, { width: size, height: size }]}>
-    <View style={{
-      width: size * 0.8,
-      height: size * 0.8,
-      borderRadius: size * 0.4,
-      borderWidth: 3,
-      borderColor: color,
-      justifyContent: 'center',
-      alignItems: 'center',
-    }}>
-      <View style={{
-        width: 4,
-        height: size * 0.35,
-        backgroundColor: color,
-        borderRadius: 2,
-        marginBottom: size * 0.08,
-      }} />
-      <View style={{
-        width: size * 0.1,
-        height: size * 0.1,
-        backgroundColor: color,
-        borderRadius: size * 0.05,
-      }} />
-    </View>
-  </View>
+  <Icon name="alert" size={size} color={color} />
 );
 
 const DownloadIcon = ({ size = 24, color = colors.surface }) => (
-  <View style={[styles.iconContainer, { width: size, height: size }]}>
-    <View style={{
-      width: size * 0.5,
-      height: size * 0.4,
-      borderBottomWidth: 2.5,
-      borderLeftWidth: 2.5,
-      borderRightWidth: 2.5,
-      borderColor: color,
-      borderBottomLeftRadius: 4,
-      borderBottomRightRadius: 4,
-      position: 'absolute',
-      bottom: size * 0.1,
-    }} />
-    <View style={{
-      width: 2.5,
-      height: size * 0.4,
-      backgroundColor: color,
-      position: 'absolute',
-      top: size * 0.1,
-    }} />
-    <View style={{
-      width: 0,
-      height: 0,
-      borderLeftWidth: size * 0.15,
-      borderRightWidth: size * 0.15,
-      borderTopWidth: size * 0.15,
-      borderLeftColor: 'transparent',
-      borderRightColor: 'transparent',
-      borderTopColor: color,
-      position: 'absolute',
-      top: size * 0.4,
-    }} />
-  </View>
+  <Icon name="download" size={size} color={color} />
 );
 
 const ShareIcon = ({ size = 24, color = colors.surface }) => (
-  <View style={[styles.iconContainer, { width: size, height: size }]}>
-    <View style={{
-      width: size * 0.25,
-      height: size * 0.25,
-      borderRadius: size * 0.125,
-      backgroundColor: color,
-      position: 'absolute',
-      top: size * 0.1,
-      right: size * 0.15,
-    }} />
-    <View style={{
-      width: size * 0.25,
-      height: size * 0.25,
-      borderRadius: size * 0.125,
-      backgroundColor: color,
-      position: 'absolute',
-      bottom: size * 0.1,
-      left: size * 0.15,
-    }} />
-    <View style={{
-      width: size * 0.25,
-      height: size * 0.25,
-      borderRadius: size * 0.125,
-      backgroundColor: color,
-      position: 'absolute',
-      top: size * 0.1,
-      left: size * 0.15,
-    }} />
-    <View style={{
-      width: size * 0.35,
-      height: 2,
-      backgroundColor: color,
-      position: 'absolute',
-      top: size * 0.35,
-      transform: [{ rotate: '30deg' }],
-    }} />
-    <View style={{
-      width: size * 0.35,
-      height: 2,
-      backgroundColor: color,
-      position: 'absolute',
-      top: size * 0.55,
-      transform: [{ rotate: '-30deg' }],
-    }} />
-  </View>
+  <Icon name="share" size={size} color={color} />
 );
 
 // Animated Table Row Component

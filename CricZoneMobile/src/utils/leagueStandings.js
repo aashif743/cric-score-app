@@ -85,6 +85,74 @@ export function formatNRR(nrr) {
   return (nrr > 0 ? '+' : '') + nrr.toFixed(3);
 }
 
+// Work out, for each team in a group, whether it has already CLINCHED a top-N
+// (advance) place, been ELIMINATED, or is still in contention — accounting for
+// the matches that haven't been played yet. Returns { [team]: 'Q' | 'E' | null }.
+//
+// The maths is deliberately conservative so it can NEVER show a wrong (Q): a
+// team is only marked qualified when it is guaranteed a top-N finish under EVERY
+// possible set of remaining results.
+//
+//  • A win is worth 2 points, a tie/no-result 1 — matching computeGroupStandings.
+//  • floor(t)  = t's points if it LOSES every remaining match (its worst case).
+//  • ceiling(t)= t's points if it WINS every remaining match (its best case).
+//
+//  Clinched (Q): fewer than `advance` OTHER teams can still reach team X's floor.
+//     If at most advance-1 teams can end level-or-above X, X is at worst Nth →
+//     guaranteed to qualify. (Two rivals who still play each other can't both hit
+//     their ceiling, so counting them independently only ever UNDER-claims — safe.)
+//  Eliminated (E): at least `advance` teams ALREADY have more points than X's
+//     ceiling, so X can never climb into the top N no matter what.
+//  Otherwise: null — still to be decided (e.g. a last-match "decider").
+//
+// Once the group is fully played we defer to the final NRR-resolved order, so a
+// team that sneaks the last spot on net run rate is correctly shown as (Q).
+export function computeQualification(standings, groupMatches, teamNames, advance) {
+  const status = {};
+  (teamNames || []).forEach((t) => { status[t] = null; });
+  if (!advance || advance <= 0 || !Array.isArray(standings) || standings.length === 0) {
+    return status;
+  }
+
+  const points = {};
+  standings.forEach((r) => { points[r.team] = r.points || 0; });
+
+  // Count each team's still-to-be-decided matches (anything not completed or
+  // abandoned — an abandoned game won't be replayed, so it yields no more points).
+  const remaining = {};
+  (teamNames || []).forEach((t) => { remaining[t] = 0; });
+  let totalRemaining = 0;
+  (groupMatches || []).forEach((m) => {
+    if (m.status === 'completed' || m.status === 'abandoned') return;
+    const a = m.teamA?.name; const b = m.teamB?.name;
+    if (a && remaining[a] !== undefined) remaining[a] += 1;
+    if (b && remaining[b] !== undefined) remaining[b] += 1;
+    totalRemaining += 1;
+  });
+
+  // Group finished → the standings order (points → NRR → H2H) is final.
+  if (totalRemaining === 0) {
+    standings.forEach((r, i) => { status[r.team] = i < advance ? 'Q' : 'E'; });
+    return status;
+  }
+
+  const WIN = 2;
+  const floorPts = (t) => (points[t] || 0);
+  const ceilPts = (t) => (points[t] || 0) + WIN * (remaining[t] || 0);
+
+  standings.forEach((r) => {
+    const x = r.team;
+    // Clinched: fewer than `advance` other teams can reach X's worst-case points.
+    const canReachX = standings.filter((o) => o.team !== x && ceilPts(o.team) >= floorPts(x)).length;
+    if (canReachX < advance) { status[x] = 'Q'; return; }
+    // Eliminated: at least `advance` teams already sit above X's best-case points.
+    const surelyAbove = standings.filter((o) => o.team !== x && floorPts(o.team) > ceilPts(x)).length;
+    if (surelyAbove >= advance) { status[x] = 'E'; return; }
+    status[x] = null;
+  });
+  return status;
+}
+
 // 3-letter short code for a team (uppercase). Falls back to first 3 letters.
 export function shortCode(name) {
   if (!name) return '';

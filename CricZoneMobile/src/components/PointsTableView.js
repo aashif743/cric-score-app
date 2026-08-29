@@ -2,11 +2,24 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing,
   Modal, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
-  TouchableWithoutFeedback,
+  TouchableWithoutFeedback, Dimensions,
 } from 'react-native';
-import { computeGroupStandings, formatNRR } from '../utils/leagueStandings';
+import Svg, { Path, Polyline, Line } from 'react-native-svg';
+import ViewShot, { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
+import { computeGroupStandings, formatNRR, computeQualification } from '../utils/leagueStandings';
 import tournamentService from '../utils/tournamentService';
 import AutocompleteInput from './AutocompleteInput';
+import ShareablePointsTable from './ShareablePointsTable';
+
+const ShareIcon = ({ color = '#fff', size = 15 }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+    <Path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+    <Polyline points="16 6 12 2 8 6" />
+    <Line x1="12" y1="2" x2="12" y2="15" />
+  </Svg>
+);
 
 const groupLetter = (i) => String.fromCharCode(65 + i);
 
@@ -186,7 +199,114 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
   }, [matches, activeGroup]);
 
   const activeStandings = standingsByGroup[activeGroup] || [];
-  const showQE = advance > 0 && activeGroupComplete;
+
+  // Live qualification status: a team is (Q) the moment it's mathematically
+  // guaranteed a top-`advance` finish and (E) once it can no longer reach it —
+  // even mid-group. Teams whose fate rests on an unplayed "decider" stay
+  // unmarked until it's actually decided.
+  const qualStatus = useMemo(() => {
+    const letter = groupLetter(activeGroup);
+    const gm = matches.filter((m) => m.stage === 'group' && m.group === letter);
+    return computeQualification(activeStandings, gm, groups[activeGroup] || [], advance);
+  }, [activeStandings, matches, activeGroup, groups, advance]);
+
+  // Anything decided early (before the group is mathematically over) → show a
+  // legend so the (Q)/(E) tags are self-explanatory.
+  const hasEarlyCall = useMemo(
+    () => advance > 0 && !activeGroupComplete && Object.values(qualStatus).some((s) => s === 'Q' || s === 'E'),
+    [qualStatus, advance, activeGroupComplete],
+  );
+
+  // Qualification status for EVERY group — needed for the full-table share.
+  const qualStatusByGroup = useMemo(
+    () => groups.map((teams, gIdx) => {
+      const letter = groupLetter(gIdx);
+      const gm = matches.filter((m) => m.stage === 'group' && m.group === letter);
+      return computeQualification(standingsByGroup[gIdx] || [], gm, teams, advance);
+    }),
+    [groups, matches, standingsByGroup, advance],
+  );
+
+  // --- Share the points table as a polished image -------------------------
+  const shareRef = useRef(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareScope, setShareScope] = useState('group'); // 'group' (this group) | 'all'
+  const [shareBusy, setShareBusy] = useState(null);        // 'save' | 'share' | null
+
+  const openShare = () => { setShareScope('group'); setShareOpen(true); };
+
+  // Data handed to the shareable card, per the chosen scope.
+  const shareGroups = useMemo(() => {
+    if (shareScope === 'all') {
+      return groups.map((teams, i) => ({
+        letter: groupLetter(i),
+        standings: standingsByGroup[i] || [],
+        qualStatus: qualStatusByGroup[i] || {},
+      }));
+    }
+    return [{
+      letter: groupLetter(activeGroup),
+      standings: activeStandings,
+      qualStatus,
+    }];
+  }, [shareScope, groups, standingsByGroup, qualStatusByGroup, activeGroup, activeStandings, qualStatus]);
+
+  const shareSubtitle = shareScope === 'all'
+    ? (groups.length > 1 ? 'All Groups' : '')
+    : (groups.length > 1 ? `Group ${groupLetter(activeGroup)}` : '');
+
+  const captureShareImage = async () => {
+    const node = shareRef.current;
+    if (!node) return null;
+    if (typeof node.capture === 'function') return await node.capture();
+    return await captureRef(node, { format: 'png', quality: 1 });
+  };
+
+  const doSave = async () => {
+    if (shareBusy) return;
+    try {
+      setShareBusy('save');
+      const { status } = await MediaLibrary.requestPermissionsAsync(true);
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Allow photo access so the image can be saved to your gallery.');
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 650)); // let the card finish laying out
+      const uri = await captureShareImage();
+      if (!uri) { Alert.alert('Error', 'Could not create the image. Please try again.'); return; }
+      await MediaLibrary.saveToLibraryAsync(uri);
+      setShareOpen(false);
+      Alert.alert('Saved', 'Points table image saved to your gallery.');
+    } catch (e) {
+      Alert.alert('Error', 'Could not save the image. Please try again.');
+    } finally {
+      setShareBusy(null);
+    }
+  };
+
+  const doShare = async () => {
+    if (shareBusy) return;
+    try {
+      setShareBusy('share');
+      const ok = await Sharing.isAvailableAsync();
+      if (!ok) { Alert.alert('Unavailable', 'Sharing is not available on this device.'); return; }
+      await new Promise((r) => setTimeout(r, 650));
+      const uri = await captureShareImage();
+      if (!uri) { Alert.alert('Error', 'Could not create the image. Please try again.'); return; }
+      setShareOpen(false);
+      await new Promise((r) => setTimeout(r, 120));
+      await Sharing.shareAsync(uri, {
+        mimeType: 'image/png',
+        dialogTitle: 'Share Points Table',
+        UTI: 'public.png',
+      });
+    } catch (e) {
+      const msg = String(e?.message || '');
+      if (!/cancel|did not share/i.test(msg)) Alert.alert('Error', 'Could not share the image. Please try again.');
+    } finally {
+      setShareBusy(null);
+    }
+  };
 
   return (
     <>
@@ -219,6 +339,13 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
 
       {/* The table itself — column header + rows in a card */}
       <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.shareBar}>
+          <TouchableOpacity style={styles.shareBtn} onPress={openShare} activeOpacity={0.85}>
+            <ShareIcon size={14} />
+            <Text style={styles.shareBtnText}>Share</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.tableCard}>
           <HeaderRow />
           {activeStandings.length === 0 ? (
@@ -237,8 +364,8 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
                   row={row}
                   rank={rank}
                   index={idx}
-                  qualified={showQE && rank <= advance}
-                  eliminated={showQE && rank > advance}
+                  qualified={qualStatus[row.team] === 'Q'}
+                  eliminated={qualStatus[row.team] === 'E'}
                   isQualifyingSlot={isQualifyingSlot}
                   isLastQualifyingSlot={isLastQualifyingSlot}
                   onPress={canEdit ? () => openEdit(row.team) : undefined}
@@ -255,6 +382,15 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
             <View style={styles.qualifyDot} />
             <Text style={styles.qualifyText}>
               Top {advance} {advance === 1 ? 'team' : 'teams'} will qualify for next round
+            </Text>
+          </View>
+        )}
+
+        {hasEarlyCall && (
+          <View style={styles.legendNote}>
+            <Text style={styles.legendText}>
+              <Text style={styles.legendQ}>(Q)</Text> already qualified · {' '}
+              <Text style={styles.legendE}>(E)</Text> can no longer qualify. Teams without a tag are still in the race — decided by the remaining matches.
             </Text>
           </View>
         )}
@@ -343,6 +479,63 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
           </KeyboardAvoidingView>
         </Modal>
       )}
+
+      {/* Share sheet — pick scope, preview, then save or share the image */}
+      <Modal visible={shareOpen} transparent animationType="slide" onRequestClose={() => !shareBusy && setShareOpen(false)}>
+        <View style={styles.shareOverlay}>
+          <View style={styles.shareSheet}>
+            <View style={styles.shareHead}>
+              <Text style={styles.shareTitle}>Share Points Table</Text>
+              <TouchableOpacity onPress={() => !shareBusy && setShareOpen(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={styles.shareClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {groups.length > 1 ? (
+              <View style={styles.scopeRow}>
+                <TouchableOpacity
+                  style={[styles.scopePill, shareScope === 'group' && styles.scopePillActive]}
+                  onPress={() => setShareScope('group')} activeOpacity={0.85} disabled={!!shareBusy}
+                >
+                  <Text style={[styles.scopePillText, shareScope === 'group' && styles.scopePillTextActive]} numberOfLines={1}>
+                    Group {groupLetter(activeGroup)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.scopePill, shareScope === 'all' && styles.scopePillActive]}
+                  onPress={() => setShareScope('all')} activeOpacity={0.85} disabled={!!shareBusy}
+                >
+                  <Text style={[styles.scopePillText, shareScope === 'all' && styles.scopePillTextActive]}>All Groups</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <ScrollView style={styles.previewScroll} contentContainerStyle={styles.previewContent} showsVerticalScrollIndicator={false}>
+              <ViewShot ref={shareRef} options={{ format: 'png', quality: 1 }}>
+                <ShareablePointsTable
+                  tournamentName={tournament?.name}
+                  groups={shareGroups}
+                  advance={advance}
+                  subtitle={shareSubtitle}
+                />
+              </ViewShot>
+            </ScrollView>
+
+            <View style={styles.shareActions}>
+              <TouchableOpacity style={[styles.shareActionBtn, styles.shareSaveBtn]} onPress={doSave} disabled={!!shareBusy} activeOpacity={0.85}>
+                {shareBusy === 'save'
+                  ? <ActivityIndicator size="small" color="#1d4ed8" />
+                  : <Text style={styles.shareSaveText}>Save to Gallery</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.shareActionBtn, styles.sharePrimaryBtn]} onPress={doShare} disabled={!!shareBusy} activeOpacity={0.85}>
+                {shareBusy === 'share'
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <><ShareIcon size={15} /><Text style={styles.sharePrimaryText}>Share</Text></>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 };
@@ -366,6 +559,46 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#2563eb', fontWeight: '800' },
 
   listContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+
+  // Share button + sheet
+  shareBar: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 10 },
+  shareBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: '#2563eb', borderRadius: 999, paddingHorizontal: 16, height: 38,
+    shadowColor: '#1e40af', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.22, shadowRadius: 6, elevation: 3,
+  },
+  shareBtnText: { color: '#fff', fontSize: 13.5, fontWeight: '800', letterSpacing: 0.3 },
+
+  shareOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.6)', justifyContent: 'flex-end' },
+  shareSheet: {
+    backgroundColor: '#f1f5f9', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 18, paddingTop: 16, paddingBottom: 26, maxHeight: '90%',
+  },
+  shareHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  shareTitle: { fontSize: 17, fontWeight: '900', color: '#0f172a' },
+  shareClose: { fontSize: 18, fontWeight: '800', color: '#94a3b8', paddingHorizontal: 4 },
+
+  scopeRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  scopePill: {
+    flex: 1, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#e2e8f0',
+  },
+  scopePillActive: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
+  scopePillText: { fontSize: 13.5, fontWeight: '800', color: '#64748b' },
+  scopePillTextActive: { color: '#1d4ed8' },
+
+  previewScroll: { maxHeight: Math.round(Dimensions.get('window').height * 0.56) },
+  previewContent: { alignItems: 'center', paddingVertical: 6 },
+
+  shareActions: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  shareActionBtn: { flex: 1, height: 52, borderRadius: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
+  shareSaveBtn: { backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#bfdbfe' },
+  shareSaveText: { fontSize: 15, fontWeight: '800', color: '#1d4ed8' },
+  sharePrimaryBtn: {
+    backgroundColor: '#2563eb',
+    shadowColor: '#1e40af', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4,
+  },
+  sharePrimaryText: { fontSize: 15, fontWeight: '900', color: '#fff', letterSpacing: 0.3 },
 
   tableCard: {
     backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden',
@@ -420,6 +653,14 @@ const styles = StyleSheet.create({
   },
   qualifyDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2563eb' },
   qualifyText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#1e40af' },
+
+  legendNote: {
+    marginTop: 10, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12,
+    backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#eef2f7',
+  },
+  legendText: { fontSize: 12, fontWeight: '600', color: '#64748b', lineHeight: 18 },
+  legendQ: { fontSize: 12, fontWeight: '900', color: '#059669' },
+  legendE: { fontSize: 12, fontWeight: '900', color: '#94a3b8' },
 
   emptyState: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 },
   emptyTitle: { fontSize: 16, fontWeight: '700', color: '#94a3b8', marginBottom: 6 },

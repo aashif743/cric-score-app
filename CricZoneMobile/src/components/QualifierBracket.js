@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import Svg, { Polyline } from 'react-native-svg';
 import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
+import Icon from './Icon';
 
 // --- helpers ---------------------------------------------------------------
 const initial = (name) => (name || '?').trim().charAt(0).toUpperCase();
@@ -37,7 +38,7 @@ const Slot = ({ name, placeholder, accent, isWinner, onEdit }) => {
         {known ? name : placeholder}
       </Text>
       {isWinner ? <View style={styles.winCheck}><View style={styles.winCheckA} /><View style={styles.winCheckB} /></View>
-        : onEdit ? <Text style={styles.slotEdit}>✎</Text> : null}
+        : onEdit ? <Icon name="edit" size={11} color="#94a3b8" /> : null}
     </>
   );
   if (onEdit) {

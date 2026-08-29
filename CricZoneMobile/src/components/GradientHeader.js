@@ -7,6 +7,7 @@ import {
   Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import Icon from './Icon';
 
 // Shared deep-indigo gradient (matches the Tournament picker hero).
 const DEFAULT_GRADIENT = ['#1e1b4b', '#312e81'];
@@ -73,7 +74,7 @@ const GradientHeader = ({
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <View style={styles.backArrow} />
+            <Icon name="arrow-left" size={22} color="#fff" />
           </TouchableOpacity>
         ) : (
           <View style={styles.iconPlaceholder} />

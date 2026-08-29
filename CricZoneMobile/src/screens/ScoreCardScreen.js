@@ -23,6 +23,7 @@ import suggestionService from '../utils/suggestionService';
 import AutocompleteInput from '../components/AutocompleteInput';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import StrikerSelectModal from '../components/StrikerSelectModal';
+import Icon from '../components/Icon';
 import Svg, { Path } from 'react-native-svg';
 
 // Curved-arrow undo glyph. Cleaner and more recognizable than the Unicode
@@ -233,6 +234,8 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [showExtrasModal, setShowExtrasModal] = useState(false);
   const [showChangeBowlerModal, setShowChangeBowlerModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  // Holds the just-completed over's summary → shows the over-complete popup.
+  const [overComplete, setOverComplete] = useState(null);
 
   // Player name edit modal state
   const [playerNameEditModal, setPlayerNameEditModal] = useState({
@@ -989,6 +992,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
           const bowlerWithStats = allBowlers.find(b => b.id === nextBowler.id) || nextBowler;
           setCurrentBowler({ ...bowlerWithStats });
         }
+
+        // Show a quick recap of the over just bowled. Skipped when the innings is
+        // ending on this over (the end-innings/match flow handles that instead),
+        // so the two popups never collide. isMaiden lets us badge a maiden over.
+        setOverComplete({ ...overData, isMaiden });
       }
     } catch (error) {
       console.error('Error in handleEndOfOver:', error);
@@ -1129,36 +1137,47 @@ const ScoreCardScreen = ({ navigation, route }) => {
       }
       const newBatsman = nextBatsman || { id: 0, name: 'New Batsman', runs: 0, balls: 0, fours: 0, sixes: 0 };
 
-      // Updated striker with applied stats (for striker-select modal display)
-      const updatedStriker = {
-        ...striker,
-        runs: striker.runs + runsToBatsman,
-        balls: striker.balls + (strikerFacesBall ? 1 : 0),
-        fours: deliveryType === 'NB' && runsScored === 4 ? striker.fours + 1 : striker.fours,
-        sixes: deliveryType === 'NB' && runsScored === 6 ? striker.sixes + 1 : striker.sixes,
-      };
+      // Does THIS delivery end the innings? (overs done, all out, or the target
+      // is passed in the chase). If so there's no incoming batsman — skip the
+      // striker picker, otherwise its selection would overwrite the fresh
+      // next-innings lineup and the 2nd innings would carry on with the old pair.
+      const willEndInnings =
+        (match.balls + (isLegalBall ? 1 : 0)) >= (settings.overs * settings.ballsPerOver) ||
+        (match.wickets + 1) >= (settings.playersPerTeam - 1) ||
+        (match.innings === 2 && (match.runs + totalRuns) >= match.target);
 
-      const survivingBatsman = runOutBatsman === 'striker' ? nonStriker : updatedStriker;
-      let suggestedStriker;
-      if (shouldRotate) {
-        suggestedStriker = runOutBatsman === 'striker' ? survivingBatsman : newBatsman;
-      } else {
-        suggestedStriker = runOutBatsman === 'striker' ? newBatsman : survivingBatsman;
+      if (!willEndInnings) {
+        // Updated striker with applied stats (for striker-select modal display)
+        const updatedStriker = {
+          ...striker,
+          runs: striker.runs + runsToBatsman,
+          balls: striker.balls + (strikerFacesBall ? 1 : 0),
+          fours: deliveryType === 'NB' && runsScored === 4 ? striker.fours + 1 : striker.fours,
+          sixes: deliveryType === 'NB' && runsScored === 6 ? striker.sixes + 1 : striker.sixes,
+        };
+
+        const survivingBatsman = runOutBatsman === 'striker' ? nonStriker : updatedStriker;
+        let suggestedStriker;
+        if (shouldRotate) {
+          suggestedStriker = runOutBatsman === 'striker' ? survivingBatsman : newBatsman;
+        } else {
+          suggestedStriker = runOutBatsman === 'striker' ? newBatsman : survivingBatsman;
+        }
+
+        const options = [
+          { ...survivingBatsman, isNew: false, isSuggested: suggestedStriker.id === survivingBatsman.id },
+          { ...newBatsman, isNew: true, isSuggested: suggestedStriker.id === newBatsman.id },
+        ];
+        options.sort((a, b) => (b.isSuggested ? 1 : 0) - (a.isSuggested ? 1 : 0));
+
+        setPendingRunOutData({
+          newBatsman,
+          survivingBatsman,
+          updatedSurvivingBatsman: runOutBatsman === 'nonStriker' ? updatedStriker : null,
+        });
+        setStrikerSelectOptions(options);
+        setShowStrikerSelectModal(true);
       }
-
-      const options = [
-        { ...survivingBatsman, isNew: false, isSuggested: suggestedStriker.id === survivingBatsman.id },
-        { ...newBatsman, isNew: true, isSuggested: suggestedStriker.id === newBatsman.id },
-      ];
-      options.sort((a, b) => (b.isSuggested ? 1 : 0) - (a.isSuggested ? 1 : 0));
-
-      setPendingRunOutData({
-        newBatsman,
-        survivingBatsman,
-        updatedSurvivingBatsman: runOutBatsman === 'nonStriker' ? updatedStriker : null,
-      });
-      setStrikerSelectOptions(options);
-      setShowStrikerSelectModal(true);
 
       // End of over (only legal deliveries advance the over)
       if (isLegalBall && (match.balls + 1) % settings.ballsPerOver === 0) {
@@ -1262,10 +1281,13 @@ const ScoreCardScreen = ({ navigation, route }) => {
       balls: prev.balls + 1,
     }));
 
-    // Update current over
-    setCurrentOverBalls(prev => [...prev, 'W']);
+    // Update current over. A run-out with runs completed shows both — e.g.
+    // "1+W" — so the ball-by-ball log doesn't lose the runs; a plain/other
+    // wicket is just "W".
+    const wicketDisplay = (wicketType === 'Run Out' && runsScored > 0) ? `${runsScored}+W` : 'W';
+    setCurrentOverBalls(prev => [...prev, wicketDisplay]);
     setCurrentOverWickets(prev => prev + 1);
-    recordBallInCurrentOver('W', runsScored, true);
+    recordBallInCurrentOver(wicketDisplay, runsScored, true);
 
     // Update bowler stats
     if (wicketType !== 'Run Out') {
@@ -1296,8 +1318,18 @@ const ScoreCardScreen = ({ navigation, route }) => {
       }
     }
 
+    // Does THIS ball end the innings? (overs done, all out, or — in the chase —
+    // the target is passed). If so there's no incoming batsman: opening the
+    // striker picker would let its selection overwrite the fresh next-innings
+    // lineup and the 2nd innings would carry on with the old batsmen.
+    const maxBallsThisInnings = settings.overs * settings.ballsPerOver;
+    const willEndInnings =
+      (match.balls + 1) >= maxBallsThisInnings ||
+      (match.wickets + 1) >= (settings.playersPerTeam - 1) ||
+      (match.innings === 2 && (match.runs + runsScored) >= match.target);
+
     // Handle batsmen positioning for Run Out
-    if (wicketType === 'Run Out') {
+    if (wicketType === 'Run Out' && !willEndInnings) {
       // Create updated striker with runs (for run outs with runs scored)
       const updatedStriker = runsScored > 0 ? {
         ...striker,
@@ -1345,8 +1377,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
       });
       setStrikerSelectOptions(options);
       setShowStrikerSelectModal(true);
-    } else {
-      // Non-runout wickets - simple replacement (striker is always out)
+    } else if (!willEndInnings) {
+      // Non-runout wickets (or a run-out that doesn't end the innings) — simple
+      // replacement (striker is always out). Skipped when the innings ends on
+      // this ball: the next-innings reset provides the new batting pair.
       if (nextBatsman) {
         setCurrentBatsmen(prev => ({ ...prev, striker: nextBatsman }));
       }
@@ -2942,9 +2976,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
   // Get ball color
   const getBallColor = (ball) => {
-    if (ball === 'W') return colors.ballWicket;
-    if (ball === '4' || ball === '6') return colors.ballBoundary;
+    // Wides / no-balls first (they may also carry "+W"); they render plain, but
+    // keep the extra colour for any place that still uses a chip.
     if (ball.includes('WD') || ball.includes('NB')) return colors.ballExtra;
+    if (ball.includes('W')) return colors.ballWicket;   // "W" and run-out "1+W"
+    if (ball === '4' || ball === '6') return colors.ballBoundary;
     if (ball.includes('BYE') || ball.includes('LB')) return colors.ballBye;
     return colors.ballRun;
   };
@@ -3036,13 +3072,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
             onPress={() => setShowSettingsModal(true)}
           >
             <View style={styles.settingsIcon}>
-              <View style={styles.settingsGear}>
-                <View style={styles.gearCenter} />
-                <View style={[styles.gearTooth, { transform: [{ rotate: '0deg' }] }]} />
-                <View style={[styles.gearTooth, { transform: [{ rotate: '45deg' }] }]} />
-                <View style={[styles.gearTooth, { transform: [{ rotate: '90deg' }] }]} />
-                <View style={[styles.gearTooth, { transform: [{ rotate: '135deg' }] }]} />
-              </View>
+              <Icon name="settings" size={22} color={colors.textSecondary} />
             </View>
           </TouchableOpacity>
         </View>
@@ -3613,7 +3643,6 @@ const ScoreCardScreen = ({ navigation, route }) => {
               </TouchableOpacity>
             </View>
             <View style={styles.bowlerSpellContainer}>
-              <Text style={styles.bowlerSpellLabel}>Spell</Text>
               <Text style={styles.bowlerSpell}>
                 {currentBowler.runs}/{currentBowler.wickets} ({currentBowler.overs})
               </Text>
@@ -3636,20 +3665,26 @@ const ScoreCardScreen = ({ navigation, route }) => {
             <Text style={styles.thisOverTitle}>This Over</Text>
             <View style={styles.ballsRow}>
               {currentOverBalls.map((ball, index) => {
-                // Check if ball has extra runs or complex display (WD+1, NB+2, LB2, BYE2, WD+W, etc.)
-                const isExtendedBall = ball.includes('+') || (ball.length > 2 && !['W', '4', '6'].includes(ball));
+                // Only COUNTED (legal) deliveries get the rounded chip. Wides and
+                // no-balls don't count as a ball of the over, so they render as
+                // plain text with no shape. Everything else — runs, wickets,
+                // byes/leg-byes, and a run-out with runs like "1+W" — is a legal
+                // ball and keeps the rounded design.
+                const isNonCounted = /^WD/i.test(ball) || /^NB/i.test(ball);
 
-                if (isExtendedBall) {
-                  // Plain text for extended values - no shape
+                if (isNonCounted) {
                   return (
                     <Text key={index} style={styles.ballTextPlain}>{ball}</Text>
                   );
                 }
 
+                // Multi-character counted balls (e.g. "1+W") use a rounded pill
+                // so the runs stay visible instead of being clipped by a circle.
+                const isMultiChar = ball.length > 1;
                 return (
                   <View
                     key={index}
-                    style={[styles.ball, { backgroundColor: getBallColor(ball) }]}
+                    style={[styles.ball, isMultiChar && styles.ballWide, { backgroundColor: getBallColor(ball) }]}
                   >
                     <Text style={styles.ballText}>{ball}</Text>
                   </View>
@@ -4179,6 +4214,78 @@ const ScoreCardScreen = ({ navigation, route }) => {
             >
               <Text style={styles.modalCancelText}>Cancel</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Over Complete — quick recap + Undo / Next Over */}
+      <Modal visible={!!overComplete} transparent animationType="fade" onRequestClose={() => setOverComplete(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.overCompleteCard}>
+            <Text style={styles.overCompleteKicker}>Over Complete</Text>
+            <Text style={styles.overCompleteTitle}>Over {overComplete?.overNumber}</Text>
+
+            <View style={styles.overCompleteStatsRow}>
+              <View style={styles.overCompleteStat}>
+                <Text style={styles.overCompleteStatValue}>{overComplete?.runs ?? 0}</Text>
+                <Text style={styles.overCompleteStatLabel}>{overComplete?.runs === 1 ? 'Run' : 'Runs'}</Text>
+              </View>
+              <View style={styles.overCompleteDivider} />
+              <View style={styles.overCompleteStat}>
+                <Text style={styles.overCompleteStatValue}>{overComplete?.wickets ?? 0}</Text>
+                <Text style={styles.overCompleteStatLabel}>{overComplete?.wickets === 1 ? 'Wicket' : 'Wickets'}</Text>
+              </View>
+            </View>
+
+            <Text style={styles.overCompleteBowler} numberOfLines={1}>
+              {overComplete?.bowlerName}{overComplete?.isMaiden ? '  ·  Maiden over' : ''}
+            </Text>
+
+            {/* Ball-by-ball for the over — same chip rules as "This Over" */}
+            <View style={styles.overCompleteBalls}>
+              {(overComplete?.balls || []).map((ball, i) => {
+                const isNonCounted = /^WD/i.test(ball) || /^NB/i.test(ball);
+                if (isNonCounted) {
+                  return <Text key={i} style={styles.ballTextPlain}>{ball}</Text>;
+                }
+                const isMultiChar = ball.length > 1;
+                return (
+                  <View key={i} style={[styles.ball, isMultiChar && styles.ballWide, { backgroundColor: getBallColor(ball) }]}>
+                    <Text style={styles.ballText}>{ball}</Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            <Text style={styles.overCompleteScore}>
+              {teams[getBattingTeamKey()]?.name} {match.runs}/{match.wickets} · {getCurrentOver()} ov
+            </Text>
+            {match.isChasing && match.target ? (
+              <Text style={styles.overCompleteNeed}>
+                Need {Math.max(0, match.target - match.runs)} from{' '}
+                {Math.max(0, settings.overs * settings.ballsPerOver - match.balls)} balls
+              </Text>
+            ) : null}
+
+            <View style={styles.overCompleteButtons}>
+              <TouchableOpacity
+                style={[styles.overCompleteBtn, styles.overCompleteUndoBtn]}
+                onPress={() => { setOverComplete(null); handleUndo(); }}
+                activeOpacity={0.85}
+                disabled={undoHistory.length === 0}
+              >
+                <Text style={[styles.overCompleteUndoText, undoHistory.length === 0 && styles.overCompleteUndoTextDisabled]}>
+                  Undo
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.overCompleteBtn, styles.overCompleteNextBtn]}
+                onPress={() => setOverComplete(null)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.overCompleteNextText}>Next Over</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -6131,6 +6238,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  // Counted ball carrying extra characters (e.g. a run-out "1+W") — grow into a
+  // rounded pill instead of clipping the text inside the fixed circle.
+  ballWide: {
+    width: undefined,
+    minWidth: responsiveSize.ballSize,
+    paddingHorizontal: responsiveSpacing.sm,
+  },
   ballText: {
     color: colors.surface,
     fontSize: responsiveFontSize.xs,
@@ -6139,8 +6253,7 @@ const styles = StyleSheet.create({
   ballTextPlain: {
     fontSize: responsiveFontSize.xs,
     fontWeight: fontWeights.bold,
-    color: colors.textPrimary,
-    marginHorizontal: responsiveSpacing.xs,
+    color: colors.textSecondary,
     height: responsiveSize.ballSize,
     lineHeight: responsiveSize.ballSize,
     textAlignVertical: 'center',
@@ -6152,6 +6265,46 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: fontSizes.lg,
   },
+
+  // Over Complete popup
+  overCompleteCard: {
+    width: '100%', maxWidth: 380, backgroundColor: colors.surface, borderRadius: 22, padding: 22,
+    shadowColor: '#0f172a', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.28, shadowRadius: 28, elevation: 14,
+  },
+  overCompleteKicker: {
+    fontSize: 11, fontWeight: '800', color: '#94a3b8',
+    letterSpacing: 1, textTransform: 'uppercase', textAlign: 'center',
+  },
+  overCompleteTitle: {
+    fontSize: 22, fontWeight: '900', color: '#0f172a', textAlign: 'center', marginTop: 2, marginBottom: 16,
+  },
+  overCompleteStatsRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+  },
+  overCompleteStat: { alignItems: 'center', paddingHorizontal: 26 },
+  overCompleteStatValue: { fontSize: 30, fontWeight: '900', color: '#0f172a', fontVariant: ['tabular-nums'] },
+  overCompleteStatLabel: {
+    fontSize: 11, fontWeight: '700', color: '#94a3b8',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2,
+  },
+  overCompleteDivider: { width: 1, height: 36, backgroundColor: '#e2e8f0' },
+  overCompleteBowler: { fontSize: 13.5, fontWeight: '800', color: '#475569', textAlign: 'center', marginBottom: 14 },
+  overCompleteBalls: {
+    flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center',
+    gap: responsiveSpacing.sm, marginBottom: 14,
+  },
+  overCompleteScore: { fontSize: 13.5, fontWeight: '800', color: '#334155', textAlign: 'center' },
+  overCompleteNeed: { fontSize: 12.5, fontWeight: '700', color: '#64748b', textAlign: 'center', marginTop: 4 },
+  overCompleteButtons: { flexDirection: 'row', gap: 12, marginTop: 20 },
+  overCompleteBtn: { flex: 1, height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  overCompleteUndoBtn: { backgroundColor: '#f1f5f9', borderWidth: 1.5, borderColor: '#e2e8f0' },
+  overCompleteUndoText: { fontSize: 15, fontWeight: '800', color: '#475569' },
+  overCompleteUndoTextDisabled: { color: '#cbd5e1' },
+  overCompleteNextBtn: {
+    backgroundColor: '#2563eb',
+    shadowColor: '#1e40af', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4,
+  },
+  overCompleteNextText: { fontSize: 15.5, fontWeight: '900', color: '#fff', letterSpacing: 0.3 },
   scoringContainer: {
     backgroundColor: colors.cardBg,
     paddingHorizontal: isSmallScreen ? 8 : 12,

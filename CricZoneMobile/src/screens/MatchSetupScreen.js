@@ -424,9 +424,19 @@ const MatchSetupScreen = ({ navigation, route }) => {
         // created — update it in place instead of creating a duplicate.
         if (existingMatchId) {
           await matchService.updateMatch(existingMatchId, matchData, user.token);
-          const fresh = await matchService.getMatch(existingMatchId, user.token);
+          // Build the started match locally instead of re-fetching. getMatch()
+          // returns the saved liveState for an in-progress match, but a bracket
+          // match's liveState holds bracket metadata (sourceA/sourceB), NOT the
+          // teams — re-fetching here would hand the scorecard an object with no
+          // teamA/teamB and it would show "Team A"/"Team B". We already have
+          // everything a fresh start needs in matchData.
           navigation.replace('ScoreCard', {
-            matchData: fresh.data || fresh,
+            matchData: {
+              _id: existingMatchId,
+              ...matchData,
+              status: 'in_progress',
+              date: new Date().toISOString(),
+            },
             matchSettings: matchData,
           });
         } else {
@@ -896,6 +906,20 @@ const MatchSetupScreen = ({ navigation, route }) => {
                 icon={<BallsIcon />}
               />
             </View>
+
+            {/* Tournament matches: make it clear the overs/balls above can be cut
+                for a single game (e.g. a dead rubber) without touching the
+                tournament's own settings or any other fixture. */}
+            {tournamentId && (
+              <View style={styles.perMatchHint}>
+                <Text style={styles.perMatchHintTitle}>Overs &amp; balls apply to this match only</Text>
+                <Text style={styles.perMatchHintText}>
+                  Reduce the overs or balls above if this game doesn't need full length — e.g. a
+                  dead rubber where both teams are already through. It changes only this match; the
+                  tournament settings and other fixtures stay the same.
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Match Summary */}
@@ -1154,6 +1178,27 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#f1f5f9',
     marginHorizontal: spacing.lg,
+  },
+  perMatchHint: {
+    marginTop: spacing.md,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 14,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  perMatchHintTitle: {
+    fontSize: 13,
+    fontWeight: fontWeights.bold,
+    color: '#1d4ed8',
+    marginBottom: 4,
+  },
+  perMatchHintText: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontWeight: fontWeights.medium,
+    color: '#3b6bb5',
   },
   // Dropdown Styles
   dropdownContainer: {

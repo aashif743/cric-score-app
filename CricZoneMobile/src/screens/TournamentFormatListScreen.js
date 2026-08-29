@@ -15,6 +15,7 @@ import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import TournamentCard from '../components/TournamentCard';
 import GradientHeader from '../components/GradientHeader';
+import Icon from '../components/Icon';
 
 const FORMAT_TITLES = {
   quick: 'Quick Tournaments',
@@ -168,8 +169,7 @@ const TournamentFormatListScreen = ({ navigation, route }) => {
       {!loading && !error && filteredTournaments.length > 0 && (
         <TouchableOpacity style={styles.fab} onPress={handleCreate} activeOpacity={0.8}>
           <View style={styles.fabIcon}>
-            <View style={styles.fabHLine} />
-            <View style={styles.fabVLine} />
+            <Icon name="plus" size={26} color="#fff" strokeWidth={2.6} />
           </View>
         </TouchableOpacity>
       )}
@@ -178,8 +178,7 @@ const TournamentFormatListScreen = ({ navigation, route }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalIconContainer}>
-              <View style={styles.modalTrashTop} />
-              <View style={styles.modalTrashBody} />
+              <Icon name="trash" size={30} color="#ef4444" />
             </View>
             <Text style={styles.modalTitle}>Delete Tournament?</Text>
             <Text style={styles.modalMessage}>

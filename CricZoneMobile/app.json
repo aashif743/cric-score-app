@@ -2,7 +2,7 @@
   "expo": {
     "name": "CricZone",
     "slug": "CricZoneMobile",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "14",
+      "buildNumber": "20",
       "infoPlist": {
         "NSCameraUsageDescription": "CricZone needs camera access to capture and share scorecard images.",
         "NSPhotoLibraryUsageDescription": "CricZone needs photo library access to save and share scorecard images.",

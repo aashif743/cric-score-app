@@ -35,48 +35,31 @@ const StrikerSelectModal = ({
 
           {/* Batsman Options */}
           <View style={styles.optionsContainer}>
+            {/* Both batsmen are shown neutrally — no pre-selected default — so
+                the scorer must consciously tap who is on strike. */}
             {batsmanOptions.map((batsman, index) => (
               <TouchableOpacity
                 key={batsman.id || index}
-                style={[
-                  styles.optionCard,
-                  batsman.isSuggested && styles.optionCardSuggested,
-                ]}
+                style={styles.optionCard}
                 onPress={() => onSelect(batsman)}
                 activeOpacity={0.7}
               >
                 {/* Avatar */}
-                <View style={[
-                  styles.avatar,
-                  batsman.isSuggested && styles.avatarSuggested,
-                ]}>
-                  <Text style={[
-                    styles.avatarText,
-                    batsman.isSuggested && styles.avatarTextSuggested,
-                  ]}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
                     {batsman.name.charAt(0).toUpperCase()}
                   </Text>
                 </View>
 
                 {/* Name */}
                 <View style={styles.optionInfo}>
-                  <Text style={[
-                    styles.optionName,
-                    batsman.isSuggested && styles.optionNameSuggested,
-                  ]} numberOfLines={2}>
+                  <Text style={styles.optionName} numberOfLines={2}>
                     {batsman.name}
                   </Text>
                   {batsman.isNew ? (
                     <Text style={styles.newTag}>New batsman</Text>
                   ) : null}
                 </View>
-
-                {/* Checkmark for suggested */}
-                {batsman.isSuggested && (
-                  <View style={styles.checkContainer}>
-                    <Text style={styles.checkText}>✓</Text>
-                  </View>
-                )}
               </TouchableOpacity>
             ))}
           </View>

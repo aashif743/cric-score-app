@@ -30,10 +30,12 @@ exports.getLiveMatches = async (req, res) => {
     const tournamentIds = publicTournaments.map((t) => t._id);
 
     // "Live now" means recently active. Matches left at in_progress for hours
-    // are abandoned, not live — without this guard the strip fills with stale
-    // matches that were never formally ended. A real match won't sit idle this
-    // long; a paused one resumes well within the window.
-    const LIVE_RECENCY_MS = 12 * 60 * 60 * 1000; // 12 hours
+    // are abandoned, not live — without this guard the public strip fills with
+    // stale cards that were never formally ended. A real match updates every
+    // ball, so it stays well within this window; if a scorer walks away the card
+    // drops off, and the instant they resume (any ball) updatedAt refreshes and
+    // it reappears. So the filter is non-destructive — it only hides idle cards.
+    const LIVE_RECENCY_MS = 3 * 60 * 60 * 1000; // 3 hours of no scoring activity
     const FINISHED_WINDOW_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
     const liveSince = new Date(Date.now() - LIVE_RECENCY_MS);
     const finishedSince = new Date(Date.now() - FINISHED_WINDOW_MS);

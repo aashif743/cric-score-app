@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AuthContext } from '../context/AuthContext';
 import LiveMatchesStrip from '../components/LiveMatchesStrip';
+import Icon from '../components/Icon';
 
 // --- Icons (built from Views) ------------------------------------------------
 
@@ -24,28 +25,15 @@ const CricketBatIcon = () => (
 );
 
 const TrophyIcon = () => (
-  <View style={iconStyles.container}>
-    <View style={iconStyles.trophyCup} />
-    <View style={iconStyles.trophyHandleL} />
-    <View style={iconStyles.trophyHandleR} />
-    <View style={iconStyles.trophyStem} />
-    <View style={iconStyles.trophyBase} />
-  </View>
+  <View style={iconStyles.container}><Icon name="trophy" size={22} color="#fff" /></View>
 );
 
 const ClockIcon = () => (
-  <View style={iconStyles.container}>
-    <View style={iconStyles.clockFace} />
-    <View style={iconStyles.clockHandV} />
-    <View style={iconStyles.clockHandH} />
-  </View>
+  <View style={iconStyles.container}><Icon name="clock" size={22} color="#fff" /></View>
 );
 
 const ChevronIcon = ({ color = '#fff' }) => (
-  <View style={iconStyles.chevronContainer}>
-    <View style={[iconStyles.chevronLine, { backgroundColor: color, transform: [{ rotate: '45deg' }, { translateY: -3 }] }]} />
-    <View style={[iconStyles.chevronLine, { backgroundColor: color, transform: [{ rotate: '-45deg' }, { translateY: 3 }] }]} />
-  </View>
+  <Icon name="chevron-right" size={17} color={color} strokeWidth={2.6} />
 );
 
 // --- Animated section card ---------------------------------------------------
