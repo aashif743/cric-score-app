@@ -225,6 +225,19 @@ function Dashboard() {
               </ActionButton>
             </Link>
           </ActionCard>
+
+          <ActionCard variants={itemVariants} whileHover={{ y: -5 }}>
+            <h3>Player Auction</h3>
+            <p>Run a live player auction for your league — teams, purses & bidding</p>
+            <Link
+              to="/auctions"
+              style={{ textDecoration: 'none', width: '100%', display: 'flex', justifyContent: 'center' }}
+            >
+              <ActionButton whileHover={{ scale: 1.05 }}>
+                Open Auctions
+              </ActionButton>
+            </Link>
+          </ActionCard>
         </ActionGrid>
       </motion.div>
     </DashboardContainer>

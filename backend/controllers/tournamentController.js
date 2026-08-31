@@ -986,6 +986,63 @@ exports.setBracketTeam = async (req, res) => {
   }
 };
 
+// A generated/placeholder player name that shouldn't be remembered as part of a
+// team's real line-up (e.g. "Batsman 3", "Bowler 1", "New Batsman",
+// "Mumbai Player 5").
+const isPlaceholderPlayerName = (name, team) => {
+  const n = (name || "").trim();
+  if (!n) return true;
+  if (/^Batsman\s+\d+$/i.test(n)) return true;
+  if (/^Bowler\s+\d+$/i.test(n)) return true;
+  if (/^New\s+Batsman$/i.test(n)) return true;
+  if (/^Player\s+\d+$/i.test(n)) return true;
+  if (team) {
+    const esc = team.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`^${esc}\\s+Player\\s+\\d+$`, "i").test(n)) return true;
+  }
+  return false;
+};
+
+// GET /api/tournaments/:id/rosters
+// Every REAL (non-placeholder) player name seen for each team across the
+// tournament's matches, so the scorer can re-use a team's line-up next time:
+//   { data: { "Team A": ["John", "Sam", ...], "Team B": [...] } }
+exports.getTeamRosters = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
+    }
+    const matches = await Match.find({ tournament: id })
+      .select(
+        "innings1.battingTeam innings1.bowlingTeam innings1.batting.name innings1.bowling.name " +
+        "innings2.battingTeam innings2.bowlingTeam innings2.batting.name innings2.bowling.name",
+      )
+      .lean();
+
+    const rosters = {};
+    const add = (team, name) => {
+      if (!team || isPlaceholderPlayerName(name, team)) return;
+      const clean = name.trim();
+      if (!rosters[team]) rosters[team] = [];
+      if (!rosters[team].some((x) => x.toLowerCase() === clean.toLowerCase())) {
+        rosters[team].push(clean);
+      }
+    };
+    for (const m of matches) {
+      for (const inn of [m.innings1, m.innings2]) {
+        if (!inn) continue;
+        (inn.batting || []).forEach((p) => add(inn.battingTeam, p && p.name));
+        (inn.bowling || []).forEach((p) => add(inn.bowlingTeam, p && p.name));
+      }
+    }
+    return res.json({ success: true, data: rosters });
+  } catch (error) {
+    console.error("Get team rosters error:", error);
+    return res.status(500).json({ success: false, error: "Failed to load team rosters." });
+  }
+};
+
 // PATCH /tournaments/:id/playoff-format  { playoffFormat: 'knockout' | 'qualifier' }
 // Changes a league tournament's knockout-stage format and rebuilds the playoff
 // matches. Allowed while the playoffs haven't started (group stage may be live).

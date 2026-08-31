@@ -13,6 +13,7 @@ router.route("/:id")
   .delete(protect, tournamentController.deleteTournament);
 
 router.get("/:id/stats", protect, tournamentController.getTournamentStats);
+router.get("/:id/rosters", protect, tournamentController.getTeamRosters);
 router.post("/:id/share", protect, tournamentController.generateShareId);
 router.patch("/:id/rename-team", protect, tournamentController.renameTeam);
 router.patch("/:id/swap-teams", protect, tournamentController.swapTeamGroups);

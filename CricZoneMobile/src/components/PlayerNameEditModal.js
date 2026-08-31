@@ -9,6 +9,7 @@ import {
   Modal,
   Keyboard,
   FlatList,
+  ScrollView,
   Dimensions,
   Platform,
   KeyboardAvoidingView,
@@ -18,6 +19,14 @@ import { colors, spacing, borderRadius, fontWeights } from '../utils/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// A default/placeholder name (e.g. "Batsman 1", "Bowler 3", "New Batsman") that
+// the user is about to overwrite — treat it like an empty query so the full
+// saved line-up and recent suggestions show right away.
+const isPlaceholderName = (n) => {
+  const s = (n || '').trim();
+  return !s || /^(batsman|bowler|player)\s+\d+$/i.test(s) || /^new\s+batsman$/i.test(s);
+};
+
 const PlayerNameEditModal = ({
   visible,
   initialValue = '',
@@ -26,18 +35,32 @@ const PlayerNameEditModal = ({
   title = 'Edit Name',
   placeholder = 'Enter player name',
   type = 'player', // 'player' or 'team'
+  prioritySuggestions = [], // this team's saved line-up, shown first
+  priorityLabel = 'Team players',
 }) => {
   const [value, setValue] = useState(initialValue);
   const [suggestions, setSuggestions] = useState([]);
   const inputRef = useRef(null);
   const requestId = useRef(0);
 
+  // The team's saved players that match what's typed (prefix match), shown as a
+  // labelled section above the normal suggestions. General suggestions that
+  // duplicate a team player are dropped so nothing appears twice.
+  const q = isPlaceholderName(value) ? '' : value.trim().toLowerCase();
+  const teamMatches = (prioritySuggestions || [])
+    .filter((n) => n && (!q || n.toLowerCase().startsWith(q)))
+    .slice(0, 8);
+  const teamSet = new Set(teamMatches.map((n) => n.toLowerCase()));
+  const generalSuggestions = suggestions.filter(
+    (s) => !teamSet.has((s.name || '').toLowerCase()),
+  );
+
   // Reset value when modal opens
   useEffect(() => {
     if (visible) {
       setValue(initialValue);
       // Fetch initial suggestions immediately
-      if (initialValue.trim().length >= 1) {
+      if (initialValue.trim().length >= 1 && !isPlaceholderName(initialValue)) {
         fetchSuggestions(initialValue.trim());
       } else {
         fetchRecentSuggestions();
@@ -88,7 +111,7 @@ const PlayerNameEditModal = ({
     setValue(text);
 
     // Immediate fetch - no debounce for fastest response
-    if (text.trim().length >= 1) {
+    if (text.trim().length >= 1 && !isPlaceholderName(text)) {
       fetchSuggestions(text.trim());
     } else {
       fetchRecentSuggestions();
@@ -213,21 +236,56 @@ const PlayerNameEditModal = ({
                   )}
                 </View>
 
-                {/* Suggestions List */}
-                {suggestions.length > 0 && (
+                {/* Suggestions — this team's saved line-up first, then general */}
+                {(teamMatches.length > 0 || generalSuggestions.length > 0) && (
                   <View style={styles.suggestionsContainer}>
-                    <Text style={styles.suggestionsLabel}>
-                      {value.trim().length > 0 ? 'Suggestions' : 'Recent Players'}
-                    </Text>
-                    <FlatList
-                      data={suggestions}
-                      renderItem={renderSuggestionItem}
-                      keyExtractor={(item, idx) => item._id || `${item.name}-${idx}`}
-                      keyboardShouldPersistTaps="always"
-                      showsVerticalScrollIndicator={suggestions.length > 5}
-                      bounces={false}
+                    <ScrollView
                       style={styles.suggestionsList}
-                    />
+                      keyboardShouldPersistTaps="always"
+                      showsVerticalScrollIndicator
+                      bounces={false}
+                    >
+                      {teamMatches.length > 0 && (
+                        <>
+                          <View style={styles.sectionHeader}>
+                            <Text style={styles.suggestionsLabel} numberOfLines={1}>{priorityLabel}</Text>
+                            <View style={styles.savedPill}><Text style={styles.savedPillText}>Saved line-up</Text></View>
+                          </View>
+                          {teamMatches.map((name, idx) => (
+                            <TouchableOpacity
+                              key={`team-${name}-${idx}`}
+                              style={styles.suggestionItem}
+                              onPress={() => handleSelectSuggestion({ name })}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={styles.suggestionText} numberOfLines={1}>{name}</Text>
+                              <View style={styles.teamBadge}><Text style={styles.teamBadgeText}>Team</Text></View>
+                            </TouchableOpacity>
+                          ))}
+                        </>
+                      )}
+
+                      {generalSuggestions.length > 0 && (
+                        <>
+                          <Text style={[styles.suggestionsLabel, teamMatches.length > 0 && styles.sectionGap]}>
+                            {value.trim().length > 0 ? 'Other suggestions' : 'Recent players'}
+                          </Text>
+                          {generalSuggestions.map((s, idx) => (
+                            <TouchableOpacity
+                              key={s._id || `${s.name}-${idx}`}
+                              style={styles.suggestionItem}
+                              onPress={() => handleSelectSuggestion(s)}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={styles.suggestionText} numberOfLines={1}>{s.name}</Text>
+                              {isPopular(s) && (
+                                <View style={styles.popularBadge}><Text style={styles.popularBadgeText}>Popular</Text></View>
+                              )}
+                            </TouchableOpacity>
+                          ))}
+                        </>
+                      )}
+                    </ScrollView>
                   </View>
                 )}
               </View>
@@ -341,7 +399,17 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+    flexShrink: 1,
   },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sectionGap: { marginTop: 12 },
+  savedPill: {
+    backgroundColor: '#eff6ff', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2,
+    borderWidth: 1, borderColor: '#bfdbfe', marginBottom: 6,
+  },
+  savedPillText: { fontSize: 9.5, fontWeight: '800', color: '#1d4ed8', letterSpacing: 0.3 },
+  teamBadge: { backgroundColor: '#eff6ff', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginLeft: 8 },
+  teamBadgeText: { fontSize: 10, color: '#1d4ed8', fontWeight: '700' },
   suggestionsList: {
     backgroundColor: '#f8fafc',
     borderRadius: 10,

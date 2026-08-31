@@ -21,6 +21,19 @@ const tournamentService = {
     }
   },
 
+  // Real player names seen for each team across the tournament's matches, so a
+  // team's line-up can be suggested first when scoring their next match.
+  // Returns { "Team A": ["John", ...], ... } (empty object on any failure).
+  getTeamRosters: async (id, token) => {
+    try {
+      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const response = await API.get(`/tournaments/${id}/rosters`, config);
+      return response.data?.data || {};
+    } catch (error) {
+      return {};
+    }
+  },
+
   getTournament: async (id, token) => {
     try {
       const config = { headers: { Authorization: `Bearer ${token}` } };

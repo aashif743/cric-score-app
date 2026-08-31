@@ -29,6 +29,11 @@ import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import Support from './pages/Support';
 import AccountDeletion from './pages/AccountDeletion';
+import AuctionList from './pages/auction/AuctionList';
+import AuctionSetup from './pages/auction/AuctionSetup';
+import AuctionControl from './pages/auction/AuctionControl';
+import AuctionOwner from './pages/auction/AuctionOwner';
+import AuctionBigScreen from './pages/auction/AuctionBigScreen';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
 
 // --- Placeholder Components for Future Features ---
@@ -208,7 +213,7 @@ const handleResumeMatch = (matchToResume) => {
 
 
   // --- Conditional Rendering Logic for Navigation ---
-  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament', '/overlay', '/tv', '/privacy', '/terms'];
+  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament', '/overlay', '/tv', '/privacy', '/terms', '/auction'];
   const isNavHidden = pathsWithoutNav.some(path => location.pathname.startsWith(path) && path !== '/');
   
   // Corrected code
@@ -240,6 +245,13 @@ const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will
           <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/auth" />} />
           <Route path="/past-matches" element={user ? <PastMatches onResumeMatch={handleResumeMatch} /> : <Navigate to="/auth" />} />
           
+          {/* --- Auction system --- */}
+          <Route path="/auction/screen/:shareId" element={<AuctionBigScreen />} />
+          <Route path="/auctions" element={user ? <AuctionList /> : <Navigate to="/auth" />} />
+          <Route path="/auctions/:id/setup" element={user ? <AuctionSetup /> : <Navigate to="/auth" />} />
+          <Route path="/auctions/:id/live" element={user ? <AuctionControl /> : <Navigate to="/auth" />} />
+          <Route path="/auctions/:id/team" element={user ? <AuctionOwner /> : <Navigate to="/auth" />} />
+
           {/* --- New Routes for Future Features --- */}
           <Route path="/points-system" element={user ? <PointsSystem /> : <Navigate to="/auth" />} />
           <Route path="/profile" element={user ? <ProfilePage /> : <Navigate to="/auth" />} />

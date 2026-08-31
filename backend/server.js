@@ -16,6 +16,7 @@ const suggestionRoutes = require("./routes/suggestionRoutes");
 const tournamentRoutes = require("./routes/tournamentRoutes");
 const publicRoutes = require("./routes/publicRoutes");
 const liveRoutes = require("./routes/liveRoutes");
+const auctionRoutes = require("./routes/auctionRoutes");
 
 const app = express();
 
@@ -54,6 +55,9 @@ const io = new Server(server, {
   },
 });
 
+// Make the Socket.io server available to controllers (auction broadcasts).
+app.set("io", io);
+
 // CORS configuration for Express API routes
 app.use(cors(corsOptions));
 
@@ -71,6 +75,7 @@ app.use("/api/suggestions", suggestionRoutes);
 app.use("/api/tournaments", tournamentRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/live", liveRoutes);
+app.use("/api/auctions", auctionRoutes);
 
 // MongoDB Connection
 mongoose
@@ -146,6 +151,16 @@ io.on("connection", (socket) => {
   socket.on("leave-match", (matchId) => {
     socket.leave(matchId);
     console.log(`User ${socket.id} left room: ${matchId}`);
+  });
+
+  // Auction rooms — control panel, big screen and owner devices join to receive
+  // live 'auction:update' broadcasts (the actual actions go through the REST API,
+  // which validates and then emits to this room).
+  socket.on("join-auction", (auctionId) => {
+    if (auctionId) socket.join(`auction:${auctionId}`);
+  });
+  socket.on("leave-auction", (auctionId) => {
+    if (auctionId) socket.leave(`auction:${auctionId}`);
   });
 
   socket.on("disconnect", () => {

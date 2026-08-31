@@ -20,11 +20,27 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
 import suggestionService from '../utils/suggestionService';
+import tournamentService from '../utils/tournamentService';
 import AutocompleteInput from '../components/AutocompleteInput';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import StrikerSelectModal from '../components/StrikerSelectModal';
 import Icon from '../components/Icon';
 import Svg, { Path } from 'react-native-svg';
+
+// A generated/placeholder player name (e.g. "Batsman 3", "Bowler 1",
+// "New Batsman", "Mumbai Player 5") that shouldn't be remembered as a real
+// squad member. Mirrors the backend's roster filter.
+const isPlaceholderPlayerName = (name, team) => {
+  const n = (name || '').trim();
+  if (!n) return true;
+  if (/^(batsman|bowler|player)\s+\d+$/i.test(n)) return true;
+  if (/^new\s+batsman$/i.test(n)) return true;
+  if (team) {
+    const esc = team.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`^${esc}\\s+player\\s+\\d+$`, 'i').test(n)) return true;
+  }
+  return false;
+};
 
 // Curved-arrow undo glyph. Cleaner and more recognizable than the Unicode
 // "anticlockwise top semicircle arrow" character (which renders unreliably
@@ -244,7 +260,14 @@ const ScoreCardScreen = ({ navigation, route }) => {
     playerName: '',
     playerType: null, // 'striker', 'nonStriker', 'bowler'
     title: 'Edit Name',
+    teamPlayers: [],   // this team's saved line-up (shown first in the picker)
+    teamLabel: '',     // e.g. "Mumbai players"
   });
+
+  // Saved player names per team across this tournament's matches. Lets us
+  // suggest a team's known line-up first when a player is re-named in a later
+  // match. { "Team A": ["John", ...] } — empty for non-tournament / guest games.
+  const [teamRosters, setTeamRosters] = useState({});
   const [showEndInningsModal, setShowEndInningsModal] = useState(false);
   const [endInningsPromptDismissed, setEndInningsPromptDismissed] = useState(false); // Track if user dismissed end innings prompt
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -435,6 +458,18 @@ const ScoreCardScreen = ({ navigation, route }) => {
   }, [matchData?._id]);
 
   // Live sync helpers are defined later, after saveMatchProgress
+
+  // Load this tournament's saved team line-ups so the player-name picker can
+  // suggest a team's known players first. No-op for guest / non-tournament games.
+  useEffect(() => {
+    const tId = matchData?.tournament;
+    if (!tId || !user?.token) return;
+    let cancelled = false;
+    tournamentService.getTeamRosters(tId, user.token)
+      .then((rosters) => { if (!cancelled && rosters && typeof rosters === 'object') setTeamRosters(rosters); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [matchData?.tournament, user?.token]);
 
   // Get batting team key (teamA or teamB)
   const getBattingTeamKey = () => {
@@ -2894,12 +2929,46 @@ const ScoreCardScreen = ({ navigation, route }) => {
       title = 'Edit Bowler';
     }
 
+    // The team this player belongs to (batsmen → current batting side; bowler →
+    // current bowling side).
+    const teamKey = playerType === 'bowler' ? getBowlingTeamKey() : getBattingTeamKey();
+    const teamName = teams[teamKey]?.name || '';
+
+    // Build this team's line-up to suggest: names ALREADY entered for the team
+    // in THIS match (freshest) first, then its saved roster from past matches.
+    // The current-match part covers the cross-innings case — e.g. a team that
+    // batted in the 1st innings and now bowls in the 2nd: its 1st-innings names
+    // are offered when renaming its bowler.
+    const collected = [];
+    const pushNames = (arr) => (arr || []).forEach((p) => {
+      const n = (p?.name || '').trim();
+      if (n && !isPlaceholderPlayerName(n, teamName) &&
+          !collected.some((x) => x.toLowerCase() === n.toLowerCase())) {
+        collected.push(n);
+      }
+    });
+    // Current innings, whichever side this team is on right now.
+    if (teams[getBattingTeamKey()]?.name === teamName) pushNames(allBatsmen);
+    if (teams[getBowlingTeamKey()]?.name === teamName) pushNames(allBowlers);
+    // The already-played first innings, if we're past it.
+    if (firstInningsData) {
+      if (firstInningsData.battingTeam === teamName) pushNames(firstInningsData.batting);
+      if (firstInningsData.bowlingTeam === teamName) pushNames(firstInningsData.bowling);
+    }
+    // Then merge the saved roster (past matches), skipping duplicates.
+    (teamRosters[teamName] || []).forEach((n) => {
+      if (n && !collected.some((x) => x.toLowerCase() === n.toLowerCase())) collected.push(n);
+    });
+    const teamPlayers = collected;
+
     setPlayerNameEditModal({
       visible: true,
       playerId,
       playerName,
       playerType,
       title,
+      teamPlayers,
+      teamLabel: teamName ? `${teamName} players` : 'Team players',
     });
   };
 
@@ -5603,6 +5672,8 @@ const ScoreCardScreen = ({ navigation, route }) => {
         title={playerNameEditModal.title}
         placeholder="Enter player name"
         type="player"
+        prioritySuggestions={playerNameEditModal.teamPlayers}
+        priorityLabel={playerNameEditModal.teamLabel}
         onSave={handlePlayerNameModalSave}
         onClose={closePlayerNameModal}
       />
