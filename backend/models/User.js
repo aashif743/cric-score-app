@@ -15,6 +15,10 @@ const userSchema = mongoose.Schema(
       unique: false,  // Explicitly set to not unique
       sparse: true    // Allows multiple null values
     },
+    // Set only for email/password accounts (bcrypt hash). Phone-OTP users have none.
+    password: {
+      type: String,
+    },
     otp: {
         type: String,
     },

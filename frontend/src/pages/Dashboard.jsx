@@ -199,32 +199,38 @@ function Dashboard() {
         style={{ width: '100%' }}
       >
         <ActionGrid>
-          <ActionCard variants={itemVariants} className="disabled">
-            <h3>Tournament</h3>
-            <p>Organize or join competitive cricket tournaments</p>
-            <ActionButton disabled whileHover={{ scale: 1.05 }}>
-              Coming Soon
-            </ActionButton>
-            <ComingSoonBadge>Feature in development</ComingSoonBadge>
-          </ActionCard>
+          {/* Web-based scoring is now handled by the mobile app — these cards are
+              hidden from the website (kept here so they can be re-enabled later). */}
+          {false && (
+            <>
+              <ActionCard variants={itemVariants} className="disabled">
+                <h3>Tournament</h3>
+                <p>Organize or join competitive cricket tournaments</p>
+                <ActionButton disabled whileHover={{ scale: 1.05 }}>
+                  Coming Soon
+                </ActionButton>
+                <ComingSoonBadge>Feature in development</ComingSoonBadge>
+              </ActionCard>
 
-          <ActionCard variants={itemVariants} whileHover={{ y: -5 }}>
-            <h3>Quick Match</h3>
-            <p>Start a friendly match with customizable rules</p>
-            <Link
-              to="/match-setup"
-              style={{
-                textDecoration: 'none',
-                width: '100%',
-                display: 'flex',
-                justifyContent: 'center'
-              }}
-            >
-              <ActionButton whileHover={{ scale: 1.05 }}>
-                Start Match
-              </ActionButton>
-            </Link>
-          </ActionCard>
+              <ActionCard variants={itemVariants} whileHover={{ y: -5 }}>
+                <h3>Quick Match</h3>
+                <p>Start a friendly match with customizable rules</p>
+                <Link
+                  to="/match-setup"
+                  style={{
+                    textDecoration: 'none',
+                    width: '100%',
+                    display: 'flex',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <ActionButton whileHover={{ scale: 1.05 }}>
+                    Start Match
+                  </ActionButton>
+                </Link>
+              </ActionCard>
+            </>
+          )}
 
           <ActionCard variants={itemVariants} whileHover={{ y: -5 }}>
             <h3>Player Auction</h3>

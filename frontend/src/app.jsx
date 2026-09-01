@@ -34,6 +34,8 @@ import AuctionSetup from './pages/auction/AuctionSetup';
 import AuctionControl from './pages/auction/AuctionControl';
 import AuctionOwner from './pages/auction/AuctionOwner';
 import AuctionBigScreen from './pages/auction/AuctionBigScreen';
+import LandingPage from './pages/LandingPage';
+import { ThemeProvider } from './context/ThemeContext.jsx';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
 
 // --- Placeholder Components for Future Features ---
@@ -227,7 +229,7 @@ const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will
       <main style={{ paddingBottom: showBottomNav ? '80px' : '0' }}>
         <Routes>
           {/* --- Public Routes --- */}
-          <Route path="/" element={!user ? <AuthPage /> : <Navigate to="/dashboard" />} />
+          <Route path="/" element={<LandingPage />} />
           <Route path="/auth" element={!user ? <AuthPage /> : <Navigate to="/dashboard" />} />
           <Route path="/match-setup" element={<MatchSetup onStartMatch={handleStartMatch} />} />
           <Route path="/full-scorecard/:matchIdParam" element={<FullScorecardPage />} />
@@ -286,11 +288,13 @@ const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will
 // The main App component wraps everything in the necessary providers.
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <AppContent />
-      </Router>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

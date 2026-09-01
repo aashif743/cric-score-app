@@ -45,6 +45,11 @@ const AuthPage = () => {
     name: 'Sri Lanka',
     flag: '🇱🇰'
   });
+  // Email login/register (alternative to phone OTP).
+  const [method, setMethod] = useState('phone');     // 'phone' | 'email'
+  const [emailMode, setEmailMode] = useState('login'); // 'login' | 'register'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -52,7 +57,7 @@ const AuthPage = () => {
   const formRef = useRef(null);
 
   useEffect(() => {
-    if (otp.length === 6 && !isLoading) {
+    if (otp.length === 4 && !isLoading) {
       formRef.current?.requestSubmit();
     }
   }, [otp, isLoading]);
@@ -86,10 +91,27 @@ const AuthPage = () => {
         setStep('name');
       } else {
         login(response);
-        navigate('/dashboard');
+        navigate('/auctions');
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Invalid OTP. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEmailAuth = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+    try {
+      const data = emailMode === 'register'
+        ? await authService.registerWithEmail(name, email, password)
+        : await authService.loginWithEmail(email, password);
+      login(data);
+      navigate('/auctions');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -118,23 +140,48 @@ const AuthPage = () => {
       transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] }
     };
 
+    if (method === 'email') {
+      const register = emailMode === 'register';
+      return (
+        <motion.form key={`email-${emailMode}`} onSubmit={handleEmailAuth} {...formAnimation}>
+          <h2 className="auth-title">{register ? 'Create your account' : 'Welcome back'}</h2>
+          <p className="auth-subtitle">{register ? 'Sign up with your email' : 'Log in with your email & password'}</p>
+          {register && (
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" className="auth-input" required autoFocus />
+          )}
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" className="auth-input" required autoFocus={!register} />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="auth-input" required />
+          <button type="submit" disabled={isLoading || !email || !password || (register && !name.trim())} className="auth-button">
+            {isLoading ? <span className="loading-text">Please wait…</span> : (register ? 'Create account' : 'Log in')}
+          </button>
+          <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#606770', textAlign: 'center' }}>
+            {register ? 'Already have an account? ' : "Don't have an account? "}
+            <button type="button" onClick={() => { setEmailMode(register ? 'login' : 'register'); setError(''); }}
+              style={{ background: 'none', border: 'none', color: '#1877f2', fontWeight: 600, cursor: 'pointer' }}>
+              {register ? 'Log in' : 'Sign up'}
+            </button>
+          </p>
+        </motion.form>
+      );
+    }
+
     switch (step) {
       case 'otp':
         return (
           <motion.form ref={formRef} key="otp" onSubmit={handleVerifyOtp} {...formAnimation}>
             <h2 className="auth-title">Enter Verification Code</h2>
-            <p className="auth-subtitle">We've sent a 6-digit code to <strong>{phoneNumber}</strong></p>
+            <p className="auth-subtitle">We've sent a 4-digit code to <strong>{phoneNumber}</strong></p>
             <input
               type="tel"
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-              placeholder="••••••"
+              placeholder="••••"
               className="auth-input otp-input"
-              maxLength="6"
+              maxLength="4"
               required
               autoFocus
             />
-            <button type="submit" disabled={isLoading || otp.length !== 6} className="auth-button">
+            <button type="submit" disabled={isLoading || otp.length !== 4} className="auth-button">
               {isLoading ? (
                 <span className="loading-text">Verifying...</span>
               ) : (
@@ -292,6 +339,20 @@ const AuthPage = () => {
           </motion.div>
         )}
         
+        {step === 'phone' && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            {['phone', 'email'].map((m) => (
+              <button key={m} type="button" onClick={() => { setMethod(m); setError(''); }}
+                style={{
+                  flex: 1, padding: '10px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 14,
+                  background: method === m ? '#1877f2' : '#eef2f7', color: method === m ? '#fff' : '#606770',
+                }}>
+                {m === 'phone' ? 'Phone' : 'Email'}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="auth-form-wrapper">
           <AnimatePresence mode="wait">
             {renderStep()}

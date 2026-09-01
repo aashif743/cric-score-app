@@ -49,10 +49,26 @@ const completeRegistration = async (phoneNumber, name) => {
   return response.data;
 };
 
+/** Log in with email + password. */
+const loginWithEmail = async (email, password) => {
+  const response = await axios.post(API_URL + "login-email", { email, password });
+  if (response.data.token) localStorage.setItem("user", JSON.stringify(response.data));
+  return response.data;
+};
+
+/** Create an account with name + email + password. */
+const registerWithEmail = async (name, email, password) => {
+  const response = await axios.post(API_URL + "register-email", { name, email, password });
+  if (response.data.token) localStorage.setItem("user", JSON.stringify(response.data));
+  return response.data;
+};
+
 const authService = {
   sendOtp,
   verifyOtp,
   completeRegistration,
+  loginWithEmail,
+  registerWithEmail,
 };
 
 export default authService;

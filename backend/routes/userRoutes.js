@@ -1,12 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { sendOtp, verifyOtp, setUserName, deleteAccount, getProfile, refreshToken } = require('../controllers/userController');
+const { sendOtp, verifyOtp, setUserName, deleteAccount, getProfile, refreshToken, registerEmail, loginEmail } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 
 // Public routes
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 router.post('/complete-registration', setUserName);
+router.post('/register-email', registerEmail);
+router.post('/login-email', loginEmail);
 
 // Protected routes (require authentication)
 router.get('/profile', protect, getProfile);

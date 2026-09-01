@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const axios = require('axios');
 const User = require('../models/User');
 const Match = require('../models/Match');
@@ -240,4 +241,75 @@ const refreshToken = async (req, res) => {
   }
 };
 
-module.exports = { sendOtp, verifyOtp, setUserName, deleteAccount, getProfile, refreshToken };
+// @desc    Register a new account with email + password
+// @route   POST /api/users/register-email
+const registerEmail = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!name || !name.trim() || !cleanEmail || !password) {
+      return res.status(400).json({ message: 'Name, email and password are required' });
+    }
+    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
+      return res.status(400).json({ message: 'Please enter a valid email address' });
+    }
+    if (String(password).length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    }
+    const existing = await User.findOne({ email: cleanEmail });
+    if (existing) {
+      return res.status(409).json({ message: 'An account with this email already exists' });
+    }
+    const hash = await bcrypt.hash(String(password), 10);
+    // The sentinel phoneNumber satisfies the model's required+unique phone index
+    // without ever colliding with a real number; email users log in by email.
+    const user = await User.create({
+      name: name.trim(),
+      email: cleanEmail,
+      password: hash,
+      phoneNumber: `email:${cleanEmail}`,
+    });
+    res.status(201).json({
+      _id: user.id,
+      name: user.name,
+      email: user.email,
+      token: generateToken(user._id),
+      isNewUser: false,
+    });
+  } catch (error) {
+    console.error('Email register error:', error.message);
+    res.status(500).json({ message: 'Failed to register. Please try again.' });
+  }
+};
+
+// @desc    Log in with email + password
+// @route   POST /api/users/login-email
+const loginEmail = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
+    const user = await User.findOne({ email: cleanEmail });
+    if (!user || !user.password) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+    const ok = await bcrypt.compare(String(password), user.password);
+    if (!ok) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+    res.status(200).json({
+      _id: user.id,
+      name: user.name,
+      email: user.email,
+      token: generateToken(user._id),
+      isNewUser: false,
+    });
+  } catch (error) {
+    console.error('Email login error:', error.message);
+    res.status(500).json({ message: 'Failed to log in. Please try again.' });
+  }
+};
+
+module.exports = { sendOtp, verifyOtp, setUserName, deleteAccount, getProfile, refreshToken, registerEmail, loginEmail };
