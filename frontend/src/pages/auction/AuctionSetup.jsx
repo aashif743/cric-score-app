@@ -4,6 +4,7 @@ import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
 import { formatMoney, parseMoney } from "../../utils/auctionFormat";
 import ImageUpload from "../../components/auction/ImageUpload";
+import AuctionShell from "./AuctionShell.jsx";
 
 const TABS = ["Teams", "Players", "Settings"];
 
@@ -28,25 +29,18 @@ export default function AuctionSetup() {
   const { auction, teams, players } = state;
   const money = (n) => formatMoney(n, { symbol: auction.currencySymbol, format: auction.currencyFormat });
 
-  return (
-    <div className="min-h-screen bg-slate-50 px-4 py-6">
-      <div className="mx-auto max-w-4xl">
-        {/* Header */}
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <button onClick={() => navigate("/auctions")} className="mb-1 text-xs font-bold text-slate-400 hover:text-slate-600">← All auctions</button>
-            <h1 className="text-2xl font-black text-slate-900">{auction.name}</h1>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => navigate(`/auctions/${id}/live`)} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">Go Live →</button>
-          </div>
-        </div>
+  const goLive = (
+    <button onClick={() => navigate(`/auctions/${id}/live`)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 hover:bg-emerald-700">Go Live →</button>
+  );
 
+  return (
+    <AuctionShell active="setup" auctionId={id} auctionName={auction.name} shareId={auction.shareId} title={auction.name} status={auction.status} right={goLive}>
+      <div className="max-w-5xl">
         {/* Tabs */}
-        <div className="mb-5 flex gap-2">
+        <div className="mb-6 flex gap-2">
           {TABS.map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === t ? "bg-indigo-600 text-white" : "bg-white text-slate-600 border border-slate-200"}`}>
+              className={`rounded-xl px-4 py-2 text-sm font-bold transition ${tab === t ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"}`}>
               {t}
             </button>
           ))}
@@ -56,7 +50,7 @@ export default function AuctionSetup() {
         {tab === "Players" && <PlayersTab id={id} token={user.token} players={players} money={money} onChange={setState} />}
         {tab === "Settings" && <SettingsTab id={id} token={user.token} auction={auction} money={money} onChange={setState} />}
       </div>
-    </div>
+    </AuctionShell>
   );
 }
 
@@ -76,14 +70,14 @@ function TeamsTab({ id, token, teams, defaultPurse, money, onChange }) {
 
   return (
     <div>
-      <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="mb-4 rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5 p-4">
         <div className="mb-2"><ImageUpload value={form.logoUrl} onChange={(url) => setForm({ ...form, logoUrl: url })} round label="Team logo" /></div>
         <div className="grid gap-2 sm:grid-cols-4">
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Team name" className="rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
-          <input value={form.ownerName} onChange={(e) => setForm({ ...form, ownerName: e.target.value })} placeholder="Owner name" className="rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
-          <input value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} placeholder="Owner email (login)" className="rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Team name" className="rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+          <input value={form.ownerName} onChange={(e) => setForm({ ...form, ownerName: e.target.value })} placeholder="Owner name" className="rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+          <input value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} placeholder="Owner email (login)" className="rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
           <div className="flex gap-2">
-            <input value={form.purse} onChange={(e) => setForm({ ...form, purse: e.target.value })} placeholder={`Purse (${money(defaultPurse)})`} className="w-full rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+            <input value={form.purse} onChange={(e) => setForm({ ...form, purse: e.target.value })} placeholder={`Purse (${money(defaultPurse)})`} className="w-full rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
             <button onClick={add} className="rounded-lg bg-indigo-600 px-4 text-sm font-bold text-white">Add</button>
           </div>
         </div>
@@ -91,11 +85,11 @@ function TeamsTab({ id, token, teams, defaultPurse, money, onChange }) {
       {teams.length === 0 ? <Empty text="No teams yet — add the bidding teams above." /> : (
         <div className="grid gap-3 sm:grid-cols-2">
           {teams.map((t) => (
-            <div key={t._id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
+            <div key={t._id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5 p-4">
               <div className="flex items-center gap-3">
                 {t.logoUrl ? <img src={t.logoUrl} alt="" className="h-10 w-10 rounded-full object-cover" /> : <div className="grid h-10 w-10 place-items-center rounded-full bg-slate-200 text-sm font-bold text-slate-500">{t.name[0]}</div>}
                 <div>
-                <div className="font-black text-slate-900">{t.name}</div>
+                <div className="font-black text-slate-900 dark:text-white">{t.name}</div>
                 <div className="text-xs text-slate-500">{t.ownerName || "—"} {t.ownerEmail ? `· ${t.ownerEmail}` : ""}</div>
                 <div className="mt-1 text-sm font-bold text-emerald-600">Purse {money(t.purse)}</div>
                 </div>
@@ -137,11 +131,11 @@ function PlayersTab({ id, token, players, money, onChange }) {
 
   return (
     <div>
-      <div className="mb-3 grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-6">
-        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Player name" className="sm:col-span-2 rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
-        <input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="Role" className="rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
-        <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Grade" className="rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
-        <input value={form.basePrice} onChange={(e) => setForm({ ...form, basePrice: e.target.value })} placeholder="Base (20 L)" className="rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+      <div className="mb-3 grid gap-2 rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5 p-4 sm:grid-cols-6">
+        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Player name" className="sm:col-span-2 rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+        <input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="Role" className="rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+        <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Grade" className="rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+        <input value={form.basePrice} onChange={(e) => setForm({ ...form, basePrice: e.target.value })} placeholder="Base (20 L)" className="rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
         <button onClick={add} className="rounded-lg bg-indigo-600 px-4 text-sm font-bold text-white">Add</button>
         <div className="flex items-center gap-6 sm:col-span-6">
           <ImageUpload value={form.photoUrl} onChange={(url) => setForm({ ...form, photoUrl: url })} round label="Player photo" />
@@ -149,20 +143,20 @@ function PlayersTab({ id, token, players, money, onChange }) {
         </div>
       </div>
 
-      <details className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+      <details className="mb-4 rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5 p-4">
         <summary className="cursor-pointer text-sm font-bold text-slate-700">Bulk import (one player per line: Name, BasePrice, Role, Grade)</summary>
-        <textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} placeholder={"Virat Kohli, 2Cr, Batsman, A\nJasprit Bumrah, 2Cr, Bowler, A"} className="mt-2 w-full rounded-lg border-2 border-slate-200 p-3 text-sm outline-none focus:border-indigo-500" />
+        <textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} placeholder={"Virat Kohli, 2Cr, Batsman, A\nJasprit Bumrah, 2Cr, Bowler, A"} className="mt-2 w-full rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 p-3 text-sm outline-none focus:border-indigo-500" />
         <button onClick={importBulk} className="mt-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white">Import players</button>
       </details>
 
       {players.length === 0 ? <Empty text="No players yet — add them above or bulk import." /> : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5">
           {players.map((p, i) => (
-            <div key={p._id} className={`flex items-center gap-3 px-4 py-3 ${i ? "border-t border-slate-100" : ""}`}>
+            <div key={p._id} className={`flex items-center gap-3 px-4 py-3 ${i ? "border-t border-slate-100 dark:border-white/10" : ""}`}>
               <span className="w-6 text-xs font-bold text-slate-400">{i + 1}</span>
-              {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-9 w-9 rounded-full object-cover" /> : <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-500">{p.name[0]}</div>}
+              {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-9 w-9 rounded-full object-cover" /> : <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-500 dark:bg-white/10">{p.name[0]}</div>}
               <div className="flex-1">
-                <div className="font-bold text-slate-900">{p.name} {p.isOverseas && <span className="text-[10px] text-sky-500">✈</span>}</div>
+                <div className="font-bold text-slate-900 dark:text-white">{p.name} {p.isOverseas && <span className="text-[10px] text-sky-500">✈</span>}</div>
                 <div className="text-xs text-slate-500">{[p.role, p.category].filter(Boolean).join(" · ") || "—"}</div>
               </div>
               <div className="text-sm font-bold text-slate-700">{money(p.basePrice)}</div>
@@ -206,12 +200,12 @@ function SettingsTab({ id, token, auction, money, onChange }) {
     <label className="block">
       <span className="mb-1 block text-xs font-bold uppercase text-slate-500">{label}</span>
       <input value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} placeholder={placeholder}
-        className="w-full rounded-lg border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+        className="w-full rounded-lg border-2 border-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder-slate-400 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
     </label>
   );
 
   return (
-    <div className="max-w-lg rounded-2xl border border-slate-200 bg-white p-5">
+    <div className="max-w-lg rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5 p-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Default purse per team" k="defaultPurse" placeholder="1 Cr" />
         <div />
@@ -233,7 +227,7 @@ function SettingsTab({ id, token, auction, money, onChange }) {
   );
 }
 
-const Empty = ({ text }) => <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-12 text-center text-sm text-slate-400">{text}</div>;
+const Empty = ({ text }) => <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-12 text-center text-sm text-slate-400 dark:border-white/15 dark:bg-white/5">{text}</div>;
 const StatusChip = ({ status }) => {
   const map = { pending: "bg-slate-100 text-slate-500", current: "bg-amber-100 text-amber-700", sold: "bg-emerald-100 text-emerald-700", unsold: "bg-red-100 text-red-600" };
   return <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${map[status] || map.pending}`}>{status}</span>;

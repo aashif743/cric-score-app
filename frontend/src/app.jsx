@@ -214,13 +214,16 @@ const handleResumeMatch = (matchToResume) => {
 };
 
 
-  // --- Conditional Rendering Logic for Navigation ---
-  const pathsWithoutNav = ['/scorecard', '/full-scorecard', '/', '/tournament', '/overlay', '/tv', '/privacy', '/terms', '/auction'];
-  const isNavHidden = pathsWithoutNav.some(path => location.pathname.startsWith(path) && path !== '/');
-  
-  // Corrected code
-const showBottomNav = !isNavHidden && location.pathname !== '/auth';
-const showHeader = !showBottomNav && location.pathname !== '/'; // Now this will work
+  // --- App chrome (legacy bottom tab bar / header) ---
+  // Only the legacy in-browser scoring screens keep the old chrome. The landing
+  // page, auth, the standalone auction system, and every public/full-screen page
+  // render completely chrome-free.
+  const path = location.pathname;
+  const chromelessExact = ['/', '/auth'];
+  const chromelessPrefix = ['/auction', '/scorecard', '/full-scorecard', '/tournament', '/overlay', '/tv', '/privacy', '/terms', '/support', '/account-deletion'];
+  const isChromeless = chromelessExact.includes(path) || chromelessPrefix.some((p) => path === p || path.startsWith(p));
+  const showBottomNav = !isChromeless;
+  const showHeader = false;
 
 
   return (
