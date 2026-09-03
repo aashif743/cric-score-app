@@ -34,6 +34,7 @@ import AuctionSetup from './pages/auction/AuctionSetup';
 import AuctionControl from './pages/auction/AuctionControl';
 import AuctionOwner from './pages/auction/AuctionOwner';
 import AuctionBigScreen from './pages/auction/AuctionBigScreen';
+import AuctionResults from './pages/auction/AuctionResults';
 import LandingPage from './pages/LandingPage';
 import { ThemeProvider } from './context/ThemeContext.jsx';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
@@ -259,6 +260,7 @@ const handleResumeMatch = (matchToResume) => {
           <Route path="/auctions" element={user ? <AuctionList /> : <Navigate to={authRedirect} replace />} />
           <Route path="/auctions/:id/setup" element={user ? <AuctionSetup /> : <Navigate to={authRedirect} replace />} />
           <Route path="/auctions/:id/live" element={user ? <AuctionControl /> : <Navigate to={authRedirect} replace />} />
+          <Route path="/auctions/:id/results" element={user ? <AuctionResults /> : <Navigate to={authRedirect} replace />} />
           <Route path="/auctions/:id/team" element={user ? <AuctionOwner /> : <Navigate to={authRedirect} replace />} />
 
           {/* --- New Routes for Future Features --- */}

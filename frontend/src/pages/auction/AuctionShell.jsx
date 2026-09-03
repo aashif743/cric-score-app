@@ -1,7 +1,7 @@
 import React, { useContext, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  FiGrid, FiSettings, FiZap, FiMonitor, FiChevronLeft, FiLogOut, FiMenu, FiX,
+  FiGrid, FiSettings, FiZap, FiMonitor, FiChevronLeft, FiLogOut, FiMenu, FiX, FiAward,
 } from "react-icons/fi";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import ThemeToggle from "../../components/ThemeToggle.jsx";
@@ -45,6 +45,7 @@ export default function AuctionShell({ active, auctionId, auctionName, shareId, 
             <div className="mt-5 mb-1 truncate px-3 text-[10px] font-black uppercase tracking-widest text-slate-400">{auctionName || "Auction"}</div>
             <NavItem to={`/auctions/${auctionId}/setup`} icon={FiSettings} label="Setup" isActive={active === "setup"} />
             <NavItem to={`/auctions/${auctionId}/live`} icon={FiZap} label="Live Auction" isActive={active === "live"} />
+            <NavItem to={`/auctions/${auctionId}/results`} icon={FiAward} label="Results" isActive={active === "results"} />
             {shareId && <NavItem to={`/auction/screen/${shareId}`} icon={FiMonitor} label="Big Screen" external />}
             <NavItem to="/auctions" icon={FiChevronLeft} label="All auctions" />
           </>

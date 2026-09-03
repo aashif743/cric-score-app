@@ -38,13 +38,14 @@ export default function AuctionControl() {
     const current = state.players.find((p) => String(p._id) === String(a.currentPlayer)) || null;
     const bidTeam = state.teams.find((t) => String(t._id) === String(a.currentBidTeam)) || null;
     const pending = state.players.filter((p) => p.status === "pending").sort((x, y) => x.order - y.order);
+    const unsold = state.players.filter((p) => p.status === "unsold");
     const remaining = (t) => Math.max(0, (t.purse || 0) - (t.spent || 0));
-    return { a, money, current, bidTeam, pending, remaining };
+    return { a, money, current, bidTeam, pending, unsold, remaining };
   }, [state]);
 
   if (loading) return <Center text="Loading…" />;
   if (!derived) return <Center text="Auction not found." />;
-  const { a, money, current, bidTeam, pending, remaining } = derived;
+  const { a, money, current, bidTeam, pending, unsold, remaining } = derived;
 
   return (
     <div className="min-h-screen bg-slate-900 px-4 py-5 text-white">
@@ -53,9 +54,15 @@ export default function AuctionControl() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <button onClick={() => navigate(`/auctions/${id}/setup`)} className="text-xs font-bold text-slate-400 hover:text-white">← Setup</button>
-            <h1 className="text-xl font-black">{a.name} <span className="ml-2 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-400">Live control</span></h1>
+            <h1 className="text-xl font-black">{a.name}
+              <span className="ml-2 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-400">Live control</span>
+              {a.settings?.biddingMode === "online" && <span className="ml-2 rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] font-black uppercase text-sky-300">Online bidding</span>}
+            </h1>
           </div>
-          <a href={`/auction/screen/${a.shareId}`} target="_blank" rel="noreferrer" className="rounded-lg bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/20">Open Big Screen ↗</a>
+          <div className="flex items-center gap-2">
+            <button onClick={() => navigate(`/auctions/${id}/results`)} className="rounded-lg bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/20">Results</button>
+            <a href={`/auction/screen/${a.shareId}`} target="_blank" rel="noreferrer" className="rounded-lg bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/20">Big Screen ↗</a>
+          </div>
         </div>
 
         {err && <div className="mb-3 rounded-xl bg-red-500/90 px-4 py-2 text-sm font-bold">{err}</div>}
@@ -114,7 +121,17 @@ export default function AuctionControl() {
             <div className="rounded-2xl bg-white/5 p-3">
               <div className="mb-2 px-1 text-xs font-black uppercase tracking-wide text-white/50">Up next ({pending.length})</div>
               <div className="max-h-64 space-y-1 overflow-y-auto">
-                {pending.length === 0 ? <div className="px-1 py-3 text-sm text-white/40">All players done.</div> :
+                {pending.length === 0 ? (
+                  <div className="px-1 py-3">
+                    <div className="text-sm text-white/40">No players left in the pool.</div>
+                    {unsold.length > 0 && (
+                      <button disabled={busy} onClick={() => act(() => auctionService.reauctionUnsold(id, user.token))}
+                        className="mt-2 w-full rounded-lg bg-amber-500/90 py-2 text-xs font-black text-black hover:bg-amber-400">
+                        ↺ Re-auction {unsold.length} unsold
+                      </button>
+                    )}
+                  </div>
+                ) : (
                   pending.map((p) => (
                     <button key={p._id} disabled={busy} onClick={() => act(() => auctionService.open(id, p._id, user.token))}
                       className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/10">
@@ -122,7 +139,7 @@ export default function AuctionControl() {
                       <span className="flex-1 truncate text-sm font-bold">{p.name}</span>
                       <span className="text-[11px] font-bold text-white/50">{money(p.basePrice)}</span>
                     </button>
-                  ))}
+                  )))}
               </div>
             </div>
 

@@ -30,6 +30,7 @@ const auctionService = {
   undo: (id, token) => API.post(`/auctions/${id}/undo`, {}, cfg(token)).then((r) => r.data.data),
   sell: (id, token) => API.post(`/auctions/${id}/sell`, {}, cfg(token)).then((r) => r.data.data),
   unsold: (id, token) => API.post(`/auctions/${id}/unsold`, {}, cfg(token)).then((r) => r.data.data),
+  reauctionUnsold: (id, token) => API.post(`/auctions/${id}/reauction-unsold`, {}, cfg(token)).then((r) => r.data.data),
 
   // Owner bidding (online mode) — the owner bids for their own team.
   ownerBid: (id, token) => API.post(`/auctions/${id}/owner-bid`, {}, cfg(token)).then((r) => r.data.data),

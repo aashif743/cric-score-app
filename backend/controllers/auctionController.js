@@ -364,6 +364,15 @@ exports.undoBid = liveAction((req, a) => engine.undoBid(a._id));
 exports.sellCurrent = liveAction((req, a) => engine.sellCurrent(a._id));
 exports.markUnsold = liveAction((req, a) => engine.markUnsold(a._id));
 
+// Put every unsold player back into the pool (a common end-of-round move).
+exports.reauctionUnsold = liveAction(async (req, a) => {
+  await AuctionPlayer.updateMany(
+    { auction: a._id, status: "unsold" },
+    { $set: { status: "pending", soldTo: null, soldPrice: null } }
+  );
+  return engine.getState(a._id);
+});
+
 // A team OWNER places a bid for their own team — only in "online" bidding mode,
 // and only if the caller actually owns a team in this auction. Reuses the same
 // server-authoritative engine (purse / increment / max-bid all validated).
