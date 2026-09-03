@@ -363,3 +363,32 @@ exports.markBid = liveAction((req, a) => engine.markBid(a._id, req.body.teamId))
 exports.undoBid = liveAction((req, a) => engine.undoBid(a._id));
 exports.sellCurrent = liveAction((req, a) => engine.sellCurrent(a._id));
 exports.markUnsold = liveAction((req, a) => engine.markUnsold(a._id));
+
+// A team OWNER places a bid for their own team — only in "online" bidding mode,
+// and only if the caller actually owns a team in this auction. Reuses the same
+// server-authoritative engine (purse / increment / max-bid all validated).
+exports.ownerBid = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid auction ID" });
+    }
+    const auction = await Auction.findById(id).lean();
+    if (!auction) return res.status(404).json({ success: false, error: "Auction not found" });
+    if (auction.settings?.biddingMode !== "online") {
+      return res.status(403).json({ success: false, error: "Online bidding is turned off for this auction" });
+    }
+    const email = (req.user.email || "").toLowerCase();
+    const team = await AuctionTeam.findOne({
+      auction: id,
+      $or: [{ ownerUser: req.user.id }, { ownerEmail: email }],
+    });
+    if (!team) return res.status(403).json({ success: false, error: "You are not a team owner in this auction" });
+
+    const state = await engine.markBid(id, team._id);
+    broadcast(req, id, state);
+    res.json({ success: true, data: state });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message || "Bid failed" });
+  }
+};

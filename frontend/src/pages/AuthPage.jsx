@@ -52,6 +52,9 @@ const AuthPage = () => {
   const [password, setPassword] = useState('');
 
   const { login } = useContext(AuthContext);
+  // Where to go after auth — honour a ?redirect= (e.g. an owner's team link),
+  // otherwise the auction dashboard.
+  const redirectTo = new URLSearchParams(window.location.search).get('redirect') || '/auctions';
   const navigate = useNavigate();
 
   const formRef = useRef(null);
@@ -91,7 +94,7 @@ const AuthPage = () => {
         setStep('name');
       } else {
         login(response);
-        navigate('/auctions');
+        navigate(redirectTo);
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Invalid OTP. Please try again.');
@@ -109,7 +112,7 @@ const AuthPage = () => {
         ? await authService.registerWithEmail(name, email, password)
         : await authService.loginWithEmail(email, password);
       login(data);
-      navigate('/auctions');
+      navigate(redirectTo);
     } catch (err) {
       setError(err.response?.data?.message || 'Something went wrong. Please try again.');
     } finally {
@@ -124,7 +127,7 @@ const AuthPage = () => {
     try {
       const userData = await authService.completeRegistration(phoneNumber, name);
       login(userData);
-      navigate('/dashboard');
+      navigate(redirectTo);
     } catch (err) { // FIXED: Removed the incorrect '=>' from the catch block
       setError(err.response?.data?.message || 'Failed to register.');
     } finally {

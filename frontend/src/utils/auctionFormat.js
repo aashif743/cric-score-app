@@ -21,6 +21,21 @@ export function shortMoney(amount, format = "inr") {
   return formatMoney(amount, { symbol: "", format }).trim();
 }
 
+// What the next bid will cost, mirroring the server engine: the first bid on a
+// lot takes the base price, later bids add the increment for the current tier.
+// (Display only — the server re-validates authoritatively.)
+export function nextBidAmount(auction) {
+  if (!auction) return 0;
+  const cur = auction.currentBid || 0;
+  if (!auction.bidCount) return cur; // first bid = base price
+  const tiers = (auction.settings && auction.settings.incrementTiers) || [];
+  let step = tiers.length ? tiers[tiers.length - 1].step : 500000;
+  for (const t of tiers) {
+    if (t.upTo == null || cur < t.upTo) { step = t.step; break; }
+  }
+  return cur + step;
+}
+
 // Parse a human amount into an integer:
 //  "1.5cr" → 15000000, "20 l" → 2000000, "2,00,000" → 200000, "500000" → 500000
 export function parseMoney(input) {

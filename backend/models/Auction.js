@@ -50,6 +50,9 @@ const auctionSchema = mongoose.Schema(
       maxSquadSize: { type: Number, default: 25 },
       // Stop a team bidding so high it can't still fill its minimum squad.
       enforceMaxBid: { type: Boolean, default: true },
+      // 'manual' → the auctioneer marks each bid (real-event). 'online' → team
+      // owners place their own bids from their devices; the admin still sells.
+      biddingMode: { type: String, enum: ["manual", "online"], default: "manual" },
     },
 
     // ---- Live lot state (single source of truth during the auction) --------

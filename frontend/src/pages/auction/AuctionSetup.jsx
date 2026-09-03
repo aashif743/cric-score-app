@@ -30,7 +30,12 @@ export default function AuctionSetup() {
   const money = (n) => formatMoney(n, { symbol: auction.currencySymbol, format: auction.currencyFormat });
 
   const goLive = (
-    <button onClick={() => navigate(`/auctions/${id}/live`)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 hover:bg-emerald-700">Go Live →</button>
+    <>
+      <button
+        onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/auctions/${id}/team`); alert("Owner link copied! Share it with all team owners — after they log in (with the email you set), each sees their own team."); }}
+        className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-200 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/20">Owner link</button>
+      <button onClick={() => navigate(`/auctions/${id}/live`)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 hover:bg-emerald-700">Go Live →</button>
+    </>
   );
 
   return (
@@ -181,6 +186,7 @@ function SettingsTab({ id, token, auction, money, onChange }) {
     minSquadSize: s.minSquadSize || 0,
     maxSquadSize: s.maxSquadSize || 25,
     enforceMaxBid: s.enforceMaxBid,
+    biddingMode: s.biddingMode || "manual",
   });
   const [saved, setSaved] = useState(false);
   const save = async () => {
@@ -191,7 +197,7 @@ function SettingsTab({ id, token, auction, money, onChange }) {
     await auctionService.update(id, { settings: {
       defaultPurse: parseMoney(f.defaultPurse), incrementTiers: tiers,
       minSquadSize: Number(f.minSquadSize) || 0, maxSquadSize: Number(f.maxSquadSize) || 25,
-      enforceMaxBid: !!f.enforceMaxBid,
+      enforceMaxBid: !!f.enforceMaxBid, biddingMode: f.biddingMode,
     } }, token);
     setSaved(true); setTimeout(() => setSaved(false), 1500);
     onChange(await auctionService.get(id, token));
@@ -204,8 +210,29 @@ function SettingsTab({ id, token, auction, money, onChange }) {
     </label>
   );
 
+  const modes = [
+    { key: "manual", title: "Manual (real event)", desc: "You mark each bid on the control panel as owners bid in the room." },
+    { key: "online", title: "Online (owners bid)", desc: "Owners place bids from their own devices; you confirm the sale." },
+  ];
+
   return (
     <div className="max-w-lg rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5 p-5">
+      <div className="mb-5">
+        <span className="mb-2 block text-xs font-bold uppercase text-slate-500">Bidding mode</span>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {modes.map((m) => {
+            const active = f.biddingMode === m.key;
+            return (
+              <button key={m.key} type="button" onClick={() => setF({ ...f, biddingMode: m.key })}
+                className={`rounded-xl border-2 p-3 text-left transition ${active ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : "border-slate-200 dark:border-white/10"}`}>
+                <div className={`text-sm font-black ${active ? "text-indigo-700 dark:text-indigo-300" : ""}`}>{m.title}</div>
+                <div className="mt-0.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400">{m.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Default purse per team" k="defaultPurse" placeholder="1 Cr" />
         <div />

@@ -35,4 +35,7 @@ router.post("/:id/undo", protect, c.undoBid);
 router.post("/:id/sell", protect, c.sellCurrent);
 router.post("/:id/unsold", protect, c.markUnsold);
 
+// Owner bidding (online mode) — the caller must own a team in this auction
+router.post("/:id/owner-bid", protect, c.ownerBid);
+
 module.exports = router;

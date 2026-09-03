@@ -225,6 +225,10 @@ const handleResumeMatch = (matchToResume) => {
   const showBottomNav = !isChromeless;
   const showHeader = false;
 
+  // Send unauthenticated users to /auth but remember where they were headed
+  // (e.g. an owner opening their team link) so we can return them after login.
+  const authRedirect = `/auth?redirect=${encodeURIComponent(location.pathname + location.search)}`;
+
 
   return (
     <>
@@ -252,10 +256,10 @@ const handleResumeMatch = (matchToResume) => {
           
           {/* --- Auction system --- */}
           <Route path="/auction/screen/:shareId" element={<AuctionBigScreen />} />
-          <Route path="/auctions" element={user ? <AuctionList /> : <Navigate to="/auth" />} />
-          <Route path="/auctions/:id/setup" element={user ? <AuctionSetup /> : <Navigate to="/auth" />} />
-          <Route path="/auctions/:id/live" element={user ? <AuctionControl /> : <Navigate to="/auth" />} />
-          <Route path="/auctions/:id/team" element={user ? <AuctionOwner /> : <Navigate to="/auth" />} />
+          <Route path="/auctions" element={user ? <AuctionList /> : <Navigate to={authRedirect} replace />} />
+          <Route path="/auctions/:id/setup" element={user ? <AuctionSetup /> : <Navigate to={authRedirect} replace />} />
+          <Route path="/auctions/:id/live" element={user ? <AuctionControl /> : <Navigate to={authRedirect} replace />} />
+          <Route path="/auctions/:id/team" element={user ? <AuctionOwner /> : <Navigate to={authRedirect} replace />} />
 
           {/* --- New Routes for Future Features --- */}
           <Route path="/points-system" element={user ? <PointsSystem /> : <Navigate to="/auth" />} />
