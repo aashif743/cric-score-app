@@ -7,6 +7,7 @@ import {
 import { FaApple, FaGooglePlay } from "react-icons/fa";
 import { AuthContext } from "../context/AuthContext.jsx";
 import ThemeToggle from "../components/ThemeToggle.jsx";
+import brand from "../assets/criczone_icon.png";
 
 // Real store links — replace these two when they're ready.
 const APP_STORE_URL = "#";
@@ -42,7 +43,7 @@ function Header({ user, onAuction }) {
     <header className="sticky top-0 z-40 border-b border-slate-200/60 bg-white/70 backdrop-blur-xl transition-colors dark:border-white/10 dark:bg-slate-950/70">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5">
         <div className="flex items-center gap-2">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-lg font-black text-white shadow-lg">C</div>
+          <img src={brand} alt="CricZone" className="h-9 w-9 rounded-xl object-cover shadow-lg" />
           <span className="text-lg font-black tracking-tight">CricZone</span>
         </div>
         <nav className="hidden items-center gap-7 text-sm font-semibold text-slate-600 dark:text-slate-300 md:flex">
@@ -206,7 +207,7 @@ function Footer() {
     <footer className="border-t border-slate-200 bg-slate-50 py-10 transition-colors dark:border-white/10 dark:bg-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-5 text-center sm:flex-row sm:justify-between sm:text-left">
         <div className="flex items-center gap-2">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-black text-white">C</div>
+          <img src={brand} alt="CricZone" className="h-8 w-8 rounded-lg object-cover" />
           <span className="font-black">CricZone</span>
         </div>
         <div className="flex flex-wrap items-center justify-center gap-5 text-sm font-semibold text-slate-500 dark:text-slate-400">

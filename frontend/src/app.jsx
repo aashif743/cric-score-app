@@ -252,7 +252,8 @@ const handleResumeMatch = (matchToResume) => {
           <Route path="/account-deletion" element={<AccountDeletion />} />
 
           {/* --- Protected Routes (Require Login) --- */}
-          <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/auth" />} />
+          {/* Legacy scoring dashboard retired on the web — always go to the auction dashboard. */}
+          <Route path="/dashboard" element={<Navigate to="/auctions" replace />} />
           <Route path="/past-matches" element={user ? <PastMatches onResumeMatch={handleResumeMatch} /> : <Navigate to="/auth" />} />
           
           {/* --- Auction system --- */}

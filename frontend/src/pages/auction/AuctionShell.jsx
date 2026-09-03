@@ -5,6 +5,7 @@ import {
 } from "react-icons/fi";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import ThemeToggle from "../../components/ThemeToggle.jsx";
+import brand from "../../assets/criczone_icon.png";
 
 // Standalone admin-dashboard frame for the auction system — desktop-first, with
 // a fixed sidebar. Completely separate from the legacy scoring app chrome.
@@ -31,7 +32,7 @@ export default function AuctionShell({ active, auctionId, auctionName, shareId, 
   const Sidebar = () => (
     <div className="flex h-full flex-col p-4">
       <div className="mb-6 flex items-center gap-2 px-2">
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-lg font-black text-white shadow-lg">C</div>
+        <img src={brand} alt="CricZone" className="h-9 w-9 rounded-xl object-cover shadow-lg" />
         <div className="leading-tight">
           <div className="text-sm font-black">CricZone</div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-500">Auctions</div>

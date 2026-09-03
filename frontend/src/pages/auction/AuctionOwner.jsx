@@ -5,6 +5,7 @@ import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
 import { formatMoney, nextBidAmount } from "../../utils/auctionFormat";
 import ThemeToggle from "../../components/ThemeToggle.jsx";
+import brand from "../../assets/criczone_icon.png";
 
 export default function AuctionOwner() {
   const { id } = useParams();
@@ -55,7 +56,7 @@ export default function AuctionOwner() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">
       <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-slate-200 bg-white/80 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-slate-900/80">
-        <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-black text-white">C</div>
+        <img src={brand} alt="CricZone" className="h-8 w-8 rounded-lg object-cover" />
         <span className="font-black">CricZone Auction</span>
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />

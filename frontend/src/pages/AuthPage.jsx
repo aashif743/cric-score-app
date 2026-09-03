@@ -1,384 +1,132 @@
-import React, { useState, useContext, useEffect, useRef } from 'react';
+import React, { useContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { FiMail, FiLock, FiUser, FiArrowRight, FiCheck } from 'react-icons/fi';
 import { AuthContext } from '../context/AuthContext.jsx';
 import authService from '../utils/authService.js';
-import './AuthPage.css';
-import myLogo from '../assets/criczone.png'; // FIXED: Added the 'import' keyword
-import styled from 'styled-components';
+import ThemeToggle from '../components/ThemeToggle.jsx';
+import logo from '../assets/criczone_logo.png';
+import icon from '../assets/criczone_icon.png';
 
-const LogoIcon = styled.div`
-  width: 200px;
-  height: 200px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  
-  svg {
-    width: 18px;
-    height: 18px;
-    color: white;
-  }
-`;
+// Professional desktop email auth (login + signup). No phone/OTP on the web.
+export default function AuthPage() {
+  const { login } = useContext(AuthContext);
+  const navigate = useNavigate();
+  const redirectTo = new URLSearchParams(window.location.search).get('redirect') || '/auctions';
 
-// Sample countries data - you might want to import this from a separate file
-const countries = [
-  { code: 'LK', dialCode: '+94', name: 'Sri Lanka', flag: '🇱🇰' },
-  { code: 'IN', dialCode: '+91', name: 'India', flag: '🇮🇳' },
-  { code: 'US', dialCode: '+1', name: 'United States', flag: '🇺🇸' },
-  // Add more countries as needed
-];
-
-const AuthPage = () => {
-  const [step, setStep] = useState('phone'); // phone, otp, name
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [otp, setOtp] = useState('');
+  const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [name, setName] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCountry, setSelectedCountry] = useState({
-    code: 'LK',
-    dialCode: '+94',
-    name: 'Sri Lanka',
-    flag: '🇱🇰'
-  });
-  // Email login/register (alternative to phone OTP).
-  const [method, setMethod] = useState('phone');     // 'phone' | 'email'
-  const [emailMode, setEmailMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const register = mode === 'register';
 
-  const { login } = useContext(AuthContext);
-  // Where to go after auth — honour a ?redirect= (e.g. an owner's team link),
-  // otherwise the auction dashboard.
-  const redirectTo = new URLSearchParams(window.location.search).get('redirect') || '/auctions';
-  const navigate = useNavigate();
-
-  const formRef = useRef(null);
-
-  useEffect(() => {
-    if (otp.length === 4 && !isLoading) {
-      formRef.current?.requestSubmit();
-    }
-  }, [otp, isLoading]);
-
-  const filteredCountries = countries.filter(country =>
-    country.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    country.dialCode.includes(searchQuery)
-  );
-
-  const handleSendOtp = async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    setIsLoading(true);
+    setLoading(true);
     setError('');
     try {
-      await authService.sendOtp(phoneNumber);
-      setStep('otp');
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to send OTP. Please check the number.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-    try {
-      const response = await authService.verifyOtp(phoneNumber, otp);
-      if (response.isNewUser) {
-        setStep('name');
-      } else {
-        login(response);
-        navigate(redirectTo);
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Invalid OTP. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleEmailAuth = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-    try {
-      const data = emailMode === 'register'
-        ? await authService.registerWithEmail(name, email, password)
-        : await authService.loginWithEmail(email, password);
+      const data = register
+        ? await authService.registerWithEmail(name.trim(), email.trim(), password)
+        : await authService.loginWithEmail(email.trim(), password);
       login(data);
       navigate(redirectTo);
     } catch (err) {
-      setError(err.response?.data?.message || 'Something went wrong. Please try again.');
+      setError(err.response?.data?.message || err?.error || 'Something went wrong. Please try again.');
     } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleCompleteRegistration = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-    try {
-      const userData = await authService.completeRegistration(phoneNumber, name);
-      login(userData);
-      navigate(redirectTo);
-    } catch (err) { // FIXED: Removed the incorrect '=>' from the catch block
-      setError(err.response?.data?.message || 'Failed to register.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const renderStep = () => {
-    const formAnimation = {
-      initial: { opacity: 0, y: 20 },
-      animate: { opacity: 1, y: 0 },
-      exit: { opacity: 0, y: -20 },
-      transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] }
-    };
-
-    if (method === 'email') {
-      const register = emailMode === 'register';
-      return (
-        <motion.form key={`email-${emailMode}`} onSubmit={handleEmailAuth} {...formAnimation}>
-          <h2 className="auth-title">{register ? 'Create your account' : 'Welcome back'}</h2>
-          <p className="auth-subtitle">{register ? 'Sign up with your email' : 'Log in with your email & password'}</p>
-          {register && (
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" className="auth-input" required autoFocus />
-          )}
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" className="auth-input" required autoFocus={!register} />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="auth-input" required />
-          <button type="submit" disabled={isLoading || !email || !password || (register && !name.trim())} className="auth-button">
-            {isLoading ? <span className="loading-text">Please wait…</span> : (register ? 'Create account' : 'Log in')}
-          </button>
-          <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#606770', textAlign: 'center' }}>
-            {register ? 'Already have an account? ' : "Don't have an account? "}
-            <button type="button" onClick={() => { setEmailMode(register ? 'login' : 'register'); setError(''); }}
-              style={{ background: 'none', border: 'none', color: '#1877f2', fontWeight: 600, cursor: 'pointer' }}>
-              {register ? 'Log in' : 'Sign up'}
-            </button>
-          </p>
-        </motion.form>
-      );
-    }
-
-    switch (step) {
-      case 'otp':
-        return (
-          <motion.form ref={formRef} key="otp" onSubmit={handleVerifyOtp} {...formAnimation}>
-            <h2 className="auth-title">Enter Verification Code</h2>
-            <p className="auth-subtitle">We've sent a 4-digit code to <strong>{phoneNumber}</strong></p>
-            <input
-              type="tel"
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-              placeholder="••••"
-              className="auth-input otp-input"
-              maxLength="4"
-              required
-              autoFocus
-            />
-            <button type="submit" disabled={isLoading || otp.length !== 4} className="auth-button">
-              {isLoading ? (
-                <span className="loading-text">Verifying...</span>
-              ) : (
-                'Verify & Continue'
-              )}
-            </button>
-            <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#606770' }}>
-              Didn't receive code? <button 
-                type="button" 
-                onClick={handleSendOtp}
-                style={{ 
-                  background: 'none', 
-                  border: 'none', 
-                  color: '#1877f2', 
-                  fontWeight: '600', 
-                  cursor: 'pointer' 
-                }}
-              >
-                Resend
-              </button>
-            </p>
-          </motion.form>
-        );
-      case 'name':
-        return (
-          <motion.form key="name" onSubmit={handleCompleteRegistration} {...formAnimation}>
-            <h2 className="auth-title">Welcome to CricZone!</h2>
-            <p className="auth-subtitle">Just one more step to complete your profile</p>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Your full name"
-              className="auth-input"
-              required
-              autoFocus
-            />
-            <button type="submit" disabled={isLoading || !name.trim()} className="auth-button">
-              {isLoading ? (
-                <span className="loading-text">Saving...</span>
-              ) : (
-                'Complete Registration'
-              )}
-            </button>
-          </motion.form>
-        );
-      default: // 'phone' step
-        return (
-          <motion.form key="phone" onSubmit={handleSendOtp} {...formAnimation}>
-            <h2 className="auth-title">Login or Sign Up</h2>
-            <p className="auth-subtitle">Enter your phone number to get started</p>
-            
-            <div className="phone-input-wrapper">
-              <div className={`phone-input-container ${error ? 'error' : ''} ${showCountryDropdown ? 'show-dropdown' : ''}`}>
-                <div 
-                  className="country-selector"
-                  onClick={() => setShowCountryDropdown(!showCountryDropdown)}
-                >
-                  <span className="country-flag">{selectedCountry.flag}</span>
-                  <span className="country-code">{selectedCountry.dialCode}</span>
-                  <svg className="chevron-icon" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M7 10l5 5 5-5z" />
-                  </svg>
-                </div>
-                
-                <input
-                  type="tel"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9+]/g, ''))}
-                  placeholder="Phone number"
-                  className="phone-input"
-                  required
-                  autoFocus
-                />
-              </div>
-              
-              {showCountryDropdown && (
-                <div className="country-dropdown">
-                  <div className="country-search">
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search country..."
-                      className="search-input"
-                    />
-                  </div>
-                  <div className="country-list">
-                    {filteredCountries.map((country) => (
-                      <div
-                        key={country.code}
-                        className={`country-item ${selectedCountry.code === country.code ? 'active' : ''}`}
-                        onClick={() => {
-                          setSelectedCountry(country);
-                          setShowCountryDropdown(false);
-                          setSearchQuery('');
-                        }}
-                      >
-                        <span className="country-item-flag">{country.flag}</span>
-                        <span className="country-item-name">{country.name}</span>
-                        <span className="country-item-code">{country.dialCode}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            <button 
-              type="submit" 
-              disabled={isLoading || !phoneNumber} 
-              className="auth-button"
-            >
-              {isLoading ? (
-                <span className="loading-text">Sending...</span>
-              ) : (
-                'Continue'
-              )}
-            </button>
-          </motion.form>
-        );
+      setLoading(false);
     }
   };
 
   return (
-    <div className="auth-container">
-      <motion.div 
-        className="auth-card"
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <motion.div 
-          className="logo-placeholder"
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-        >
-          <LogoIcon>
-                      {/* 2. Replace the SVG with an img tag */}
-                      <img src={myLogo} alt="CricZone Logo" style={{ height: '100%' }} />
-                  </LogoIcon>
-          <span className="logo-text">CricZone</span>
-        </motion.div>
-        
-        {error && (
-          <motion.div 
-            className="auth-error"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            {error}
-          </motion.div>
-        )}
-        
-        {step === 'phone' && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            {['phone', 'email'].map((m) => (
-              <button key={m} type="button" onClick={() => { setMethod(m); setError(''); }}
-                style={{
-                  flex: 1, padding: '10px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 14,
-                  background: method === m ? '#1877f2' : '#eef2f7', color: method === m ? '#fff' : '#606770',
-                }}>
-                {m === 'phone' ? 'Phone' : 'Email'}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="auth-form-wrapper">
-          <AnimatePresence mode="wait">
-            {renderStep()}
-          </AnimatePresence>
+    <div className="flex min-h-screen bg-white text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">
+      {/* Brand panel (desktop only) */}
+      <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-12 text-white lg:flex">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-24 top-8 h-72 w-72 animate-float rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute bottom-0 right-0 h-96 w-96 animate-float rounded-full bg-white/10 blur-3xl [animation-delay:-3s]" />
         </div>
-        
-        <motion.div 
-          className="guest-mode-container"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.4 }}
-        >
-          <p className="guest-text">Continue as guest</p>
-          <button 
-            onClick={() => navigate('/match-setup')} 
-            className="guest-button"
-          >
-            START A QUICK MATCH
-          </button>
-        </motion.div>
-      </motion.div>
+        <div className="relative flex items-center gap-3">
+          <img src={icon} alt="CricZone" className="h-11 w-11 rounded-2xl bg-white/10 p-1.5" />
+          <span className="text-xl font-black tracking-tight">CricZone</span>
+        </div>
+        <div className="relative">
+          <h1 className="text-4xl font-black leading-[1.1] xl:text-5xl">Run professional cricket leagues &amp; live player auctions.</h1>
+          <p className="mt-5 max-w-md text-lg text-white/80">Sign in to create and manage auctions — teams, purses, live bidding, and a cinematic big screen.</p>
+          <ul className="mt-8 space-y-2.5">
+            {['Set purses & base prices', 'Live bidding on a big screen', 'Auto purse calculation', 'Owners follow on their devices'].map((t) => (
+              <li key={t} className="flex items-center gap-2.5 font-semibold text-white/90">
+                <span className="grid h-5 w-5 place-items-center rounded-full bg-white/20"><FiCheck size={12} /></span>{t}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="relative text-sm text-white/60">© {new Date().getFullYear()} CricZone. All rights reserved.</div>
+      </div>
+
+      {/* Form panel */}
+      <div className="flex w-full flex-col lg:w-1/2">
+        <div className="flex items-center justify-between p-5">
+          <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-400 transition hover:text-slate-700 dark:hover:text-white">← Back to home</button>
+          <ThemeToggle />
+        </div>
+
+        <div className="flex flex-1 items-center justify-center px-6 pb-20">
+          <div className="w-full max-w-md">
+            <img src={logo} alt="CricZone" className="mb-8 h-11 w-auto object-contain lg:hidden" />
+
+            <AnimatePresence mode="wait">
+              <motion.form key={mode} onSubmit={submit}
+                initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
+                <h2 className="text-3xl font-black tracking-tight">{register ? 'Create your account' : 'Welcome back'}</h2>
+                <p className="mt-1.5 font-medium text-slate-500 dark:text-slate-400">
+                  {register ? 'Get started with CricZone auctions.' : 'Sign in to your CricZone account.'}
+                </p>
+
+                {error && (
+                  <div className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 dark:bg-red-500/10 dark:text-red-400">{error}</div>
+                )}
+
+                <div className="mt-6 space-y-3">
+                  {register && <Field Icon={FiUser} type="text" value={name} onChange={setName} placeholder="Full name" autoFocus />}
+                  <Field Icon={FiMail} type="email" value={email} onChange={setEmail} placeholder="Email address" autoFocus={!register} />
+                  <Field Icon={FiLock} type="password" value={password} onChange={setPassword} placeholder="Password" />
+                </div>
+
+                <button type="submit" disabled={loading || !email || !password || (register && !name.trim())}
+                  className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 py-3.5 text-sm font-black text-white shadow-lg shadow-indigo-600/25 transition hover:bg-indigo-700 disabled:opacity-60">
+                  {loading ? 'Please wait…' : (register ? 'Create account' : 'Sign in')}{!loading && <FiArrowRight />}
+                </button>
+
+                <p className="mt-6 text-center text-sm font-semibold text-slate-500 dark:text-slate-400">
+                  {register ? 'Already have an account?' : "Don't have an account?"}{' '}
+                  <button type="button" onClick={() => { setMode(register ? 'login' : 'register'); setError(''); }}
+                    className="font-black text-indigo-600 hover:underline dark:text-indigo-400">
+                    {register ? 'Sign in' : 'Create one'}
+                  </button>
+                </p>
+              </motion.form>
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
     </div>
   );
-};
+}
 
-export default AuthPage;
+function Field({ Icon, value, onChange, ...rest }) {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border-2 border-slate-200 bg-slate-50 px-4 transition focus-within:border-indigo-500 dark:border-white/10 dark:bg-white/5">
+      <Icon className="shrink-0 text-slate-400" />
+      <input
+        {...rest}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required
+        className="w-full bg-transparent py-3.5 text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400 dark:text-white"
+      />
+    </div>
+  );
+}
