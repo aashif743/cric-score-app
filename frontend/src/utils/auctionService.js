@@ -6,7 +6,7 @@ const cfg = (token) => ({ headers: { Authorization: `Bearer ${token}` } });
 
 const auctionService = {
   // Auctions
-  list: (token) => API.get("/auctions", cfg(token)).then((r) => r.data.data),
+  list: (token) => API.get("/auctions", cfg(token)).then((r) => ({ auctions: r.data.data, invites: r.data.invites || [] })),
   create: (data, token) => API.post("/auctions", data, cfg(token)).then((r) => r.data.data),
   get: (id, token) => API.get(`/auctions/${id}`, cfg(token)).then((r) => r.data.data),
   update: (id, data, token) => API.patch(`/auctions/${id}`, data, cfg(token)).then((r) => r.data.data),
@@ -34,6 +34,9 @@ const auctionService = {
 
   // Owner bidding (online mode) — the owner bids for their own team.
   ownerBid: (id, token) => API.post(`/auctions/${id}/owner-bid`, {}, cfg(token)).then((r) => r.data.data),
+
+  // Team owner accepts / rejects an invitation.
+  respondInvite: (id, accept, token) => API.post(`/auctions/${id}/invite`, { accept }, cfg(token)).then((r) => r.data.data),
 };
 
 export default auctionService;

@@ -39,4 +39,7 @@ router.post("/:id/reauction-unsold", protect, c.reauctionUnsold);
 // Owner bidding (online mode) — the caller must own a team in this auction
 router.post("/:id/owner-bid", protect, c.ownerBid);
 
+// Team owner accepts / rejects their invitation to this auction
+router.post("/:id/invite", protect, c.respondInvite);
+
 module.exports = router;

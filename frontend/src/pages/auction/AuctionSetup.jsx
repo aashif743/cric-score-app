@@ -7,7 +7,7 @@ import {
 } from "react-icons/fi";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
-import { formatMoney, parseMoney } from "../../utils/auctionFormat";
+import { formatMoney, parseMoney, CURRENCIES, auctionCurrencyCode } from "../../utils/auctionFormat";
 import ImageUpload from "../../components/auction/ImageUpload";
 import AuctionShell from "./AuctionShell.jsx";
 import {
@@ -190,7 +190,10 @@ function TeamsTab({ id, token, teams, defaultPurse, money, onChange }) {
               <div className="flex min-w-0 items-center gap-3">
                 {t.logoUrl ? <img src={t.logoUrl} alt="" className="h-11 w-11 rounded-full object-cover" /> : <div className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-black text-white">{t.name[0]}</div>}
                 <div className="min-w-0">
-                  <div className="truncate font-black text-slate-900 dark:text-white">{t.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate font-black text-slate-900 dark:text-white">{t.name}</span>
+                    {t.ownerEmail && <InviteChip status={t.inviteStatus} />}
+                  </div>
                   <div className="truncate text-xs text-slate-500 dark:text-slate-400">{t.ownerName || "No owner"} {t.ownerEmail ? `· ${t.ownerEmail}` : ""}</div>
                   <div className="mt-0.5 text-sm font-bold text-emerald-600 dark:text-emerald-400">Purse {money(t.purse)}</div>
                 </div>
@@ -344,6 +347,7 @@ function PlayersTab({ id, token, players, money, onChange }) {
 function SettingsTab({ id, token, auction, money, onChange }) {
   const s = auction.settings;
   const [f, setF] = useState({
+    currencyCode: auctionCurrencyCode(auction),
     defaultPurse: money(s.defaultPurse),
     tier1Step: money(s.incrementTiers?.[0]?.step || 500000),
     tier1UpTo: s.incrementTiers?.[0]?.upTo ? money(s.incrementTiers[0].upTo) : "",
@@ -377,11 +381,14 @@ function SettingsTab({ id, token, auction, money, onChange }) {
         { upTo: f.tier1UpTo ? parseMoney(f.tier1UpTo) : null, step: parseMoney(f.tier1Step) },
         { upTo: null, step: parseMoney(f.tier2Step) },
       ];
-      await auctionService.update(id, { settings: {
-        defaultPurse: parseMoney(f.defaultPurse), incrementTiers: tiers,
-        minSquadSize: Number(f.minSquadSize) || 0, maxSquadSize: Number(f.maxSquadSize) || 25,
-        enforceMaxBid: !!f.enforceMaxBid, biddingMode: f.biddingMode,
-      } }, token);
+      await auctionService.update(id, {
+        currencyCode: f.currencyCode,
+        settings: {
+          defaultPurse: parseMoney(f.defaultPurse), incrementTiers: tiers,
+          minSquadSize: Number(f.minSquadSize) || 0, maxSquadSize: Number(f.maxSquadSize) || 25,
+          enforceMaxBid: !!f.enforceMaxBid, biddingMode: f.biddingMode,
+        },
+      }, token);
       toast.success("Settings saved.");
       onChange(await auctionService.get(id, token));
     } catch (e) { toast.error(e?.error || "Could not save settings."); }
@@ -409,6 +416,17 @@ function SettingsTab({ id, token, auction, money, onChange }) {
               </button>
             );
           })}
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle>Currency</SectionTitle>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Auction currency" hint="Amounts across the auction use this currency">
+            <Select value={f.currencyCode} onChange={(e) => set("currencyCode", e.target.value)}>
+              {Object.values(CURRENCIES).map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+            </Select>
+          </Field>
         </div>
       </Card>
 
@@ -451,6 +469,17 @@ function SettingsTab({ id, token, auction, money, onChange }) {
     </div>
   );
 }
+
+const InviteChip = ({ status }) => {
+  const map = {
+    pending: { cls: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300", label: "Invite sent" },
+    accepted: { cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300", label: "Joined" },
+    rejected: { cls: "bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-300", label: "Declined" },
+  };
+  const m = map[status];
+  if (!m) return null;
+  return <span className={cx("shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase", m.cls)}>{m.label}</span>;
+};
 
 const StatusChip = ({ status }) => {
   const map = {

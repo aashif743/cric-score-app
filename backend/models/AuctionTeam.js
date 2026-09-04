@@ -19,6 +19,16 @@ const auctionTeamSchema = mongoose.Schema(
     // Email the admin assigns; the owner is linked once they log in with it.
     ownerEmail: { type: String, trim: true, lowercase: true, default: "" },
     ownerUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    // Invitation lifecycle for the assigned owner:
+    //   none      → no owner email set
+    //   pending   → invited, awaiting the owner's accept/reject
+    //   accepted  → owner joined; the auction shows on their dashboard
+    //   rejected  → owner declined; hidden from them (admin still sees it)
+    inviteStatus: {
+      type: String,
+      enum: ["none", "pending", "accepted", "rejected"],
+      default: "none",
+    },
 
     purse: { type: Number, required: true, default: 10000000 },
     spent: { type: Number, default: 0 },

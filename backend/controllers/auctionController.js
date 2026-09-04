@@ -18,6 +18,13 @@ async function findUserByEmail(email) {
 
 const room = (id) => `auction:${id}`;
 
+// Supported currencies (kept in sync with the frontend). Default: LKR.
+const CURRENCIES = {
+  LKR: { code: "LKR", symbol: "Rs", format: "plain" },
+  INR: { code: "INR", symbol: "₹", format: "inr" },
+  USD: { code: "USD", symbol: "$", format: "plain" },
+};
+
 // Push fresh state to everyone watching this auction (control panel, big screen,
 // owner devices). `io` is stashed on the app in server.js.
 function broadcast(req, auctionId, state, extra = {}) {
@@ -48,16 +55,18 @@ async function loadOwned(req, res) {
 
 exports.createAuction = async (req, res) => {
   try {
-    const { name, sport, currencyFormat, currencySymbol, settings } = req.body;
+    const { name, sport, currencyCode, currencyFormat, currencySymbol, settings } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: "Auction name is required" });
     }
+    const cur = CURRENCIES[currencyCode] || CURRENCIES.LKR; // default: Sri Lankan Rupees
     const auction = await Auction.create({
       user: req.user.id,
       name: name.trim(),
       sport: sport || "cricket",
-      currencyFormat: currencyFormat || "inr",
-      currencySymbol: currencySymbol || "₹",
+      currencyCode: cur.code,
+      currencyFormat: currencyFormat || cur.format,
+      currencySymbol: currencySymbol || cur.symbol,
       settings: settings || undefined,
       shareId: crypto.randomBytes(5).toString("hex"),
     });
@@ -76,16 +85,36 @@ exports.getMyAuctions = async (req, res) => {
     const adminAuctions = await Auction.find({ user: req.user.id }).sort({ createdAt: -1 }).lean();
     const adminIds = new Set(adminAuctions.map((a) => String(a._id)));
 
-    // 2) Auctions where this user is a team owner (by linked account or email).
+    // 2) Teams where this user is the assigned owner (by linked account or email).
     const myTeams = await AuctionTeam.find({
       $or: [{ ownerUser: req.user.id }, ...(email ? [{ ownerEmail: email }] : [])],
-    }).select("auction name").lean();
-    const ownerAuctionIds = [...new Set(myTeams.map((t) => String(t.auction)))].filter((id) => !adminIds.has(id));
+    }).select("auction name inviteStatus").lean();
+
+    // Accepted (incl. legacy teams with no inviteStatus) become dashboard cards;
+    // "pending" become invitations; "rejected" are hidden.
+    const accepted = myTeams.filter((t) => !["pending", "rejected"].includes(t.inviteStatus) && !adminIds.has(String(t.auction)));
+    const pendingTeams = myTeams.filter((t) => t.inviteStatus === "pending" && !adminIds.has(String(t.auction)));
+
+    const teamByAuction = {};
+    accepted.forEach((t) => { teamByAuction[String(t.auction)] = t.name; });
+    const ownerAuctionIds = [...new Set(accepted.map((t) => String(t.auction)))];
     const ownerAuctions = ownerAuctionIds.length
       ? await Auction.find({ _id: { $in: ownerAuctionIds } }).sort({ createdAt: -1 }).lean()
       : [];
-    const teamByAuction = {};
-    myTeams.forEach((t) => { teamByAuction[String(t.auction)] = t.name; });
+
+    // Pending invitations (with the auction name to show on the dashboard).
+    const inviteAuctionIds = [...new Set(pendingTeams.map((t) => String(t.auction)))];
+    const inviteAuctions = inviteAuctionIds.length
+      ? await Auction.find({ _id: { $in: inviteAuctionIds } }).select("name").lean()
+      : [];
+    const auctionNameById = {};
+    inviteAuctions.forEach((a) => { auctionNameById[String(a._id)] = a.name; });
+    const invites = pendingTeams.map((t) => ({
+      auctionId: String(t.auction),
+      auctionName: auctionNameById[String(t.auction)] || "Auction",
+      teamId: String(t._id),
+      teamName: t.name,
+    }));
 
     const decorate = (a, role) => async () => {
       const [teams, players, sold] = await Promise.all([
@@ -100,7 +129,7 @@ exports.getMyAuctions = async (req, res) => {
       ...adminAuctions.map((a) => decorate(a, "admin")()),
       ...ownerAuctions.map((a) => decorate(a, "owner")()),
     ]);
-    res.json({ success: true, data: withCounts });
+    res.json({ success: true, data: withCounts, invites });
   } catch (error) {
     console.error("Get auctions error:", error);
     res.status(500).json({ success: false, error: "Failed to load auctions" });
@@ -126,6 +155,7 @@ exports.getAuction = async (req, res) => {
     if (email) {
       const myTeam = await AuctionTeam.findOne({
         auction: id,
+        inviteStatus: { $ne: "rejected" }, // a declined owner loses access
         $or: [{ ownerUser: req.user.id }, { ownerEmail: email }],
       });
       if (myTeam) {
@@ -164,9 +194,16 @@ exports.updateAuction = async (req, res) => {
   try {
     const auction = await loadOwned(req, res);
     if (!auction) return;
-    const { name, sport, currencyFormat, currencySymbol, settings, status } = req.body;
+    const { name, sport, currencyCode, currencyFormat, currencySymbol, settings, status } = req.body;
     if (name !== undefined) auction.name = name.trim();
     if (sport !== undefined) auction.sport = sport;
+    // Setting a known currency code updates symbol + format together.
+    if (currencyCode !== undefined && CURRENCIES[currencyCode]) {
+      const cur = CURRENCIES[currencyCode];
+      auction.currencyCode = cur.code;
+      auction.currencyFormat = cur.format;
+      auction.currencySymbol = cur.symbol;
+    }
     if (currencyFormat !== undefined) auction.currencyFormat = currencyFormat;
     if (currencySymbol !== undefined) auction.currencySymbol = currencySymbol;
     if (settings !== undefined) auction.settings = { ...auction.settings.toObject(), ...settings };
@@ -219,9 +256,10 @@ exports.addTeam = async (req, res) => {
       logoUrl: logoUrl || "",
       ownerName: ownerName || "",
       ownerEmail: cleanEmail,
-      // Link an existing account immediately so the owner sees the auction the
-      // moment they log in (even before opening the owner link).
+      // Link an existing account immediately so the invite reaches them, but the
+      // owner must still accept before the auction shows on their dashboard.
       ownerUser: cleanEmail ? await findUserByEmail(cleanEmail) : null,
+      inviteStatus: cleanEmail ? "pending" : "none",
       purse: purse != null ? purse : auction.settings?.defaultPurse || 0,
       order: count,
     });
@@ -244,8 +282,11 @@ exports.updateTeam = async (req, res) => {
     fields.forEach((f) => { if (req.body[f] !== undefined) team[f] = req.body[f]; });
     if (req.body.ownerEmail !== undefined) {
       const cleanEmail = (req.body.ownerEmail || "").toLowerCase();
-      // Re-link to whichever account owns the new email (or clear the link).
-      if (cleanEmail !== team.ownerEmail) team.ownerUser = cleanEmail ? await findUserByEmail(cleanEmail) : null;
+      // Re-link + re-invite whenever the email actually changes.
+      if (cleanEmail !== team.ownerEmail) {
+        team.ownerUser = cleanEmail ? await findUserByEmail(cleanEmail) : null;
+        team.inviteStatus = cleanEmail ? "pending" : "none";
+      }
       team.ownerEmail = cleanEmail;
     }
     await team.save();
@@ -427,6 +468,7 @@ exports.ownerBid = async (req, res) => {
     const email = (req.user.email || "").toLowerCase();
     const team = await AuctionTeam.findOne({
       auction: id,
+      inviteStatus: { $ne: "rejected" },
       $or: [{ ownerUser: req.user.id }, { ownerEmail: email }],
     });
     if (!team) return res.status(403).json({ success: false, error: "You are not a team owner in this auction" });
@@ -436,5 +478,37 @@ exports.ownerBid = async (req, res) => {
     res.json({ success: true, data: state });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message || "Bid failed" });
+  }
+};
+
+// A team owner accepts or rejects their invitation. Body: { accept: boolean }.
+exports.respondInvite = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid auction ID" });
+    }
+    const email = (req.user.email || "").toLowerCase();
+    const team = await AuctionTeam.findOne({
+      auction: id,
+      inviteStatus: "pending",
+      $or: [{ ownerUser: req.user.id }, ...(email ? [{ ownerEmail: email }] : [])],
+    });
+    if (!team) return res.status(404).json({ success: false, error: "No pending invitation found" });
+
+    if (req.body.accept) {
+      team.inviteStatus = "accepted";
+      team.ownerUser = req.user.id;
+    } else {
+      team.inviteStatus = "rejected";
+    }
+    await team.save();
+
+    const state = await engine.getState(id);
+    broadcast(req, id, state);
+    res.json({ success: true, data: { status: team.inviteStatus } });
+  } catch (error) {
+    console.error("Respond invite error:", error);
+    res.status(400).json({ success: false, error: error.message || "Could not respond to the invitation" });
   }
 };

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   FiPlus, FiSettings, FiZap, FiLink, FiTrash2, FiUsers, FiUser, FiCheckCircle,
-  FiAward, FiGrid, FiRadio, FiEye, FiShield,
+  FiAward, FiGrid, FiRadio, FiEye, FiShield, FiMail, FiCheck, FiX,
 } from "react-icons/fi";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
@@ -21,18 +21,30 @@ export default function AuctionList() {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
   const [auctions, setAuctions] = useState([]);
+  const [invites, setInvites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState("");
 
   const load = async () => {
-    try { setLoading(true); setAuctions(await auctionService.list(user.token)); }
-    catch (e) { setAuctions([]); }
+    try { setLoading(true); const r = await auctionService.list(user.token); setAuctions(r.auctions); setInvites(r.invites); }
+    catch (e) { setAuctions([]); setInvites([]); }
     finally { setLoading(false); }
   };
   useEffect(() => { if (user?.token) load(); /* eslint-disable-next-line */ }, [user?.token]);
+
+  const respondInvite = async (inv, accept) => {
+    try {
+      setInviteBusy(inv.teamId + (accept ? "-a" : "-r"));
+      await auctionService.respondInvite(inv.auctionId, accept, user.token);
+      toast.success(accept ? `You joined ${inv.auctionName} as ${inv.teamName}.` : "Invitation declined.");
+      await load();
+    } catch (e) { toast.error(e?.error || "Could not respond to the invitation."); }
+    finally { setInviteBusy(""); }
+  };
 
   const overview = useMemo(() => ({
     total: auctions.length,
@@ -74,6 +86,26 @@ export default function AuctionList() {
 
   return (
     <AuctionShell active="list" title="My Auctions" right={newBtn}>
+      {/* Pending invitations */}
+      {invites.length > 0 && (
+        <div className="mb-6 space-y-3">
+          {invites.map((inv) => (
+            <motion.div key={inv.teamId} initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+              className="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-500/25 dark:bg-violet-500/10">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-600 text-white"><FiMail size={18} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-black text-slate-900 dark:text-white">You're invited to <span className="text-violet-700 dark:text-violet-300">{inv.auctionName}</span></div>
+                <div className="text-xs font-bold text-slate-500 dark:text-slate-400">as owner of <span className="font-black">{inv.teamName}</span></div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="success" icon={FiCheck} loading={inviteBusy === inv.teamId + "-a"} onClick={() => respondInvite(inv, true)} className="px-3 py-2 text-xs">Accept</Button>
+                <Button variant="soft" icon={FiX} loading={inviteBusy === inv.teamId + "-r"} onClick={() => respondInvite(inv, false)} className="px-3 py-2 text-xs">Decline</Button>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+
       {/* Overview */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat icon={FiGrid} label="Auctions" value={overview.total} tint="indigo" />

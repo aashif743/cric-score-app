@@ -17,9 +17,11 @@ const auctionSchema = mongoose.Schema(
     },
     name: { type: String, required: true, trim: true },
     sport: { type: String, default: "cricket", trim: true },
-    // How the UI renders money. "inr" → Lakh/Crore, "plain" → grouped numbers.
-    currencyFormat: { type: String, enum: ["inr", "plain"], default: "inr" },
-    currencySymbol: { type: String, default: "₹" },
+    // Currency. Default is Sri Lankan Rupees (LKR); INR and USD are selectable.
+    // `currencyFormat` drives rendering: "inr" → Lakh/Crore, "plain" → grouped.
+    currencyCode: { type: String, enum: ["LKR", "INR", "USD"], default: "LKR" },
+    currencyFormat: { type: String, enum: ["inr", "plain"], default: "plain" },
+    currencySymbol: { type: String, default: "Rs" },
 
     status: {
       type: String,

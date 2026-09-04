@@ -5,6 +5,25 @@
 const CRORE = 10000000;
 const LAKH = 100000;
 
+// Supported currencies. `format` drives how amounts render:
+//   "inr"   → Lakh / Crore grouping (Indian style)
+//   "plain" → standard thousands grouping (Rs 1,500,000 / $12,000)
+// The default across the app is Sri Lankan Rupees (LKR).
+export const CURRENCIES = {
+  LKR: { code: "LKR", symbol: "Rs", format: "plain", label: "Sri Lankan Rupee (Rs)" },
+  INR: { code: "INR", symbol: "₹", format: "inr", label: "Indian Rupee (₹)" },
+  USD: { code: "USD", symbol: "$", format: "plain", label: "US Dollar ($)" },
+};
+export const DEFAULT_CURRENCY = "LKR";
+export const currencyMeta = (code) => CURRENCIES[code] || CURRENCIES[DEFAULT_CURRENCY];
+// Given an auction, resolve its currency code from stored code or symbol/format.
+export function auctionCurrencyCode(auction) {
+  if (!auction) return DEFAULT_CURRENCY;
+  if (auction.currencyCode && CURRENCIES[auction.currencyCode]) return auction.currencyCode;
+  const match = Object.values(CURRENCIES).find((c) => c.symbol === auction.currencySymbol && c.format === auction.currencyFormat);
+  return match ? match.code : DEFAULT_CURRENCY;
+}
+
 const trim = (s) => s.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
 
 // 12500000 → "₹1.25 Cr", 2000000 → "₹20 L"
@@ -42,12 +61,13 @@ export function parseMoney(input) {
   if (input == null) return 0;
   const s = String(input).trim().toLowerCase().replace(/,/g, "");
   if (!s) return 0;
-  const m = s.match(/^(-?\d*\.?\d+)\s*(cr|crore|l|lakh|lac|k)?$/);
+  const m = s.match(/^(-?\d*\.?\d+)\s*(cr|crore|l|lakh|lac|m|mn|k)?$/);
   if (!m) return Math.round(Number(s.replace(/[^\d.-]/g, "")) || 0);
   const val = parseFloat(m[1]);
   const unit = m[2];
   if (unit === "cr" || unit === "crore") return Math.round(val * CRORE);
   if (unit === "l" || unit === "lakh" || unit === "lac") return Math.round(val * LAKH);
+  if (unit === "m" || unit === "mn") return Math.round(val * 1000000);
   if (unit === "k") return Math.round(val * 1000);
   return Math.round(val);
 }
