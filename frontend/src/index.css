@@ -1,3 +1,22 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* --- Global themed canvas ------------------------------------------------
+   Legacy page stylesheets (FullScorecard.css) declare a plain, unlayered
+   `body { background: var(--light-color) }` that outranks Tailwind's base
+   layer and pins the whole app light. These rules set the base canvas on the
+   <html> element (higher specificity, loaded last) so the background follows
+   the active theme everywhere — including any area a page root doesn't paint.
+   Native form controls / scrollbars also match via `color-scheme`. */
+html {
+  color-scheme: light;
+  background-color: #f8fafc;
+}
+html.dark {
+  color-scheme: dark;
+  background-color: #020617;
+}
+html.dark body {
+  background-color: #020617;
+}

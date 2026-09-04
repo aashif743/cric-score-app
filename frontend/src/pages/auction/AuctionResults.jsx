@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { toPng } from "html-to-image";
 import jsPDF from "jspdf";
 import { FiImage, FiFileText, FiDownloadCloud, FiCheckCircle, FiAward } from "react-icons/fi";
@@ -7,9 +7,11 @@ import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
 import { formatMoney } from "../../utils/auctionFormat";
 import AuctionShell from "./AuctionShell.jsx";
+import { Button, Spinner, toast, confirmDialog } from "../../components/auction/ui.jsx";
 
 export default function AuctionResults() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useContext(AuthContext);
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -17,7 +19,11 @@ export default function AuctionResults() {
   const cardRef = useRef(null);
 
   const load = async () => {
-    try { setState(await auctionService.get(id, user.token)); }
+    try {
+      const data = await auctionService.get(id, user.token);
+      if (data && data.isAdmin === false) { navigate(`/auctions/${id}/team`, { replace: true }); return; }
+      setState(data);
+    }
     catch (e) { setState(null); }
     finally { setLoading(false); }
   };
@@ -40,9 +46,10 @@ export default function AuctionResults() {
   }, [state]);
 
   const complete = async () => {
-    if (!window.confirm("Mark this auction as completed?")) return;
-    await auctionService.update(id, { status: "completed" }, user.token).catch(() => {});
-    load();
+    const ok = await confirmDialog({ title: "Complete this auction?", message: "This marks the auction as finished. You can still view and export the results.", confirmText: "Mark completed" });
+    if (!ok) return;
+    try { await auctionService.update(id, { status: "completed" }, user.token); toast.success("Auction marked completed."); load(); }
+    catch (e) { toast.error("Could not update the auction."); }
   };
 
   const snapshot = async () => {
@@ -54,8 +61,8 @@ export default function AuctionResults() {
     try {
       setBusy("img");
       const url = await snapshot();
-      if (url) { const link = document.createElement("a"); link.download = `${d.a.name}-results.png`; link.href = url; link.click(); }
-    } catch (e) { alert("Could not create the image."); } finally { setBusy(""); }
+      if (url) { const link = document.createElement("a"); link.download = `${d.a.name}-results.png`; link.href = url; link.click(); toast.success("Image downloaded."); }
+    } catch (e) { toast.error("Could not create the image."); } finally { setBusy(""); }
   };
   const downloadPdf = async () => {
     try {
@@ -67,10 +74,11 @@ export default function AuctionResults() {
         const pdf = new jsPDF({ orientation: img.width > img.height ? "l" : "p", unit: "px", format: [img.width, img.height] });
         pdf.addImage(url, "PNG", 0, 0, img.width, img.height);
         pdf.save(`${d.a.name}-results.pdf`);
+        toast.success("PDF downloaded.");
         setBusy("");
       };
       img.src = url;
-    } catch (e) { alert("Could not create the PDF."); setBusy(""); }
+    } catch (e) { toast.error("Could not create the PDF."); setBusy(""); }
   };
   const exportCsv = () => {
     const rows = [["Team", "Player", "Role", "Category", "Price"]];
@@ -82,17 +90,18 @@ export default function AuctionResults() {
     link.href = URL.createObjectURL(blob);
     link.download = `${d.a.name}-results.csv`;
     link.click();
+    toast.success("CSV exported.");
   };
 
-  if (loading) return <Center text="Loading…" />;
+  if (loading) return <Center text={<Spinner size={28} className="text-indigo-500" />} />;
   if (!d) return <Center text="Auction not found." />;
   const { a, money, teams, sold, unsold, totalSpend, priciest } = d;
 
   const exportButtons = (
     <div className="flex items-center gap-2">
-      <button onClick={exportCsv} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-200 dark:bg-white/10 dark:text-slate-200"><FiFileText size={14} /> CSV</button>
-      <button onClick={downloadImage} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-200 dark:bg-white/10 dark:text-slate-200"><FiImage size={14} /> {busy === "img" ? "…" : "Image"}</button>
-      <button onClick={downloadPdf} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700"><FiDownloadCloud size={14} /> {busy === "pdf" ? "…" : "PDF"}</button>
+      <Button variant="soft" icon={FiFileText} onClick={exportCsv} className="px-3 py-2">CSV</Button>
+      <Button variant="soft" icon={FiImage} loading={busy === "img"} onClick={downloadImage} className="px-3 py-2">Image</Button>
+      <Button icon={FiDownloadCloud} loading={busy === "pdf"} onClick={downloadPdf} className="px-3 py-2">PDF</Button>
     </div>
   );
 
@@ -107,7 +116,7 @@ export default function AuctionResults() {
       </div>
 
       {a.status !== "completed" ? (
-        <button onClick={complete} className="mb-5 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"><FiCheckCircle /> Mark auction completed</button>
+        <div className="mb-5"><Button variant="success" icon={FiCheckCircle} onClick={complete}>Mark auction completed</Button></div>
       ) : (
         <div className="mb-5 inline-flex items-center gap-2 rounded-xl bg-emerald-100 px-4 py-2.5 text-sm font-black text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><FiCheckCircle /> Auction completed</div>
       )}

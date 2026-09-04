@@ -1,7 +1,7 @@
 import React, { useContext, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  FiGrid, FiSettings, FiZap, FiMonitor, FiChevronLeft, FiLogOut, FiMenu, FiX, FiAward,
+  FiGrid, FiSettings, FiZap, FiMonitor, FiChevronLeft, FiLogOut, FiMenu, FiX, FiAward, FiVideo,
 } from "react-icons/fi";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import ThemeToggle from "../../components/ThemeToggle.jsx";
@@ -31,8 +31,10 @@ export default function AuctionShell({ active, auctionId, auctionName, shareId, 
 
   const Sidebar = () => (
     <div className="flex h-full flex-col p-4">
-      <div className="mb-6 flex items-center gap-2 px-2">
-        <img src={brand} alt="CricZone" className="h-9 w-9 rounded-xl object-cover shadow-lg" />
+      <div className="mb-6 flex items-center gap-2.5 px-2">
+        <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 p-0.5 shadow-lg shadow-indigo-600/25">
+          <img src={brand} alt="CricZone" className="h-full w-full rounded-[0.9rem] object-cover" />
+        </div>
         <div className="leading-tight">
           <div className="text-sm font-black">CricZone</div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-500">Auctions</div>
@@ -48,6 +50,7 @@ export default function AuctionShell({ active, auctionId, auctionName, shareId, 
             <NavItem to={`/auctions/${auctionId}/live`} icon={FiZap} label="Live Auction" isActive={active === "live"} />
             <NavItem to={`/auctions/${auctionId}/results`} icon={FiAward} label="Results" isActive={active === "results"} />
             {shareId && <NavItem to={`/auction/screen/${shareId}`} icon={FiMonitor} label="Big Screen" external />}
+            {shareId && <NavItem to={`/auction/overlay/${shareId}`} icon={FiVideo} label="Stream Overlay" external />}
             <NavItem to="/auctions" icon={FiChevronLeft} label="All auctions" />
           </>
         )}
@@ -70,7 +73,7 @@ export default function AuctionShell({ active, auctionId, auctionName, shareId, 
   );
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">
+    <div className="flex min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/50 text-slate-900 transition-colors dark:from-slate-950 dark:to-slate-900/50 dark:text-white">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900 lg:block">
         <Sidebar />

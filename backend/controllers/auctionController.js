@@ -4,7 +4,17 @@ const Auction = require("../models/Auction");
 const AuctionTeam = require("../models/AuctionTeam");
 const AuctionPlayer = require("../models/AuctionPlayer");
 const Bid = require("../models/Bid");
+const User = require("../models/User");
 const engine = require("../services/auctionEngine");
+
+// Find an existing user account for an email so a team can be linked to its
+// owner immediately (before they ever log in). Returns the user id or null.
+async function findUserByEmail(email) {
+  const clean = (email || "").trim().toLowerCase();
+  if (!clean) return null;
+  const u = await User.findOne({ email: clean }).select("_id").lean();
+  return u ? u._id : null;
+}
 
 const room = (id) => `auction:${id}`;
 
@@ -60,18 +70,36 @@ exports.createAuction = async (req, res) => {
 
 exports.getMyAuctions = async (req, res) => {
   try {
-    const auctions = await Auction.find({ user: req.user.id }).sort({ createdAt: -1 }).lean();
-    // Attach light counts for the list view.
-    const withCounts = await Promise.all(
-      auctions.map(async (a) => {
-        const [teams, players, sold] = await Promise.all([
-          AuctionTeam.countDocuments({ auction: a._id }),
-          AuctionPlayer.countDocuments({ auction: a._id }),
-          AuctionPlayer.countDocuments({ auction: a._id, status: "sold" }),
-        ]);
-        return { ...a, teamCount: teams, playerCount: players, soldCount: sold };
-      })
-    );
+    const email = (req.user.email || "").toLowerCase();
+
+    // 1) Auctions this user manages (admin).
+    const adminAuctions = await Auction.find({ user: req.user.id }).sort({ createdAt: -1 }).lean();
+    const adminIds = new Set(adminAuctions.map((a) => String(a._id)));
+
+    // 2) Auctions where this user is a team owner (by linked account or email).
+    const myTeams = await AuctionTeam.find({
+      $or: [{ ownerUser: req.user.id }, ...(email ? [{ ownerEmail: email }] : [])],
+    }).select("auction name").lean();
+    const ownerAuctionIds = [...new Set(myTeams.map((t) => String(t.auction)))].filter((id) => !adminIds.has(id));
+    const ownerAuctions = ownerAuctionIds.length
+      ? await Auction.find({ _id: { $in: ownerAuctionIds } }).sort({ createdAt: -1 }).lean()
+      : [];
+    const teamByAuction = {};
+    myTeams.forEach((t) => { teamByAuction[String(t.auction)] = t.name; });
+
+    const decorate = (a, role) => async () => {
+      const [teams, players, sold] = await Promise.all([
+        AuctionTeam.countDocuments({ auction: a._id }),
+        AuctionPlayer.countDocuments({ auction: a._id }),
+        AuctionPlayer.countDocuments({ auction: a._id, status: "sold" }),
+      ]);
+      return { ...a, teamCount: teams, playerCount: players, soldCount: sold, role, myTeamName: teamByAuction[String(a._id)] || null };
+    };
+
+    const withCounts = await Promise.all([
+      ...adminAuctions.map((a) => decorate(a, "admin")()),
+      ...ownerAuctions.map((a) => decorate(a, "owner")()),
+    ]);
     res.json({ success: true, data: withCounts });
   } catch (error) {
     console.error("Get auctions error:", error);
@@ -183,13 +211,17 @@ exports.addTeam = async (req, res) => {
       return res.status(400).json({ success: false, error: "Team name is required" });
     }
     const count = await AuctionTeam.countDocuments({ auction: auction._id });
+    const cleanEmail = (ownerEmail || "").toLowerCase();
     const team = await AuctionTeam.create({
       auction: auction._id,
       name: name.trim(),
       shortName: (shortName || name).trim().substring(0, 4).toUpperCase(),
       logoUrl: logoUrl || "",
       ownerName: ownerName || "",
-      ownerEmail: (ownerEmail || "").toLowerCase(),
+      ownerEmail: cleanEmail,
+      // Link an existing account immediately so the owner sees the auction the
+      // moment they log in (even before opening the owner link).
+      ownerUser: cleanEmail ? await findUserByEmail(cleanEmail) : null,
       purse: purse != null ? purse : auction.settings?.defaultPurse || 0,
       order: count,
     });
@@ -210,7 +242,12 @@ exports.updateTeam = async (req, res) => {
     if (!team) return res.status(404).json({ success: false, error: "Team not found" });
     const fields = ["name", "shortName", "logoUrl", "ownerName", "purse", "order"];
     fields.forEach((f) => { if (req.body[f] !== undefined) team[f] = req.body[f]; });
-    if (req.body.ownerEmail !== undefined) team.ownerEmail = (req.body.ownerEmail || "").toLowerCase();
+    if (req.body.ownerEmail !== undefined) {
+      const cleanEmail = (req.body.ownerEmail || "").toLowerCase();
+      // Re-link to whichever account owns the new email (or clear the link).
+      if (cleanEmail !== team.ownerEmail) team.ownerUser = cleanEmail ? await findUserByEmail(cleanEmail) : null;
+      team.ownerEmail = cleanEmail;
+    }
     await team.save();
     const state = await engine.getState(auction._id);
     broadcast(req, auction._id, state);

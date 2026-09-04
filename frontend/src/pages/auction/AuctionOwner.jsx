@@ -5,6 +5,7 @@ import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
 import { formatMoney, nextBidAmount } from "../../utils/auctionFormat";
 import ThemeToggle from "../../components/ThemeToggle.jsx";
+import { Spinner, toast } from "../../components/auction/ui.jsx";
 import brand from "../../assets/criczone_icon.png";
 
 export default function AuctionOwner() {
@@ -14,7 +15,6 @@ export default function AuctionOwner() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
 
   useEffect(() => {
     if (!user?.token) return;
@@ -39,16 +39,15 @@ export default function AuctionOwner() {
     return { a, money, myTeam, squad, current, bidTeam, remaining, online, next, iAmTop, canBid };
   }, [state]);
 
-  const flash = (m) => { setErr(m); setTimeout(() => setErr(""), 2500); };
   const bid = async () => {
     if (busy) return;
     setBusy(true);
-    try { const nx = await auctionService.ownerBid(id, user.token); setState((prev) => ({ ...prev, ...nx })); }
-    catch (e) { flash(e?.error || "Could not place the bid"); }
+    try { const nx = await auctionService.ownerBid(id, user.token); setState((prev) => ({ ...prev, ...nx })); toast.success("Bid placed!"); }
+    catch (e) { toast.error(e?.error || "Could not place the bid"); }
     finally { setBusy(false); }
   };
 
-  if (loading) return <Center text="Loading…" />;
+  if (loading) return <Center text={<Spinner size={28} className="text-indigo-500" />} />;
   if (!d) return <Center text="Auction not found." />;
   if (!d.myTeam) return <Center text="You're not assigned to a team in this auction. Ask the organiser to add your email." />;
   const { a, money, myTeam, squad, current, bidTeam, remaining, online, next, iAmTop, canBid } = d;
@@ -58,15 +57,15 @@ export default function AuctionOwner() {
       <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-slate-200 bg-white/80 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-slate-900/80">
         <img src={brand} alt="CricZone" className="h-8 w-8 rounded-lg object-cover" />
         <span className="font-black">CricZone Auction</span>
+        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-black uppercase text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">Owner view</span>
         <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => navigate("/auctions")} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5">My auctions</button>
           <ThemeToggle />
           <button onClick={() => { logout(); navigate("/"); }} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5">Log out</button>
         </div>
       </header>
 
       <div className="mx-auto max-w-2xl space-y-4 p-4">
-        {err && <div className="rounded-xl bg-red-500/90 px-4 py-2 text-sm font-bold text-white">{err}</div>}
-
         {/* My team */}
         <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-violet-700 p-6 text-white shadow-lg">
           <div className="text-xs font-bold uppercase tracking-widest text-white/60">{a.name}</div>

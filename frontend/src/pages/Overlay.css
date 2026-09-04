@@ -1,9 +1,11 @@
 /* Overlay.css - Professional Cricket Score Overlay for OBS/Streaming */
 
-/* Base - Transparent background for OBS Browser Source */
-html, body {
-  margin: 0;
-  padding: 0;
+/* Base - Transparent background for OBS Browser Source.
+   Scoped to the `.overlay-obs` class (added by Overlay.jsx while mounted) so
+   this transparency does NOT leak into every route and break dark mode by
+   letting the browser's white background show through the app canvas. */
+html.overlay-obs,
+body.overlay-obs {
   background: transparent !important;
 }
 

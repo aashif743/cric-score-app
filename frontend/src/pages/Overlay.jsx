@@ -18,6 +18,18 @@ const Overlay = () => {
   const socketRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
 
+  // OBS browser sources need a fully transparent page. We opt in to that only
+  // while the overlay is mounted so the rest of the app keeps its themed
+  // (light/dark) canvas.
+  useEffect(() => {
+    document.documentElement.classList.add("overlay-obs");
+    document.body.classList.add("overlay-obs");
+    return () => {
+      document.documentElement.classList.remove("overlay-obs");
+      document.body.classList.remove("overlay-obs");
+    };
+  }, []);
+
   // Fetch initial data
   const fetchOverlayData = useCallback(async () => {
     try {
