@@ -7,6 +7,19 @@
     
     <link rel="icon" type="image/png" href="/criczone2.png" />
 
+    <!-- Apply the theme before paint to avoid a light flash. Defaults to dark
+         for first-time visitors; a saved choice still wins. -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("theme");
+          var dark = saved ? saved === "dark" : true;
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

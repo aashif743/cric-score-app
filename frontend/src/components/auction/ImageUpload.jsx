@@ -11,7 +11,7 @@ const ACCEPT = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 // Professional image picker: drag-and-drop or click, client-side validation
 // (type + size), live preview with change/remove, and an upload spinner.
 // Uploads to Hostinger and returns the public URL via onChange.
-export default function ImageUpload({ value, onChange, round = true, label = "Photo", hint }) {
+export default function ImageUpload({ value, onChange, round = true, wide = false, label = "Photo", hint }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -57,6 +57,47 @@ export default function ImageUpload({ value, onChange, round = true, label = "Ph
   };
 
   const shape = round ? "rounded-full" : "rounded-2xl";
+
+  // Wide banner variant (cover image): a full-width clickable dropzone.
+  if (wide) {
+    return (
+      <div>
+        {label && <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>}
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={onDrop}
+          className={cx(
+            "group relative grid aspect-[16/6] w-full place-items-center overflow-hidden rounded-2xl border-2 border-dashed transition",
+            drag ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : "border-slate-300 bg-slate-50 hover:border-indigo-400 dark:border-white/15 dark:bg-white/5"
+          )}
+        >
+          {busy ? (
+            <Spinner size={26} className="text-indigo-500" />
+          ) : value ? (
+            <>
+              <img src={value} alt="" className="h-full w-full object-cover" />
+              <span className="absolute inset-0 grid place-items-center bg-black/45 text-white opacity-0 transition group-hover:opacity-100">
+                <span className="inline-flex items-center gap-2 rounded-lg bg-white/15 px-3 py-1.5 text-sm font-bold backdrop-blur"><FiRefreshCw size={15} /> Change cover</span>
+              </span>
+            </>
+          ) : (
+            <div className="text-center">
+              <FiUploadCloud size={26} className="mx-auto text-slate-400 transition group-hover:text-indigo-500" />
+              <div className="mt-1.5 text-sm font-bold text-slate-500 dark:text-slate-300">Add a cover image</div>
+              <div className="text-xs font-medium text-slate-400">{hint || `Drag & drop or click · wide banner · max ${MAX_MB}MB`}</div>
+            </div>
+          )}
+        </button>
+        {value && (
+          <button type="button" onClick={() => onChange("")} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-red-500 hover:text-red-600"><FiTrash2 size={12} /> Remove cover</button>
+        )}
+        <input ref={inputRef} type="file" accept="image/*" onChange={onPick} className="hidden" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-4">

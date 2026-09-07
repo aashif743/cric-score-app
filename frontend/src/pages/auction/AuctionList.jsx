@@ -8,7 +8,7 @@ import {
 import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
 import AuctionShell from "./AuctionShell.jsx";
-import { Button, Modal, Field, Input, EmptyState, Spinner, toast, confirmDialog } from "../../components/auction/ui.jsx";
+import { Button, EmptyState, Spinner, toast, confirmDialog } from "../../components/auction/ui.jsx";
 
 const STATUS = {
   draft: "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300",
@@ -23,10 +23,6 @@ export default function AuctionList() {
   const [auctions, setAuctions] = useState([]);
   const [invites, setInvites] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [inviteBusy, setInviteBusy] = useState("");
 
   const load = async () => {
@@ -53,18 +49,7 @@ export default function AuctionList() {
     sold: auctions.reduce((s, a) => s + (a.soldCount || 0), 0),
   }), [auctions]);
 
-  const openCreate = () => { setName(""); setError(""); setCreating(true); };
-  const create = async () => {
-    if (!name.trim()) { setError("Please enter a name for your auction."); return; }
-    try {
-      setBusy(true);
-      const a = await auctionService.create({ name: name.trim() }, user.token);
-      toast.success("Auction created — let's set it up.");
-      navigate(`/auctions/${a._id}/setup`);
-    } catch (e) {
-      toast.error(e?.error || "Could not create the auction.");
-    } finally { setBusy(false); }
-  };
+  const openCreate = () => navigate("/auctions/new");
 
   const remove = async (a) => {
     const ok = await confirmDialog({
@@ -129,15 +114,24 @@ export default function AuctionList() {
             return (
               <motion.div key={a._id}
                 initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                className="group flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-indigo-200 hover:shadow-xl dark:border-white/10 dark:bg-white/5 dark:hover:border-indigo-500/30">
-                <div className="mb-2 flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${isOwner ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300" : "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300"}`}>
+                className="group flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-indigo-200 hover:shadow-xl dark:border-white/10 dark:bg-white/5 dark:hover:border-indigo-500/30">
+                {/* cover header */}
+                <div className="relative h-24 bg-gradient-to-br from-indigo-500 to-violet-600">
+                  {a.coverUrl && <img src={a.coverUrl} alt="" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
+                  <span className={`absolute left-3 top-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${isOwner ? "bg-violet-500 text-white" : "bg-white/90 text-indigo-700"}`}>
                     {isOwner ? <><FiEye size={11} /> Owner</> : <><FiShield size={11} /> Admin</>}
                   </span>
-                  <span className={`ml-auto shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${STATUS[a.status] || STATUS.draft}`}>{a.status}</span>
+                  <span className={`absolute right-3 top-3 shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${STATUS[a.status] || STATUS.draft}`}>{a.status}</span>
+                  <div className="absolute -bottom-5 left-4 grid h-12 w-12 place-items-center overflow-hidden rounded-2xl bg-white text-base font-black text-indigo-600 shadow-lg ring-2 ring-white dark:bg-slate-900 dark:text-white dark:ring-slate-900">
+                    {a.logoUrl ? <img src={a.logoUrl} alt="" className="h-full w-full object-cover" /> : (a.name || "A")[0]}
+                  </div>
                 </div>
+
+                <div className="flex flex-1 flex-col p-5 pt-7">
                 <div className="mb-3">
                   <h3 className="text-lg font-black leading-tight text-slate-900 dark:text-white">{a.name}</h3>
+                  <div className="mt-0.5 text-xs font-bold text-slate-400">{[a.sport, a.venue].filter(Boolean).join(" · ") || a.sport || "Cricket"}</div>
                   {isOwner && a.myTeamName && <div className="mt-0.5 text-xs font-bold text-violet-600 dark:text-violet-300">Your team · {a.myTeamName}</div>}
                 </div>
 
@@ -171,23 +165,13 @@ export default function AuctionList() {
                       className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><FiTrash2 size={15} /></button>
                   </div>
                 )}
+                </div>
               </motion.div>
             );
           })}
         </div>
       )}
 
-      {/* Create modal */}
-      <Modal open={creating} onClose={() => setCreating(false)} title="Create a new auction" subtitle="You can add teams, players and settings next.">
-        <Field label="Auction name" required error={error} hint="e.g. Premier League Season 5 Auction">
-          <Input autoFocus value={name} onChange={(e) => { setName(e.target.value); if (error) setError(""); }}
-            onKeyDown={(e) => e.key === "Enter" && create()} placeholder="Enter auction name" error={!!error} />
-        </Field>
-        <div className="mt-6 flex justify-end gap-2">
-          <Button variant="soft" onClick={() => setCreating(false)}>Cancel</Button>
-          <Button icon={FiPlus} loading={busy} onClick={create}>Create auction</Button>
-        </div>
-      </Modal>
     </AuctionShell>
   );
 }

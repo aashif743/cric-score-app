@@ -52,6 +52,14 @@ export default function AuctionBigScreen() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#05060f] text-white" style={{ backgroundColor: "#05060f" }}>
+      {/* cover image background (dimmed for readability) */}
+      {a.coverUrl && (
+        <div className="pointer-events-none absolute inset-0">
+          <img src={a.coverUrl} alt="" className="h-full w-full scale-105 object-cover opacity-25" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#05060f]/85 via-[#05060f]/70 to-[#05060f]/95" />
+        </div>
+      )}
+
       {/* animated ambient background */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -left-40 top-0 h-[38rem] w-[38rem] animate-pulse-glow rounded-full bg-indigo-700/25 blur-[120px]" />
@@ -63,10 +71,14 @@ export default function AuctionBigScreen() {
       {/* Header */}
       <header className="relative flex items-center justify-between px-6 py-4 lg:px-10 lg:py-6">
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-lg font-black shadow-lg shadow-indigo-900/40">{(a.name || "A")[0]}</div>
+          {a.logoUrl
+            ? <img src={a.logoUrl} alt="" className="h-12 w-12 rounded-2xl object-cover shadow-lg ring-2 ring-white/15" />
+            : <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-lg font-black shadow-lg shadow-indigo-900/40">{(a.name || "A")[0]}</div>}
           <div>
             <h1 className="text-xl font-black leading-tight tracking-tight lg:text-2xl">{a.name}</h1>
-            <div className="text-[11px] font-bold uppercase tracking-[0.25em] text-white/40">Player Auction</div>
+            <div className="text-[11px] font-bold uppercase tracking-[0.25em] text-white/40">
+              {[a.venue, [a.date, a.time].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "Player Auction"}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-4">

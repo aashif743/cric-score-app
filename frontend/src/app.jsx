@@ -30,6 +30,7 @@ import TermsOfService from './pages/TermsOfService';
 import Support from './pages/Support';
 import AccountDeletion from './pages/AccountDeletion';
 import AuctionList from './pages/auction/AuctionList';
+import AuctionCreate from './pages/auction/AuctionCreate';
 import AuctionSetup from './pages/auction/AuctionSetup';
 import AuctionControl from './pages/auction/AuctionControl';
 import AuctionOwner from './pages/auction/AuctionOwner';
@@ -262,6 +263,7 @@ const handleResumeMatch = (matchToResume) => {
           <Route path="/auction/screen/:shareId" element={<AuctionBigScreen />} />
           <Route path="/auction/overlay/:shareId" element={<AuctionOverlay />} />
           <Route path="/auctions" element={user ? <AuctionList /> : <Navigate to={authRedirect} replace />} />
+          <Route path="/auctions/new" element={user ? <AuctionCreate /> : <Navigate to={authRedirect} replace />} />
           <Route path="/auctions/:id/setup" element={user ? <AuctionSetup /> : <Navigate to={authRedirect} replace />} />
           <Route path="/auctions/:id/live" element={user ? <AuctionControl /> : <Navigate to={authRedirect} replace />} />
           <Route path="/auctions/:id/results" element={user ? <AuctionResults /> : <Navigate to={authRedirect} replace />} />

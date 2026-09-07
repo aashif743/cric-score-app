@@ -66,9 +66,26 @@ export default function AuctionOwner() {
       </header>
 
       <div className="mx-auto max-w-2xl space-y-4 p-4">
+        {/* Auction hero */}
+        <div className="relative overflow-hidden rounded-3xl shadow-lg">
+          <div className="relative h-28 bg-gradient-to-br from-indigo-500 to-violet-600 sm:h-32">
+            {a.coverUrl && <img src={a.coverUrl} alt="" className="h-full w-full object-cover" />}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
+          </div>
+          <div className="absolute bottom-3 left-4 right-4 flex items-end gap-3">
+            <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl bg-white/15 text-xl font-black text-white ring-2 ring-white/30 backdrop-blur">
+              {a.logoUrl ? <img src={a.logoUrl} alt="" className="h-full w-full object-cover" /> : (a.name || "A")[0]}
+            </div>
+            <div className="min-w-0 pb-0.5 text-white">
+              <div className="truncate text-lg font-black leading-tight drop-shadow">{a.name}</div>
+              <div className="truncate text-[11px] font-bold uppercase tracking-widest text-white/70">{[a.sport, a.venue].filter(Boolean).join(" · ")}</div>
+            </div>
+          </div>
+        </div>
+
         {/* My team */}
         <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-violet-700 p-6 text-white shadow-lg">
-          <div className="text-xs font-bold uppercase tracking-widest text-white/60">{a.name}</div>
+          <div className="text-xs font-bold uppercase tracking-widest text-white/60">Your team</div>
           <div className="mt-1 text-3xl font-black">{myTeam.name}</div>
           <div className="mt-4 grid grid-cols-3 gap-3 text-center">
             <Stat label="Purse" value={money(myTeam.purse)} />

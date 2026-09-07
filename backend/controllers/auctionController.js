@@ -18,11 +18,12 @@ async function findUserByEmail(email) {
 
 const room = (id) => `auction:${id}`;
 
-// Supported currencies (kept in sync with the frontend). Default: LKR.
+// Supported currencies/units (kept in sync with the frontend). Default: LKR.
 const CURRENCIES = {
   LKR: { code: "LKR", symbol: "Rs", format: "plain" },
   INR: { code: "INR", symbol: "₹", format: "inr" },
   USD: { code: "USD", symbol: "$", format: "plain" },
+  POINTS: { code: "POINTS", symbol: "", format: "points" },
 };
 
 // Push fresh state to everyone watching this auction (control panel, big screen,
@@ -55,7 +56,10 @@ async function loadOwned(req, res) {
 
 exports.createAuction = async (req, res) => {
   try {
-    const { name, sport, currencyCode, currencyFormat, currencySymbol, settings } = req.body;
+    const {
+      name, sport, logoUrl, coverUrl, venue, date, time, visibility,
+      currencyCode, currencyFormat, currencySymbol, settings,
+    } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: "Auction name is required" });
     }
@@ -64,9 +68,15 @@ exports.createAuction = async (req, res) => {
       user: req.user.id,
       name: name.trim(),
       sport: sport || "cricket",
+      logoUrl: logoUrl || "",
+      coverUrl: coverUrl || "",
+      venue: venue || "",
+      date: date || "",
+      time: time || "",
+      visibility: visibility === "private" ? "private" : "public",
       currencyCode: cur.code,
       currencyFormat: currencyFormat || cur.format,
-      currencySymbol: currencySymbol || cur.symbol,
+      currencySymbol: currencySymbol != null ? currencySymbol : cur.symbol,
       settings: settings || undefined,
       shareId: crypto.randomBytes(5).toString("hex"),
     });
@@ -194,9 +204,18 @@ exports.updateAuction = async (req, res) => {
   try {
     const auction = await loadOwned(req, res);
     if (!auction) return;
-    const { name, sport, currencyCode, currencyFormat, currencySymbol, settings, status } = req.body;
+    const {
+      name, sport, logoUrl, coverUrl, venue, date, time, visibility,
+      currencyCode, currencyFormat, currencySymbol, settings, status,
+    } = req.body;
     if (name !== undefined) auction.name = name.trim();
     if (sport !== undefined) auction.sport = sport;
+    if (logoUrl !== undefined) auction.logoUrl = logoUrl;
+    if (coverUrl !== undefined) auction.coverUrl = coverUrl;
+    if (venue !== undefined) auction.venue = venue;
+    if (date !== undefined) auction.date = date;
+    if (time !== undefined) auction.time = time;
+    if (visibility !== undefined && ["public", "private"].includes(visibility)) auction.visibility = visibility;
     // Setting a known currency code updates symbol + format together.
     if (currencyCode !== undefined && CURRENCIES[currencyCode]) {
       const cur = CURRENCIES[currencyCode];
@@ -438,6 +457,8 @@ function liveAction(engineFn) {
 
 exports.openLot = liveAction((req, a) => engine.openLot(a._id, req.body.playerId));
 exports.markBid = liveAction((req, a) => engine.markBid(a._id, req.body.teamId));
+exports.adjustBid = liveAction((req, a) => engine.adjustBid(a._id, req.body.direction));
+exports.movePlayer = liveAction((req, a) => engine.movePlayer(a._id, req.body.playerId, req.body.direction));
 exports.undoBid = liveAction((req, a) => engine.undoBid(a._id));
 exports.sellCurrent = liveAction((req, a) => engine.sellCurrent(a._id));
 exports.markUnsold = liveAction((req, a) => engine.markUnsold(a._id));

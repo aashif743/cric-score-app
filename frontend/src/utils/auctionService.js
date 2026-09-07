@@ -27,6 +27,8 @@ const auctionService = {
   // Live actions (admin) — the server validates, updates, and broadcasts.
   open: (id, playerId, token) => API.post(`/auctions/${id}/open`, { playerId }, cfg(token)).then((r) => r.data.data),
   bid: (id, teamId, token) => API.post(`/auctions/${id}/bid`, { teamId }, cfg(token)).then((r) => r.data.data),
+  adjustBid: (id, direction, token) => API.post(`/auctions/${id}/adjust-bid`, { direction }, cfg(token)).then((r) => r.data.data),
+  movePlayer: (id, playerId, direction, token) => API.post(`/auctions/${id}/move-player`, { playerId, direction }, cfg(token)).then((r) => r.data.data),
   undo: (id, token) => API.post(`/auctions/${id}/undo`, {}, cfg(token)).then((r) => r.data.data),
   sell: (id, token) => API.post(`/auctions/${id}/sell`, {}, cfg(token)).then((r) => r.data.data),
   unsold: (id, token) => API.post(`/auctions/${id}/unsold`, {}, cfg(token)).then((r) => r.data.data),

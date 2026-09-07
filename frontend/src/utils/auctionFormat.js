@@ -13,6 +13,7 @@ export const CURRENCIES = {
   LKR: { code: "LKR", symbol: "Rs", format: "plain", label: "Sri Lankan Rupee (Rs)" },
   INR: { code: "INR", symbol: "₹", format: "inr", label: "Indian Rupee (₹)" },
   USD: { code: "USD", symbol: "$", format: "plain", label: "US Dollar ($)" },
+  POINTS: { code: "POINTS", symbol: "", format: "points", label: "Points" },
 };
 export const DEFAULT_CURRENCY = "LKR";
 export const currencyMeta = (code) => CURRENCIES[code] || CURRENCIES[DEFAULT_CURRENCY];
@@ -29,6 +30,7 @@ const trim = (s) => s.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
 // 12500000 → "₹1.25 Cr", 2000000 → "₹20 L"
 export function formatMoney(amount, { symbol = "₹", format = "inr" } = {}) {
   const n = Math.round(Number(amount) || 0);
+  if (format === "points") return `${n.toLocaleString()} pts`;
   if (format !== "inr") return `${symbol}${n.toLocaleString()}`;
   if (Math.abs(n) >= CRORE) return `${symbol}${trim((n / CRORE).toFixed(2))} Cr`;
   if (Math.abs(n) >= LAKH) return `${symbol}${trim((n / LAKH).toFixed(2))} L`;

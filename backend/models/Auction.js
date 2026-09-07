@@ -17,10 +17,22 @@ const auctionSchema = mongoose.Schema(
     },
     name: { type: String, required: true, trim: true },
     sport: { type: String, default: "cricket", trim: true },
-    // Currency. Default is Sri Lankan Rupees (LKR); INR and USD are selectable.
-    // `currencyFormat` drives rendering: "inr" → Lakh/Crore, "plain" → grouped.
-    currencyCode: { type: String, enum: ["LKR", "INR", "USD"], default: "LKR" },
-    currencyFormat: { type: String, enum: ["inr", "plain"], default: "plain" },
+
+    // Branding used across the big screen, owner view and share cards.
+    logoUrl: { type: String, default: "" },   // square profile / crest
+    coverUrl: { type: String, default: "" },   // wide banner / background
+
+    // Event details.
+    venue: { type: String, default: "", trim: true },
+    date: { type: String, default: "" }, // "YYYY-MM-DD" (kept as a string to avoid TZ shifts)
+    time: { type: String, default: "" }, // "HH:MM"
+    visibility: { type: String, enum: ["public", "private"], default: "public" },
+
+    // Currency / unit. Default is Sri Lankan Rupees (LKR); INR, USD and a plain
+    // POINTS unit are selectable. `currencyFormat` drives rendering:
+    // "inr" → Lakh/Crore, "plain" → grouped numbers, "points" → "1,500 pts".
+    currencyCode: { type: String, enum: ["LKR", "INR", "USD", "POINTS"], default: "LKR" },
+    currencyFormat: { type: String, enum: ["inr", "plain", "points"], default: "plain" },
     currencySymbol: { type: String, default: "Rs" },
 
     status: {
@@ -33,6 +45,10 @@ const auctionSchema = mongoose.Schema(
     settings: {
       // Default purse applied to a team unless it overrides its own.
       defaultPurse: { type: Number, default: 10000000 }, // ₹1 Cr
+      // Starting/minimum bid used as the default base price for new players.
+      minBid: { type: Number, default: 0 },
+      // Target number of players each team fills.
+      playersPerTeam: { type: Number, default: 11 },
       // Bid increment tiers: while currentBid < upTo, raise by step. The last
       // tier should have upTo:null (applies above everything else).
       incrementTiers: {

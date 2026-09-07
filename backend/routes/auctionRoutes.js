@@ -31,6 +31,8 @@ router.route("/:id/players/:playerId")
 // Live auction actions (admin-only; each broadcasts new state to the room)
 router.post("/:id/open", protect, c.openLot);
 router.post("/:id/bid", protect, c.markBid);
+router.post("/:id/adjust-bid", protect, c.adjustBid);
+router.post("/:id/move-player", protect, c.movePlayer);
 router.post("/:id/undo", protect, c.undoBid);
 router.post("/:id/sell", protect, c.sellCurrent);
 router.post("/:id/unsold", protect, c.markUnsold);

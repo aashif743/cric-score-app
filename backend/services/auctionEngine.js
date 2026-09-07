@@ -226,6 +226,61 @@ async function markUnsold(auctionId) {
   return { state, unsold: { playerId: player ? String(player._id) : null } };
 }
 
+// Manually nudge the current bid up/down by one increment (auctioneer
+// correction). Keeps the same top team and syncs the latest ledger entry so
+// Undo stays correct. Requires an existing team bid to adjust.
+async function adjustBid(auctionId, direction) {
+  const auction = await Auction.findById(auctionId);
+  if (!auction) throw new Error("Auction not found");
+  if (!auction.currentPlayer) throw new Error("No player on the block");
+  if (!auction.currentBidTeam || auction.bidCount <= 0) {
+    throw new Error("Record a team bid first, then adjust it");
+  }
+
+  const player = await AuctionPlayer.findById(auction.currentPlayer).select("basePrice").lean();
+  const base = player?.basePrice || 0;
+  const tiers = auction.settings?.incrementTiers;
+
+  let amount;
+  if (direction === "down") {
+    const stepDown = nextIncrement(Math.max(base, auction.currentBid - 1), tiers);
+    amount = Math.max(base, auction.currentBid - stepDown);
+  } else {
+    amount = auction.currentBid + nextIncrement(auction.currentBid, tiers);
+  }
+  if (amount === auction.currentBid) return getState(auctionId);
+
+  // Keep the newest ledger entry in sync with the manual amount.
+  const last = await Bid.findOne({ player: auction.currentPlayer }).sort({ seq: -1 });
+  if (last) { last.amount = amount; await last.save(); }
+
+  auction.currentBid = amount;
+  await auction.save();
+  return getState(auctionId);
+}
+
+// Reorder the pending queue. direction: "up" | "down" | "top".
+async function movePlayer(auctionId, playerId, direction) {
+  const pending = await AuctionPlayer.find({ auction: auctionId, status: "pending" }).sort({ order: 1, createdAt: 1 });
+  const idx = pending.findIndex((p) => String(p._id) === String(playerId));
+  if (idx === -1) throw new Error("Player is not in the queue");
+
+  if (direction === "top") {
+    const minOrder = pending.length ? (pending[0].order ?? 0) : 0;
+    pending[idx].order = minOrder - 1;
+    await pending[idx].save();
+    return getState(auctionId);
+  }
+
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= pending.length) return getState(auctionId); // already at the end
+  const a = pending[idx], b = pending[swapIdx];
+  const ao = a.order ?? idx, bo = b.order ?? swapIdx;
+  a.order = bo; b.order = ao;
+  await Promise.all([a.save(), b.save()]);
+  return getState(auctionId);
+}
+
 module.exports = {
   nextIncrement,
   maxBidForTeam,
@@ -235,4 +290,6 @@ module.exports = {
   undoBid,
   sellCurrent,
   markUnsold,
+  adjustBid,
+  movePlayer,
 };

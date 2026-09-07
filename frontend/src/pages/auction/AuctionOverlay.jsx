@@ -119,7 +119,9 @@ export default function AuctionOverlay() {
         ) : (
           <motion.div key="idle" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
             className="mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/85 px-5 py-3 shadow-2xl backdrop-blur-md">
-            <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-500 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500" /></span>
+            {a.logoUrl
+              ? <img src={a.logoUrl} alt="" className="h-8 w-8 rounded-lg object-cover ring-1 ring-white/15" />
+              : <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-500 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500" /></span>}
             <span className="text-sm font-black text-white">{a.name}</span>
             <span className="text-sm font-semibold text-white/50">· Next player coming up…</span>
           </motion.div>
