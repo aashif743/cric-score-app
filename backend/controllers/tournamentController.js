@@ -3,7 +3,7 @@ const Match = require("../models/Match");
 const mongoose = require("mongoose");
 const { nanoid } = require("nanoid");
 const { generateKnockoutBracket } = require("../utils/knockoutBracket");
-const { generateLeagueBracket, buildKnockoutMatches, buildQualifierPlayoff } = require("../utils/leagueBracket");
+const { generateLeagueBracket, buildKnockoutMatches, buildQualifierPlayoff, buildPlayoff, normalizePlayoffFormat } = require("../utils/leagueBracket");
 const { propagateTeamNameToTournament } = require("../utils/teamRename");
 
 const TBD = 'TBD';
@@ -91,11 +91,11 @@ const regenerateKnockoutStage = async (tournament, userId) => {
   await Match.deleteMany({ tournament: tournament._id, stage: 'knockout' });
   if (!tournament.teamsAdvancePerGroup) return;
 
-  const useQualifier = tournament.playoffFormat === 'qualifier'
-    && tournament.numberOfGroups * tournament.teamsAdvancePerGroup === 4;
-  const { knockoutMatches } = useQualifier
-    ? buildQualifierPlayoff(tournament.numberOfGroups, tournament.teamsAdvancePerGroup)
-    : buildKnockoutMatches(tournament.numberOfGroups, tournament.teamsAdvancePerGroup);
+  const { knockoutMatches } = buildPlayoff(
+    tournament.numberOfGroups,
+    tournament.teamsAdvancePerGroup,
+    tournament.playoffFormat,
+  );
 
   const koSorted = [...knockoutMatches].sort((a, b) => b.round - a.round);
   const idMap = {};
@@ -165,7 +165,11 @@ exports.createTournament = async (req, res) => {
       numberOfGroups: tournamentFormat === "league" ? Math.max(1, numberOfGroups || 1) : 1,
       teamsAdvancePerGroup: tournamentFormat === "league" ? Math.max(0, teamsAdvancePerGroup || 0) : 0,
       matchesPerPair: tournamentFormat === "league" ? Math.max(1, matchesPerPair || 1) : 1,
-      playoffFormat: playoffFormat === "qualifier" ? "qualifier" : "knockout",
+      playoffFormat: normalizePlayoffFormat(
+        playoffFormat,
+        tournamentFormat === "league" ? Math.max(1, numberOfGroups || 1) : 1,
+        tournamentFormat === "league" ? Math.max(0, teamsAdvancePerGroup || 0) : 0,
+      ),
     });
 
     // For knockout, pre-generate the full bracket so the schedule is ready immediately.
@@ -418,8 +422,10 @@ exports.updateTournament = async (req, res) => {
       const newAdvance = teamsAdvancePerGroup !== undefined ? Math.max(0, parseInt(teamsAdvancePerGroup, 10) || 0) : tournament.teamsAdvancePerGroup;
       const newMpp = matchesPerPair !== undefined ? Math.max(1, parseInt(matchesPerPair, 10) || 1) : tournament.matchesPerPair;
       let newPlayoff = tournament.playoffFormat;
-      if (playoffFormat === 'qualifier' || playoffFormat === 'knockout') newPlayoff = playoffFormat;
-      if (newPlayoff === 'qualifier' && newGroups * newAdvance !== 4) newPlayoff = 'knockout';
+      if (['qualifier', 'qualifier6', 'knockout'].includes(playoffFormat)) newPlayoff = playoffFormat;
+      // Snap to a valid format: 'qualifier' needs 4+ qualifiers, else 'knockout'.
+      // ('qualifier6' is a legacy alias that normalizes to 'qualifier'.)
+      newPlayoff = normalizePlayoffFormat(newPlayoff, newGroups, newAdvance);
       const newTeams = numberOfTeams !== undefined ? numberOfTeams : tournament.numberOfTeams;
 
       const groupChanged =
@@ -986,6 +992,135 @@ exports.setBracketTeam = async (req, res) => {
   }
 };
 
+// PATCH /tournaments/:id/bracket-source
+// body: { matchId, slot: 'A' | 'B', source }  (source '' clears the slot's source)
+// Change which GROUP POSITION feeds a bracket slot (e.g. 'A1' → 'B2'), for a
+// league-playoff slot that is filled from group standings. Owner-only, only
+// while the match hasn't started, and only for "entry" slots (a slot fed by
+// another match's winner/loser is structural and can't be re-sourced). After
+// changing, the slot re-fills immediately if that group has already finished.
+exports.setBracketSource = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { matchId, slot } = req.body || {};
+    const source = (req.body?.source || '').trim().toUpperCase();
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(matchId || '')) {
+      return res.status(400).json({ success: false, error: "Invalid ID" });
+    }
+    if (slot !== 'A' && slot !== 'B') {
+      return res.status(400).json({ success: false, error: "slot must be 'A' or 'B'" });
+    }
+
+    const tournament = await Tournament.findById(id).lean();
+    if (!tournament) return res.status(404).json({ success: false, error: "Tournament not found" });
+    if (tournament.user.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+    if (tournament.format !== 'league') {
+      return res.status(400).json({ success: false, error: "Source editing applies to league playoffs only." });
+    }
+
+    const match = await Match.findById(matchId);
+    if (!match || String(match.tournament) !== String(id) || match.stage !== 'knockout') {
+      return res.status(404).json({ success: false, error: "Playoff match not found in this tournament" });
+    }
+    if (match.status !== 'scheduled') {
+      return res.status(409).json({ success: false, error: "This match has already started — it can no longer be changed." });
+    }
+
+    // Validate the source: '' (clear) or a group position within range.
+    let cleanSource = null;
+    if (source) {
+      const m = /^([A-Z])(\d+)$/.exec(source);
+      const gIdx = m ? m[1].charCodeAt(0) - 65 : -1;
+      const pos = m ? parseInt(m[2], 10) : 0;
+      if (!m || gIdx < 0 || gIdx >= (tournament.numberOfGroups || 1) || pos < 1 || pos > (tournament.teamsAdvancePerGroup || 0)) {
+        return res.status(400).json({ success: false, error: "Pick a valid qualifying position (e.g. A1, B2)." });
+      }
+      cleanSource = `${m[1]}${pos}`;
+    }
+
+    // This slot must be an "entry" slot — not fed by another match's result.
+    const feeders = await Match.find({ tournament: id, stage: 'knockout' })
+      .select('nextMatchId nextMatchSlot loserNextMatchId loserNextMatchSlot').lean();
+    const isFeederFed = feeders.some((f) =>
+      (String(f.nextMatchId) === String(matchId) && f.nextMatchSlot === slot) ||
+      (String(f.loserNextMatchId) === String(matchId) && f.loserNextMatchSlot === slot));
+    if (isFeederFed) {
+      return res.status(400).json({ success: false, error: "This slot is decided by another match's result, so its source can't be changed." });
+    }
+
+    // Helpers to read/reset a slot on a match doc.
+    const getLS = (m) => (m.liveState && typeof m.liveState.toObject === 'function')
+      ? m.liveState.toObject() : { ...(m.liveState || {}) };
+    const resetSlot = (m, sk) => {
+      const side = sk === 'A' ? 'teamA' : 'teamB';
+      m[side] = { name: 'TBD', shortName: 'TBD' };
+      const roster = Array.from({ length: m.playersPerTeam || 11 }, (_, i) => ({
+        name: `Batsman ${i + 1}`, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, outType: 'Not Out',
+      }));
+      if (m.innings1) {
+        if (sk === 'A') { m.innings1.battingTeam = 'TBD'; m.innings1.batting = roster; }
+        else { m.innings1.bowlingTeam = 'TBD'; m.innings1.bowling = roster; }
+        m.markModified('innings1');
+      }
+    };
+
+    const sideKeySrc = slot === 'A' ? 'sourceA' : 'sourceB';
+    const otherKeySrc = slot === 'A' ? 'sourceB' : 'sourceA';
+    const ls = getLS(match);
+    if (cleanSource && ls[otherKeySrc] === cleanSource) {
+      return res.status(409).json({ success: false, error: "The other slot already uses this position." });
+    }
+    const oldSource = ls[sideKeySrc] || null;
+
+    const groupsToRefill = new Set();
+    if (cleanSource) groupsToRefill.add(cleanSource[0]);
+    if (oldSource) groupsToRefill.add(oldSource[0]);
+
+    // Keep the bracket a valid permutation: if this position already feeds another
+    // entry slot, SWAP — that slot inherits this slot's old position. This lets an
+    // owner turn "A1 v A2" into "A1 v B2" without duplicating or dropping a team.
+    if (cleanSource) {
+      const others = await Match.find({ tournament: id, stage: 'knockout', _id: { $ne: match._id } });
+      outer:
+      for (const om of others) {
+        const ols = getLS(om);
+        for (const sk of ['A', 'B']) {
+          const key = sk === 'A' ? 'sourceA' : 'sourceB';
+          if (ols[key] === cleanSource) {
+            if (om.status !== 'scheduled') {
+              return res.status(409).json({ success: false, error: `${cleanSource} is used by a match that has already started.` });
+            }
+            ols[key] = oldSource;               // hand it this slot's old position
+            om.liveState = ols; om.markModified('liveState');
+            resetSlot(om, sk);
+            await om.save();
+            break outer;
+          }
+        }
+      }
+    }
+
+    ls[sideKeySrc] = cleanSource;
+    match.liveState = ls;
+    match.markModified('liveState');
+    resetSlot(match, slot);
+    await match.save();
+
+    // Re-fill any affected group's finished standings into the freed slots.
+    const { tryAdvanceLeagueGroup } = require('./matchController');
+    for (const gl of groupsToRefill) {
+      try { await tryAdvanceLeagueGroup(id, gl); } catch (e) { console.error('Source re-fill error:', e.message); }
+    }
+
+    return res.json({ success: true, data: { matchId, slot, source: cleanSource } });
+  } catch (error) {
+    console.error("Set bracket source error:", error);
+    res.status(500).json({ success: false, error: "Failed to set the source." });
+  }
+};
+
 // A generated/placeholder player name that shouldn't be remembered as part of a
 // team's real line-up (e.g. "Batsman 3", "Bowler 1", "New Batsman",
 // "Mumbai Player 5").
@@ -1052,7 +1187,8 @@ exports.setPlayoffFormat = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: "Invalid tournament ID" });
     }
-    const newFormat = req.body?.playoffFormat === 'qualifier' ? 'qualifier' : 'knockout';
+    const requested = ['qualifier', 'qualifier6', 'knockout'].includes(req.body?.playoffFormat)
+      ? req.body.playoffFormat : 'knockout';
 
     const tournament = await Tournament.findById(id);
     if (!tournament) return res.status(404).json({ success: false, error: "Tournament not found" });
@@ -1066,9 +1202,11 @@ exports.setPlayoffFormat = async (req, res) => {
       return res.status(400).json({ success: false, error: "This tournament has no playoff stage." });
     }
     const totalAdvancing = tournament.numberOfGroups * tournament.teamsAdvancePerGroup;
-    if (newFormat === 'qualifier' && totalAdvancing !== 4) {
-      return res.status(400).json({ success: false, error: "Qualifier playoffs need exactly 4 qualifying teams (top 4)." });
+    if ((requested === 'qualifier' || requested === 'qualifier6') && totalAdvancing < 4) {
+      return res.status(400).json({ success: false, error: "IPL-style playoffs need at least 4 qualifying teams." });
     }
+    // Snap to a valid format for the current setup.
+    const newFormat = normalizePlayoffFormat(requested, tournament.numberOfGroups, tournament.teamsAdvancePerGroup);
 
     // Can't reshuffle the bracket once a playoff match has begun.
     const startedKo = await Match.findOne({

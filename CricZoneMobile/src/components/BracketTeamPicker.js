@@ -5,13 +5,21 @@ import {
 } from 'react-native';
 
 // Modal to manually place a team into a bracket slot (owner only). Lists the
-// tournament's teams, plus a "Clear" option to reset the slot to TBD.
+// tournament's teams, plus a "Clear" option to reset the slot to TBD. For a
+// not-yet-qualified league-playoff entry slot it also offers group positions
+// (A1, B2, …) so the owner can re-wire which qualifier feeds the slot.
 //   visible, onClose
-//   slotLabel     e.g. "Group A 1st" / "Winner of Match 3" (shown as subtitle)
-//   teams         array of team names to choose from
-//   currentName   the team currently in the slot (highlighted), or 'TBD'
-//   onPick(name)  async; name '' means clear to TBD. Should resolve when done.
-const BracketTeamPicker = ({ visible, onClose, slotLabel, teams = [], currentName, onPick }) => {
+//   slotLabel        e.g. "Group A 1st" / "Winner of Match 3" (shown as subtitle)
+//   teams            array of team names to choose from
+//   currentName      the team currently in the slot (highlighted), or 'TBD'
+//   onPick(name)     async; name '' means clear to TBD. Should resolve when done.
+//   sources          [{ key:'A1', label:'Group A 1st' }] group positions (optional)
+//   currentSource    the source key currently feeding the slot (highlighted)
+//   onPickSource(key) async; key '' clears the source. Resolves when done.
+const BracketTeamPicker = ({
+  visible, onClose, slotLabel, teams = [], currentName, onPick,
+  sources = [], currentSource = null, onPickSource,
+}) => {
   const [busy, setBusy] = useState('');
 
   const pick = async (name) => {
@@ -24,6 +32,17 @@ const BracketTeamPicker = ({ visible, onClose, slotLabel, teams = [], currentNam
     }
   };
 
+  const pickSource = async (key) => {
+    if (busy || !onPickSource) return;
+    setBusy(`src:${key}`);
+    try {
+      await onPickSource(key);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const hasSources = sources && sources.length > 0 && !!onPickSource;
   const known = currentName && currentName !== 'TBD';
 
   // Always show the team currently in the slot, even if the caller's list has
@@ -37,10 +56,33 @@ const BracketTeamPicker = ({ visible, onClose, slotLabel, teams = [], currentNam
         <View style={styles.overlay}>
           <TouchableWithoutFeedback onPress={() => {}}>
             <View style={styles.card}>
-              <Text style={styles.title}>Set team</Text>
+              <Text style={styles.title}>{hasSources ? 'Set slot' : 'Set team'}</Text>
               {slotLabel ? <Text style={styles.subtitle} numberOfLines={1}>{slotLabel}</Text> : null}
 
               <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+                {hasSources ? (
+                  <>
+                    <Text style={styles.sectionLabel}>By group position</Text>
+                    {sources.map((s) => {
+                      const active = s.key === currentSource;
+                      const loading = busy === `src:${s.key}`;
+                      return (
+                        <TouchableOpacity
+                          key={`src_${s.key}`}
+                          style={[styles.item, active && styles.itemActive]}
+                          onPress={() => pickSource(s.key)}
+                          disabled={!!busy}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.itemText, active && styles.itemTextActive]} numberOfLines={1}>{s.label}</Text>
+                          {loading ? <ActivityIndicator size="small" color="#2563eb" />
+                            : active ? <Text style={styles.check}>✓</Text> : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                    {list.length ? <Text style={styles.sectionLabel}>Or set a specific team</Text> : null}
+                  </>
+                ) : null}
                 {list.map((name) => {
                   const active = name === currentName;
                   const loading = busy === name;
@@ -95,7 +137,8 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 12, fontWeight: '800', color: '#94a3b8', textAlign: 'center', letterSpacing: 1, textTransform: 'uppercase' },
   subtitle: { fontSize: 15, fontWeight: '800', color: '#1e293b', textAlign: 'center', marginTop: 4, marginBottom: 12 },
-  list: { maxHeight: 300 },
+  sectionLabel: { fontSize: 11, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 2 },
+  list: { maxHeight: 340 },
   item: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     height: 50, paddingHorizontal: 16, borderRadius: 13, backgroundColor: '#f8fafc',

@@ -191,9 +191,27 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   const [playoffFormat, setPlayoffFormat] = useState(
     existingData?.playoffFormat || 'knockout'
   );
-  // Qualifier playoffs require exactly 4 teams advancing overall (top 4).
+  // IPL-style "Qualifier" playoffs work for ANY 4+ qualifiers: the top 2 seeds
+  // bye to Qualifier 1; the rest play pre-playoff knockout rounds that feed the
+  // Eliminator, then Qualifier 2 & Final. Fewer than 4 → not available.
   const advancingTotal = (parseInt(numberOfGroups, 10) || 0) * (parseInt(teamsAdvancePerGroup, 10) || 0);
-  const qualifierAvailable = advancingTotal === 4;
+  const qualifierAvailable = advancingTotal >= 4;
+  // The playoff format that actually applies for the current setup.
+  const effPlayoffFormat = (playoffFormat === 'qualifier' && qualifierAvailable) ? 'qualifier' : 'knockout';
+  // Derived playoff structure preview (for correct-logic transparency).
+  const playoffPreview = (() => {
+    if (advancingTotal < 2) return 'No playoff — set teams to advance.';
+    if (effPlayoffFormat === 'qualifier') {
+      // Pre-Eliminator knockout rounds = rounds to reduce (M-2) teams to the Eliminator.
+      const K = advancingTotal - 2;
+      const koRounds = K <= 1 ? 0 : Math.ceil(Math.log2(K));
+      const parts = [];
+      if (koRounds > 0) parts.push(`${koRounds} knockout round${koRounds > 1 ? 's' : ''}`);
+      parts.push('Qualifier 1 (top 2 seeds)', 'Eliminator', 'Qualifier 2', 'Final');
+      return parts.join(' → ');
+    }
+    return `Single-elimination knockout of the ${advancingTotal} qualifiers`;
+  })();
 
   // Team name edit modal state
   const [teamNameModal, setTeamNameModal] = useState({
@@ -337,9 +355,10 @@ const TournamentCreateScreen = ({ navigation, route }) => {
         numberOfGroups: parseInt(numberOfGroups, 10),
         teamsAdvancePerGroup: parseInt(teamsAdvancePerGroup, 10),
         matchesPerPair: parseInt(matchesPerPair, 10),
-        // Qualifier playoffs only make sense for a top-4 bracket.
-        playoffFormat: (parseInt(numberOfGroups, 10) * parseInt(teamsAdvancePerGroup, 10) === 4 && playoffFormat === 'qualifier')
-          ? 'qualifier' : 'knockout',
+        // "Qualifier" needs at least 4 qualifiers; the backend re-validates and
+        // snaps to 'knockout' if it doesn't fit.
+        playoffFormat:
+          (playoffFormat === 'qualifier' && parseInt(numberOfGroups, 10) * parseInt(teamsAdvancePerGroup, 10) >= 4) ? 'qualifier' : 'knockout',
       } : {}),
     };
 
@@ -443,7 +462,9 @@ const TournamentCreateScreen = ({ navigation, route }) => {
       const advancing = groups * advance;
       let playoff = 0;
       if (advance > 0 && advancing >= 2) {
-        playoff = (playoffFormat === 'qualifier' && advancing === 4) ? 4 : advancing - 1;
+        // The qualifier playoff has exactly M matches (a knockout has M-1); the
+        // extra one is Qualifier 2.
+        playoff = (playoffFormat === 'qualifier' && advancing >= 4) ? advancing : advancing - 1;
       }
       return group + playoff;
     }
@@ -598,16 +619,16 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                         <Text style={styles.dropdownLabel}>2nd Round Format</Text>
                         <View style={styles.playoffOptions}>
                           <TouchableOpacity
-                            style={[styles.playoffPill, playoffFormat !== 'qualifier' || !qualifierAvailable ? styles.playoffPillActive : null]}
+                            style={[styles.playoffPill, effPlayoffFormat === 'knockout' ? styles.playoffPillActive : null]}
                             onPress={() => setPlayoffFormat('knockout')}
                             activeOpacity={0.8}
                           >
-                            <Text style={[styles.playoffPillText, (playoffFormat !== 'qualifier' || !qualifierAvailable) && styles.playoffPillTextActive]}>Knockout</Text>
+                            <Text style={[styles.playoffPillText, effPlayoffFormat === 'knockout' && styles.playoffPillTextActive]}>Knockout</Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={[
                               styles.playoffPill,
-                              playoffFormat === 'qualifier' && qualifierAvailable ? styles.playoffPillActive : null,
+                              effPlayoffFormat === 'qualifier' ? styles.playoffPillActive : null,
                               !qualifierAvailable ? styles.playoffPillDisabled : null,
                             ]}
                             onPress={() => qualifierAvailable && setPlayoffFormat('qualifier')}
@@ -615,7 +636,7 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                           >
                             <Text style={[
                               styles.playoffPillText,
-                              playoffFormat === 'qualifier' && qualifierAvailable && styles.playoffPillTextActive,
+                              effPlayoffFormat === 'qualifier' && styles.playoffPillTextActive,
                               !qualifierAvailable && styles.playoffPillTextDisabled,
                             ]}>Qualifier</Text>
                           </TouchableOpacity>
@@ -623,10 +644,10 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                       </View>
                       <Text style={styles.playoffHint}>
                         {qualifierAvailable
-                          ? (playoffFormat === 'qualifier'
-                              ? 'IPL-style: Qualifier 1, Eliminator, Qualifier 2, Final.'
+                          ? (effPlayoffFormat === 'qualifier'
+                              ? `IPL-style playoffs · ${playoffPreview}`
                               : 'Standard single-elimination (semifinals & final).')
-                          : 'Qualifier (IPL-style) needs exactly 4 teams advancing.'}
+                          : 'Qualifier (IPL-style) playoffs need at least 4 teams advancing.'}
                       </Text>
                     </>
                   ) : null}

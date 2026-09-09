@@ -21,8 +21,9 @@ import TournamentTopTabs from '../components/TournamentTopTabs';
 import PointsTableView from '../components/PointsTableView';
 import TournamentStatsView from '../components/TournamentStatsView';
 import QualifierBracket from '../components/QualifierBracket';
+import SixTeamBracket from '../components/SixTeamBracket';
 import BracketTeamPicker from '../components/BracketTeamPicker';
-import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
+import { slotSourceLabel, knockoutGameNumbers, groupSourceLabel } from '../utils/bracketLabels';
 import { computeGroupStandings } from '../utils/leagueStandings';
 import Icon from '../components/Icon';
 
@@ -540,6 +541,17 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
       Alert.alert('Could not set team', err?.error || 'Please try again.');
     }
   };
+  const doSetBracketSource = async (source) => {
+    if (!editSlot) return;
+    try {
+      await tournamentService.setBracketSource(tournament._id, editSlot.match._id, editSlot.slot, source, user.token);
+      setEditSlot(null);
+      fetchData();
+    } catch (err) {
+      setEditSlot(null);
+      Alert.alert('Could not change the source', err?.response?.data?.error || err?.error || 'Please try again.');
+    }
+  };
 
   // Only the tournament creator gets owner actions (Settings, Start/Resume).
   // Visitors who open the schedule from a live card only view.
@@ -547,9 +559,11 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
   const isOwner = !!(tournament?.user && myId && String(tournament.user) === String(myId));
 
   const isQualifier = tournament?.playoffFormat === 'qualifier';
-  // Qualifier playoffs require exactly 4 qualifiers; the format can only be
-  // changed before any playoff match has started.
   const advancingTotal = (tournament?.numberOfGroups || 0) * (tournament?.teamsAdvancePerGroup || 0);
+  // Small qualifier fields (4 or 6 teams) get a dedicated bracket graphic under a
+  // single Playoffs tab; larger fields fall back to per-round tabs (still a valid
+  // playoff — Qualifier 1 / Eliminator / Qualifier 2 / Final are labelled).
+  const playoffGraphic = isQualifier && (advancingTotal === 4 || advancingTotal === 6);
   const qualifierAvailable = advancingTotal === 4;
   const playoffsStarted = knockoutMatches.some((m) => m.status && m.status !== 'scheduled');
 
@@ -574,14 +588,14 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
     // IPL-style playoffs are shown together under one "Playoffs" tab (their
     // labels — Qualifier 1, Eliminator, … — distinguish them). A standard
     // knockout uses one tab per round.
-    const k = isQualifier
-      ? [{ key: 'po', kind: 'playoffs', id: 'po', label: '2nd Round' }]
+    const k = playoffGraphic
+      ? [{ key: 'po', kind: 'playoffs', id: 'po', label: advancingTotal === 6 ? 'Playoffs' : '2nd Round' }]
       : Array.from({ length: numKnockoutRounds }, (_, i) => ({
           key: `k_${i + 1}`, kind: 'knockout', id: i + 1,
           label: koRoundLabel(i + 1, numKnockoutRounds),
         }));
     return [...g, ...(hasKnockout ? k : [])];
-  }, [groups, numKnockoutRounds, hasKnockout, isQualifier]);
+  }, [groups, numKnockoutRounds, hasKnockout, playoffGraphic, advancingTotal]);
 
   const startMatchPayload = (match) => ({
     tournamentId: tournament?._id,
@@ -771,12 +785,21 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
             />
           ))
         ) : activeTab.kind === 'playoffs' ? (
-          <QualifierBracket
-            matches={matchesForActiveTab}
-            onStart={handleStartMatch}
-            isOwner={isOwner}
-            onEditSlot={openEditSlot}
-          />
+          advancingTotal === 6 ? (
+            <SixTeamBracket
+              matches={matchesForActiveTab}
+              onStart={handleStartMatch}
+              isOwner={isOwner}
+              onEditSlot={openEditSlot}
+            />
+          ) : (
+            <QualifierBracket
+              matches={matchesForActiveTab}
+              onStart={handleStartMatch}
+              isOwner={isOwner}
+              onEditSlot={openEditSlot}
+            />
+          )
         ) : (
           matchesForActiveTab.map((m, i) => (
             <KnockoutMatchCard
@@ -797,16 +820,38 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
       </>
       )}
 
-      {editSlot ? (
-        <BracketTeamPicker
-          visible={!!editSlot}
-          onClose={() => setEditSlot(null)}
-          slotLabel={slotSourceLabel(editSlot.match, editSlot.slot, knockoutMatches, koGameNos)}
-          teams={qualifiedTeams}
-          currentName={editSlot.slot === 'A' ? editSlot.match.teamA?.name : editSlot.match.teamB?.name}
-          onPick={doSetBracketTeam}
-        />
-      ) : null}
+      {editSlot ? (() => {
+        // Group positions the owner can re-wire a slot to (league playoffs only).
+        const nGroups = tournament?.numberOfGroups || 0;
+        const adv = tournament?.teamsAdvancePerGroup || 0;
+        const groupSources = [];
+        for (let g = 0; g < nGroups; g += 1) {
+          for (let p = 1; p <= adv; p += 1) {
+            const key = `${groupLetter(g)}${p}`;
+            groupSources.push({ key, label: groupSourceLabel(key) });
+          }
+        }
+        // A slot is source-editable only if it isn't fed by another match's result.
+        const feederFed = knockoutMatches.some((m) =>
+          (String(m.nextMatchId) === String(editSlot.match._id) && m.nextMatchSlot === editSlot.slot) ||
+          (String(m.loserNextMatchId) === String(editSlot.match._id) && m.loserNextMatchSlot === editSlot.slot));
+        const canSource = tournament?.format === 'league' && !feederFed && groupSources.length > 0;
+        const curName = editSlot.slot === 'A' ? editSlot.match.teamA?.name : editSlot.match.teamB?.name;
+        const curSource = editSlot.slot === 'A' ? editSlot.match.liveState?.sourceA : editSlot.match.liveState?.sourceB;
+        return (
+          <BracketTeamPicker
+            visible={!!editSlot}
+            onClose={() => setEditSlot(null)}
+            slotLabel={slotSourceLabel(editSlot.match, editSlot.slot, knockoutMatches, koGameNos)}
+            teams={qualifiedTeams}
+            currentName={curName}
+            onPick={doSetBracketTeam}
+            sources={canSource ? groupSources : []}
+            currentSource={canSource ? (curSource || null) : null}
+            onPickSource={canSource ? doSetBracketSource : undefined}
+          />
+        );
+      })() : null}
     </SafeAreaView>
   );
 };

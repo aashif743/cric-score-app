@@ -88,7 +88,9 @@ const TournamentSchema = new mongoose.Schema({
   // Playoff (knockout-stage) format for league tournaments:
   //   'knockout'  → standard single-elimination of the qualifiers (default)
   //   'qualifier' → IPL-style playoffs (Qualifier 1, Eliminator, Qualifier 2,
-  //                 Final) — requires exactly 4 qualifiers (top 4).
+  //                 Final) for ANY 4+ qualifiers. The top 2 seeds bye to
+  //                 Qualifier 1; the rest play pre-playoff knockout rounds that
+  //                 feed the Eliminator. (M=4 → classic top-4; M=6 → 6-team.)
   playoffFormat: {
     type: String,
     enum: ['knockout', 'qualifier'],
