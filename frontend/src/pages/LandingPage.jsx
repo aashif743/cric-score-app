@@ -151,10 +151,10 @@ function HeroMockups() {
         <div className="mt-3 text-3xl font-black tracking-tight">
           142<span className="text-slate-400">/3</span>
         </div>
-        <div className="text-xs font-bold text-slate-500 dark:text-slate-400">Chennai Kings</div>
+        <div className="text-xs font-bold text-slate-500 dark:text-slate-400">Jaffna Kings</div>
         <div className="mt-3 space-y-1.5">
-          <Row name="R. Sharma *" val="64 (38)" />
-          <Row name="V. Kohli" val="41 (29)" />
+          <Row name="P. Nissanka *" val="64 (38)" />
+          <Row name="K. Mendis" val="41 (29)" />
         </div>
         <div className="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2 text-center text-xs font-black text-emerald-600 dark:text-emerald-400">
           CRR 9.86 · Need 59 off 34
@@ -169,16 +169,16 @@ function HeroMockups() {
       >
         <div className="text-[10px] font-black uppercase tracking-widest text-white/60">On the block</div>
         <div className="mt-1 flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 text-xl font-black">J</div>
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 text-xl font-black">W</div>
           <div>
-            <div className="text-base font-black leading-tight">J. Bumrah</div>
-            <div className="text-[11px] text-white/60">Bowler · Base ₹20 L</div>
+            <div className="text-base font-black leading-tight">W. Hasaranga</div>
+            <div className="text-[11px] text-white/60">Bowler · Base Rs 1,000,000</div>
           </div>
         </div>
         <div className="mt-4 rounded-2xl bg-black/25 p-3 text-center">
           <div className="text-[9px] font-black uppercase tracking-widest text-white/50">Current bid</div>
-          <div className="text-2xl font-black text-amber-300">₹1.25 Cr</div>
-          <div className="text-[11px] font-bold">Team Titans</div>
+          <div className="text-2xl font-black text-amber-300">Rs 5,500,000</div>
+          <div className="text-[11px] font-bold">Galle Gladiators</div>
         </div>
       </motion.div>
     </motion.div>
@@ -352,13 +352,13 @@ function AuctionSpotlight({ onAuction }) {
           <motion.div initial={{ opacity: 0, scale: 0.9 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} transition={{ duration: 0.6, ease: EASE }}
             className="rounded-3xl bg-black/25 p-5 ring-1 ring-white/10">
             <div className="flex items-center gap-3">
-              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-white/15 text-2xl font-black">V</div>
-              <div><div className="text-xl font-black">Star Batsman</div><div className="text-xs text-white/60">Batsman · Base ₹20 L</div></div>
+              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-white/15 text-2xl font-black">K</div>
+              <div><div className="text-xl font-black">Kusal Mendis</div><div className="text-xs text-white/60">Batsman · Base Rs 1,000,000</div></div>
             </div>
             <div className="mt-4 rounded-2xl bg-black/30 p-4 text-center">
               <div className="text-[10px] font-black uppercase tracking-widest text-white/50">Current bid</div>
-              <div className="text-4xl font-black text-amber-300">₹1.25 Cr</div>
-              <div className="text-sm font-bold">Team Titans</div>
+              <div className="text-4xl font-black text-amber-300">Rs 5,500,000</div>
+              <div className="text-sm font-bold">Galle Gladiators</div>
             </div>
           </motion.div>
         </div>

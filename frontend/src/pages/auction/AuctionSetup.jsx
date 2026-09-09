@@ -165,10 +165,10 @@ function TeamsTab({ id, token, teams, defaultPurse, money, onChange }) {
         <div className="mb-4"><ImageUpload value={form.logoUrl} onChange={(url) => set("logoUrl", url)} round label="Team logo" hint="Optional · shown on the big screen" /></div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Team name" required error={errors.name}>
-            <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Chennai Kings" error={!!errors.name} onKeyDown={(e) => e.key === "Enter" && add()} />
+            <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Colombo Kings" error={!!errors.name} onKeyDown={(e) => e.key === "Enter" && add()} />
           </Field>
           <Field label="Owner name" hint="Optional">
-            <Input value={form.ownerName} onChange={(e) => set("ownerName", e.target.value)} placeholder="e.g. Ravi Kumar" />
+            <Input value={form.ownerName} onChange={(e) => set("ownerName", e.target.value)} placeholder="e.g. Kamal Perera" />
           </Field>
           <Field label="Owner email (login)" error={errors.ownerEmail} hint="Owners log in with this to follow their team">
             <Input type="email" value={form.ownerEmail} onChange={(e) => set("ownerEmail", e.target.value)} placeholder="owner@email.com" error={!!errors.ownerEmail} />
@@ -221,7 +221,7 @@ function PlayersTab({ id, token, players, money, onChange }) {
   const validate = () => {
     const e = {};
     if (!form.name.trim()) e.name = "Player name is required.";
-    if (form.basePrice.trim() && parseMoney(form.basePrice) <= 0) e.basePrice = "Enter a valid base price (e.g. 20 L).";
+    if (form.basePrice.trim() && parseMoney(form.basePrice) <= 0) e.basePrice = "Enter a valid base price (e.g. 500,000).";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -279,7 +279,7 @@ function PlayersTab({ id, token, players, money, onChange }) {
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Player name" required error={errors.name} className="lg:col-span-1">
-            <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Virat Kohli" error={!!errors.name} onKeyDown={(e) => e.key === "Enter" && add()} />
+            <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Kusal Mendis" error={!!errors.name} onKeyDown={(e) => e.key === "Enter" && add()} />
           </Field>
           <Field label="Role" hint="Optional">
             <Select value={form.role} onChange={(e) => set("role", e.target.value)}>
@@ -290,8 +290,8 @@ function PlayersTab({ id, token, players, money, onChange }) {
           <Field label="Grade / category" hint="Optional">
             <Input value={form.category} onChange={(e) => set("category", e.target.value)} placeholder="e.g. A / Marquee" />
           </Field>
-          <Field label="Base price" error={errors.basePrice} hint="e.g. 20 L, 2 Cr">
-            <Input value={form.basePrice} onChange={(e) => set("basePrice", e.target.value)} placeholder="20 L" error={!!errors.basePrice} onKeyDown={(e) => e.key === "Enter" && add()} />
+          <Field label="Base price" error={errors.basePrice} hint="e.g. 500,000">
+            <Input value={form.basePrice} onChange={(e) => set("basePrice", e.target.value)} placeholder="500,000" error={!!errors.basePrice} onKeyDown={(e) => e.key === "Enter" && add()} />
           </Field>
           <div className="flex items-end pb-1 sm:col-span-2 lg:col-span-1">
             <Toggle checked={form.isOverseas} onChange={(v) => set("isOverseas", v)} label="Overseas player" />
@@ -302,7 +302,7 @@ function PlayersTab({ id, token, players, money, onChange }) {
         {showBulk && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="mt-5 border-t border-slate-100 pt-5 dark:border-white/10">
             <Field label="Bulk import" hint="One player per line — Name, BasePrice, Role, Grade">
-              <Textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} placeholder={"Virat Kohli, 2 Cr, Batsman, A\nJasprit Bumrah, 2 Cr, Bowler, A"} />
+              <Textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} placeholder={"Kusal Mendis, 1500000, Batsman, A\nWanindu Hasaranga, 1500000, Bowler, A"} />
             </Field>
             <div className="mt-3 flex items-center gap-3">
               <Button variant="dark" icon={FiUploadCloud} loading={bulkBusy} onClick={importBulk}>Import {parsedBulk.length || ""} players</Button>
@@ -363,7 +363,7 @@ function SettingsTab({ id, token, auction, money, onChange }) {
 
   const validate = () => {
     const e = {};
-    if (parseMoney(f.defaultPurse) <= 0) e.defaultPurse = "Enter a valid purse (e.g. 1 Cr).";
+    if (parseMoney(f.defaultPurse) <= 0) e.defaultPurse = "Enter a valid purse (e.g. 10,000,000).";
     if (parseMoney(f.tier1Step) <= 0) e.tier1Step = "Enter a valid increment.";
     if (parseMoney(f.tier2Step) <= 0) e.tier2Step = "Enter a valid increment.";
     const min = Number(f.minSquadSize) || 0, max = Number(f.maxSquadSize) || 0;
@@ -434,17 +434,17 @@ function SettingsTab({ id, token, auction, money, onChange }) {
         <SectionTitle>Purse & bidding</SectionTitle>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Default purse per team" required error={errors.defaultPurse} hint="Used when a team's purse is left blank">
-            <Input value={f.defaultPurse} onChange={(e) => set("defaultPurse", e.target.value)} placeholder="1 Cr" error={!!errors.defaultPurse} />
+            <Input value={f.defaultPurse} onChange={(e) => set("defaultPurse", e.target.value)} placeholder="10,000,000" error={!!errors.defaultPurse} />
           </Field>
           <div />
           <Field label="Increment (below…)" required error={errors.tier1Step}>
-            <Input value={f.tier1Step} onChange={(e) => set("tier1Step", e.target.value)} placeholder="5 L" error={!!errors.tier1Step} />
+            <Input value={f.tier1Step} onChange={(e) => set("tier1Step", e.target.value)} placeholder="250,000" error={!!errors.tier1Step} />
           </Field>
           <Field label="…up to" hint="Bids below this use the first increment">
-            <Input value={f.tier1UpTo} onChange={(e) => set("tier1UpTo", e.target.value)} placeholder="1 Cr" />
+            <Input value={f.tier1UpTo} onChange={(e) => set("tier1UpTo", e.target.value)} placeholder="5,000,000" />
           </Field>
           <Field label="Increment (above that)" required error={errors.tier2Step}>
-            <Input value={f.tier2Step} onChange={(e) => set("tier2Step", e.target.value)} placeholder="10 L" error={!!errors.tier2Step} />
+            <Input value={f.tier2Step} onChange={(e) => set("tier2Step", e.target.value)} placeholder="500,000" error={!!errors.tier2Step} />
           </Field>
         </div>
       </Card>
