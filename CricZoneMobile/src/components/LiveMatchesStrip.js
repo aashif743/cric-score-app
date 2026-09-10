@@ -147,10 +147,16 @@ const TournamentLiveCard = ({ group, index, onPress, navigation, cardWidth }) =>
   const teamB = match.teamB?.name || 'Team B';
   const scoreA = scoreFor(teamA, match);
   const scoreB = scoreFor(teamB, match);
-  const contextLine =
-    match.matchLabel ||
-    (match.group ? `Group ${match.group} Match` : null) ||
-    (match.matchNumber ? `${ordinal(match.matchNumber)} Match` : (isCompleted ? 'Result' : 'Live Match'));
+  // Context line. Playoff/knockout matches carry a label (e.g. "Qualifier 1").
+  // Group-stage matches show the group + match number ("Group A · 3rd Match").
+  const contextLine = (() => {
+    if (match.matchLabel) return match.matchLabel;
+    const parts = [];
+    if (match.group) parts.push(`Group ${match.group}`);
+    if (match.matchNumber) parts.push(`${ordinal(match.matchNumber)} Match`);
+    if (parts.length) return parts.join(' · ');
+    return isCompleted ? 'Result' : 'Live Match';
+  })();
 
   const openTournament = () =>
     navigation?.navigate(scheduleRouteFor(match.tournamentFormat), { tournamentId: match.tournament });
@@ -400,7 +406,7 @@ const LiveMatchesStrip = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { marginBottom: 4 },
+  container: { marginTop: 12, marginBottom: 0 },
 
   headerRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -411,59 +417,60 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 14, fontWeight: '900', color: '#0f172a', letterSpacing: 0.4, textTransform: 'uppercase' },
   headerCount: { fontSize: 11, fontWeight: '700', color: '#94a3b8' },
 
-  list: { paddingHorizontal: SIDE_PAD, paddingBottom: 14 },
+  list: { paddingHorizontal: SIDE_PAD, paddingBottom: 8 },
 
   // Pagination dots
   dotsRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingBottom: 6 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#cbd5e1' },
   dotActive: { width: 18, backgroundColor: '#4f46e5' },
 
-  // Card — clean, light, wide & short (no colourful background)
+  // Card — clean, wide & short with a clear border + soft shadow so it
+  // stands out on the light dashboard background.
   card: {
     width: CARD_W,
-    backgroundColor: '#f4f4f5',
-    borderRadius: 22,
-    paddingHorizontal: 18,
-    paddingVertical: 15,
-    borderWidth: 1,
-    borderColor: '#ececee',
+    backgroundColor: '#e8edf4',
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderWidth: 1.5,
+    borderColor: '#d3dce7',
   },
   cardHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 4,
   },
-  contextText: { flex: 1, color: '#71717a', fontSize: 13, fontWeight: '700', marginRight: 10 },
+  contextText: { flex: 1, color: '#71717a', fontSize: 11.5, fontWeight: '700', marginRight: 10 },
 
   liveTag: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  liveText: { color: '#dc2626', fontSize: 12.5, fontWeight: '900', letterSpacing: 0.8 },
-  resultTag: { color: '#059669', fontSize: 12.5, fontWeight: '900', letterSpacing: 0.6 },
+  liveText: { color: '#dc2626', fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
+  resultTag: { color: '#059669', fontSize: 11, fontWeight: '900', letterSpacing: 0.6 },
 
-  teamRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
+  teamRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3.5 },
   teamBadge: {
-    width: 34, height: 34, borderRadius: 17,
+    width: 28, height: 28, borderRadius: 14,
     backgroundColor: '#18181b',
     justifyContent: 'center', alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
-  teamBadgeText: { color: '#fff', fontSize: 15, fontWeight: '900' },
-  teamName: { flex: 1, color: '#18181b', fontSize: 16.5, fontWeight: '800' },
+  teamBadgeText: { color: '#fff', fontSize: 12.5, fontWeight: '900' },
+  teamName: { flex: 1, color: '#18181b', fontSize: 14, fontWeight: '800' },
   scoreBlock: { flexDirection: 'row', alignItems: 'center' },
-  battingDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#dc2626', marginRight: 6 },
-  scoreRuns: { color: '#18181b', fontSize: 15.5, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  scoreOvers: { color: '#a1a1aa', fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  battingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#dc2626', marginRight: 5 },
+  scoreRuns: { color: '#18181b', fontSize: 14, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  scoreOvers: { color: '#a1a1aa', fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },
 
-  resultLine: { color: '#3f3f46', fontSize: 12.5, fontWeight: '700', marginTop: 8, marginLeft: 2 },
+  resultLine: { color: '#3f3f46', fontSize: 11.5, fontWeight: '700', marginTop: 5, marginLeft: 2 },
 
   // Footer — tournament name (small) + the single "View Tournament" action
   footer: {
-    marginTop: 12, paddingTop: 12,
+    marginTop: 8, paddingTop: 8,
     borderTopWidth: 1, borderTopColor: '#e4e4e7',
   },
   footerLabel: {
-    color: '#a1a1aa', fontSize: 11, fontWeight: '800',
-    letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 4,
+    color: '#a1a1aa', fontSize: 10, fontWeight: '800',
+    letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 3,
   },
-  footerCta: { color: '#18181b', fontSize: 15.5, fontWeight: '900' },
+  footerCta: { color: '#18181b', fontSize: 13.5, fontWeight: '900' },
 
   // Pulse
   pulseWrap: { width: 8, height: 8, justifyContent: 'center', alignItems: 'center' },

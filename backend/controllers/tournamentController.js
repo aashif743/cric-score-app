@@ -1030,27 +1030,18 @@ exports.setBracketSource = async (req, res) => {
       return res.status(409).json({ success: false, error: "This match has already started — it can no longer be changed." });
     }
 
-    // Validate the source: '' (clear), else a merit seed (S1..SM) for the
-    // qualifier playoff, or a group position (A1, B2) for a standard knockout.
-    const totalQualifiers = (tournament.numberOfGroups || 1) * (tournament.teamsAdvancePerGroup || 0);
+    // Validate the source: '' (clear), else a group position (A1, B2, …). Both
+    // the standard knockout and the IPL-style qualifier playoff seed their slots
+    // by group + finishing place, so the same validation applies to both.
     let cleanSource = null;
     if (source) {
-      if (tournament.playoffFormat === 'qualifier') {
-        const m = /^S(\d+)$/.exec(source);
-        const n = m ? parseInt(m[1], 10) : 0;
-        if (!m || n < 1 || n > totalQualifiers) {
-          return res.status(400).json({ success: false, error: `Pick a valid seed (S1–S${totalQualifiers}).` });
-        }
-        cleanSource = `S${n}`;
-      } else {
-        const m = /^([A-Z])(\d+)$/.exec(source);
-        const gIdx = m ? m[1].charCodeAt(0) - 65 : -1;
-        const pos = m ? parseInt(m[2], 10) : 0;
-        if (!m || gIdx < 0 || gIdx >= (tournament.numberOfGroups || 1) || pos < 1 || pos > (tournament.teamsAdvancePerGroup || 0)) {
-          return res.status(400).json({ success: false, error: "Pick a valid qualifying position (e.g. A1, B2)." });
-        }
-        cleanSource = `${m[1]}${pos}`;
+      const m = /^([A-Z])(\d+)$/.exec(source);
+      const gIdx = m ? m[1].charCodeAt(0) - 65 : -1;
+      const pos = m ? parseInt(m[2], 10) : 0;
+      if (!m || gIdx < 0 || gIdx >= (tournament.numberOfGroups || 1) || pos < 1 || pos > (tournament.teamsAdvancePerGroup || 0)) {
+        return res.status(400).json({ success: false, error: "Pick a valid qualifying position (e.g. A1, B2)." });
       }
+      cleanSource = `${m[1]}${pos}`;
     }
 
     // This slot must be an "entry" slot — not fed by another match's result.

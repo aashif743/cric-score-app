@@ -53,6 +53,8 @@ exports.getLiveMatches = async (req, res) => {
       .select([
         "tournament", "teamA", "teamB", "status", "totalOvers", "ballsPerOver", "playersPerTeam",
         "innings", "target", "updatedAt", "result", "matchSummary.winner",
+        // Stage/group/label so the card can show e.g. "Group A · 3rd Match".
+        "stage", "group", "matchLabel",
         // Just the score-shaped fields from each innings; skip rosters.
         "innings1.runs", "innings1.wickets", "innings1.overs", "innings1.battingTeam", "innings1.bowlingTeam",
         "innings2.runs", "innings2.wickets", "innings2.overs", "innings2.battingTeam", "innings2.bowlingTeam",
@@ -77,6 +79,9 @@ exports.getLiveMatches = async (req, res) => {
         tournamentName: t?.name || "",
         tournamentFormat: t?.format || "quick",
         matchNumber: matchNumbers[i],
+        stage: m.stage,
+        group: m.group || null,
+        matchLabel: m.matchLabel || null,
         teamA: m.teamA,
         teamB: m.teamB,
         status: m.status,

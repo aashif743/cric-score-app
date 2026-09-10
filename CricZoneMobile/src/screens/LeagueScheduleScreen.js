@@ -290,8 +290,8 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
   const scores = teamScores(match);
   const showScores = isCompleted || isLive;
   // For an unfilled slot, show WHO will play there (e.g. "Group A 1st").
-  const labelA = teamAName === 'TBD' ? slotSourceLabel(match, 'A', koMatches || [], gameNoMap) : teamAName;
-  const labelB = teamBName === 'TBD' ? slotSourceLabel(match, 'B', koMatches || [], gameNoMap) : teamBName;
+  const labelA = teamAName === 'TBD' ? slotSourceLabel(match, 'A', koMatches || [], gameNoMap, { short: true }) : teamAName;
+  const labelB = teamBName === 'TBD' ? slotSourceLabel(match, 'B', koMatches || [], gameNoMap, { short: true }) : teamBName;
   // Owner can set a slot's team while the match hasn't started.
   const canEdit = isOwner && onEditSlot && match.status === 'scheduled';
   const editA = canEdit ? () => onEditSlot(match, 'A') : null;
@@ -803,22 +803,39 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
             {/* Byes: teams that skip the 2nd round and go straight to Qualifier 1 */}
             {q1Match ? (
               <View style={styles.byesCard}>
-                <Text style={styles.byesTitle}>Directly qualified to Qualifier 1</Text>
-                <Text style={styles.byesSub}>These teams get a bye — they skip the 2nd round.</Text>
-                <View style={styles.byesTeams}>
-                  {[['A', q1Match.teamA], ['B', q1Match.teamB]].map(([sk, tm]) => {
+                <View style={styles.byesHeaderRow}>
+                  <View style={styles.byesBadge}>
+                    <Text style={styles.byesBadgeText}>QUALIFIER 1</Text>
+                  </View>
+                </View>
+                {(() => {
+                  const mkTeam = (sk, tm) => {
                     const known = tm?.name && tm.name !== 'TBD';
                     const fallback = (tournament?.numberOfGroups === 2)
                       ? (sk === 'A' ? 'Group A Winner' : 'Group B Winner')
                       : slotSourceLabel(q1Match, sk, knockoutMatches, koGameNos);
+                    const label = known ? tm.name : fallback;
+                    const initial = (label || '?').trim().charAt(0).toUpperCase();
                     return (
-                      <View key={sk} style={styles.byeChip}>
-                        <Text style={styles.byeChipName} numberOfLines={1}>{known ? tm.name : fallback}</Text>
-                        <Text style={[styles.byeChipTag, known && styles.byeChipTagOk]}>{known ? '✓ Qualified' : 'To qualify'}</Text>
+                      <View style={styles.byeTeam}>
+                        <View style={[styles.byeTeamBadge, known && styles.byeTeamBadgeOk]}>
+                          <Text style={[styles.byeTeamBadgeText, known && styles.byeTeamBadgeTextOk]}>{initial}</Text>
+                        </View>
+                        <Text style={styles.byeTeamName} numberOfLines={1}>{label}</Text>
+                        <Text style={[styles.byeTeamStatus, known && styles.byeTeamStatusOk]}>
+                          {known ? 'Qualified' : 'To qualify'}
+                        </Text>
                       </View>
                     );
-                  })}
-                </View>
+                  };
+                  return (
+                    <View style={styles.byesMatchRow}>
+                      {mkTeam('A', q1Match.teamA)}
+                      <View style={styles.byesVs}><Text style={styles.byesVsText}>VS</Text></View>
+                      {mkTeam('B', q1Match.teamB)}
+                    </View>
+                  );
+                })()}
               </View>
             ) : null}
             <Text style={styles.srHeading}>2nd Round · Knockout</Text>
@@ -866,21 +883,15 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
 
       {editSlot ? (() => {
         // Sources the owner can re-wire a slot to (league playoffs only).
-        // Qualifier format uses merit SEEDS (S1..SM); a standard knockout uses
-        // group positions (A1, B2, …).
+        // Both the standard knockout and the qualifier playoff seed by group
+        // position (A1, B2, …), so the picker offers group positions for both.
         const nGroups = tournament?.numberOfGroups || 0;
         const adv = tournament?.teamsAdvancePerGroup || 0;
         const groupSources = [];
-        if (tournament?.playoffFormat === 'qualifier') {
-          for (let s = 1; s <= nGroups * adv; s += 1) {
-            groupSources.push({ key: `S${s}`, label: `Seed ${s}` });
-          }
-        } else {
-          for (let g = 0; g < nGroups; g += 1) {
-            for (let p = 1; p <= adv; p += 1) {
-              const key = `${groupLetter(g)}${p}`;
-              groupSources.push({ key, label: groupSourceLabel(key) });
-            }
+        for (let g = 0; g < nGroups; g += 1) {
+          for (let p = 1; p <= adv; p += 1) {
+            const key = `${groupLetter(g)}${p}`;
+            groupSources.push({ key, label: groupSourceLabel(key) });
           }
         }
         // A slot is source-editable only if it isn't fed by another match's result.
@@ -973,21 +984,41 @@ const styles = StyleSheet.create({
 
   scheduleList: { padding: 16, paddingBottom: 60 },
 
-  // "2nd Round" tab — byes card + section heading.
+  // "2nd Round" tab — Qualifier 1 direct-entry card + section heading.
   byesCard: {
-    backgroundColor: '#ecfdf5', borderRadius: 16, padding: 16, marginBottom: 18,
-    borderWidth: 1, borderColor: '#a7f3d0',
+    backgroundColor: '#fff', borderRadius: 18, padding: 18, marginBottom: 18,
+    borderWidth: 1, borderColor: '#e2e8f0',
+    shadowColor: '#0f172a', shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06, shadowRadius: 14, elevation: 2,
   },
-  byesTitle: { fontSize: 14, fontWeight: '900', color: '#065f46', letterSpacing: 0.2 },
-  byesSub: { fontSize: 12, fontWeight: '600', color: '#059669', marginTop: 2, marginBottom: 12 },
-  byesTeams: { flexDirection: 'row', gap: 10 },
-  byeChip: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 12,
-    borderWidth: 1, borderColor: '#d1fae5', alignItems: 'center',
+  byesHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  byesBadge: {
+    backgroundColor: '#eef2ff', borderRadius: 8, paddingHorizontal: 11, paddingVertical: 5,
+    borderWidth: 1, borderColor: '#c7d2fe',
   },
-  byeChipName: { fontSize: 14, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
-  byeChipTag: { fontSize: 10.5, fontWeight: '800', color: '#94a3b8', marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.4 },
-  byeChipTagOk: { color: '#059669' },
+  byesBadgeText: { fontSize: 11.5, fontWeight: '900', color: '#4338ca', letterSpacing: 0.9 },
+  byesMatchRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  byeTeam: { flex: 1, alignItems: 'center' },
+  byeTeamBadge: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: '#f1f5f9',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 9,
+    borderWidth: 1, borderColor: '#e2e8f0',
+  },
+  byeTeamBadgeOk: { backgroundColor: '#4f46e5', borderColor: '#4f46e5' },
+  byeTeamBadgeText: { fontSize: 17, fontWeight: '900', color: '#94a3b8' },
+  byeTeamBadgeTextOk: { color: '#fff' },
+  byeTeamName: { fontSize: 14, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
+  byeTeamStatus: {
+    fontSize: 10, fontWeight: '800', color: '#94a3b8', marginTop: 4,
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  byeTeamStatusOk: { color: '#4f46e5' },
+  byesVs: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: '#f8fafc',
+    borderWidth: 1, borderColor: '#e2e8f0', marginHorizontal: 8, marginTop: 6,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  byesVsText: { fontSize: 10.5, fontWeight: '900', color: '#64748b', letterSpacing: 0.3 },
   srHeading: {
     fontSize: 12, fontWeight: '900', color: '#64748b', textTransform: 'uppercase',
     letterSpacing: 0.6, marginBottom: 10, marginLeft: 2,

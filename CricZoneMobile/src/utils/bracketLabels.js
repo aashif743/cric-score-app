@@ -25,7 +25,8 @@ export const groupSourceLabel = (src, short = false) => {
   const m = /^([A-Z])(\d+)$/.exec(src.trim());
   if (!m) return null;
   const pos = ordinal(parseInt(m[2], 10));
-  return short ? `${m[1]} ${pos}` : `Group ${m[1]} ${pos}`;
+  // short → compact "A2"; long → "Group A 2nd".
+  return short ? `${m[1]}${m[2]}` : `Group ${m[1]} ${pos}`;
 };
 
 // Compact match label used in tight nodes: "Qualifier 1"->"Q1", "Eliminator"->

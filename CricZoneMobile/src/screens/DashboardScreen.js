@@ -75,9 +75,9 @@ const SectionCard = ({ section, index, onPress }) => {
         transform: [{ translateY }, { scale }],
         shadowColor: '#0f172a',
         shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.06,
-        shadowRadius: 16,
-        elevation: 3,
+        shadowOpacity: 0.11,
+        shadowRadius: 18,
+        elevation: 5,
       }}
     >
       <Pressable onPress={onPress} onPressIn={onIn} onPressOut={onOut} style={styles.sectionCard}>
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
     color: '#475569',
     lineHeight: 24,
     paddingHorizontal: 22,
-    paddingTop: 22,
+    paddingTop: 12,
   },
   sectionLabel: {
     fontSize: 11,
@@ -362,8 +362,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 20,
     padding: 20,
-    borderWidth: 1,
-    borderColor: '#eef0f3',
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
   },
   cardRow: {
     flexDirection: 'row',

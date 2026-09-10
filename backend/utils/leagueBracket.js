@@ -179,11 +179,13 @@ function buildGeneralPlayoff(numGroups, teamsAdvance) {
   const M = numGroups * teamsAdvance;
   if (M < 4) return buildKnockoutMatches(numGroups, teamsAdvance);
 
-  // Sources are MERIT seeds S1..SM (S1 = best qualifier), filled after the group
-  // stage by ranking all qualifiers across groups. This keeps the seeding fair
-  // for any number of groups — byes/easy draws go by record, never group letter.
-  const seeds = Array.from({ length: M }, (_, i) => `S${i + 1}`);
-  const [q1a, q1b, ...others] = seeds;            // top 2 seeds → Qualifier 1
+  // Sources are GROUP POSITIONS — group winners first (A1, B1, …), then
+  // runners-up (A2, B2, …), etc. So the two group winners bye to Qualifier 1
+  // and the rest cross-pair in the pre-Eliminator knockout (A2 v B3, B2 v A3, …).
+  // These slots are filled from each group's standings as it completes, and the
+  // labels read as group + place ("A2", "B3") everywhere.
+  const seeds = qualifierSeeds(numGroups, teamsAdvance);
+  const [q1a, q1b, ...others] = seeds;            // top 2 group winners → Qualifier 1
   const sub = buildBracketFromSeeds(others);       // K = M-2 teams → Eliminator
   const r = sub.numRounds;                          // Eliminator is at round r, slot 1
   const q2Round = r + 1;
