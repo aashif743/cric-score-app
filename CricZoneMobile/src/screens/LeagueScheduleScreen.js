@@ -21,7 +21,6 @@ import TournamentTopTabs from '../components/TournamentTopTabs';
 import PointsTableView from '../components/PointsTableView';
 import TournamentStatsView from '../components/TournamentStatsView';
 import QualifierBracket from '../components/QualifierBracket';
-import SixTeamBracket from '../components/SixTeamBracket';
 import BracketTeamPicker from '../components/BracketTeamPicker';
 import { slotSourceLabel, knockoutGameNumbers, groupSourceLabel } from '../utils/bracketLabels';
 import { computeGroupStandings } from '../utils/leagueStandings';
@@ -560,10 +559,17 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
 
   const isQualifier = tournament?.playoffFormat === 'qualifier';
   const advancingTotal = (tournament?.numberOfGroups || 0) * (tournament?.teamsAdvancePerGroup || 0);
-  // Small qualifier fields (4 or 6 teams) get a dedicated bracket graphic under a
-  // single Playoffs tab; larger fields fall back to per-round tabs (still a valid
-  // playoff — Qualifier 1 / Eliminator / Qualifier 2 / Final are labelled).
-  const playoffGraphic = isQualifier && (advancingTotal === 4 || advancingTotal === 6);
+  // Split the qualifier bracket into a "2nd Round" (pre-playoff knockout that
+  // feeds the Eliminator) and the "Playoffs" (Qualifier 1 / Eliminator /
+  // Qualifier 2 / Final). Byes go straight to Qualifier 1, so the 2nd Round tab
+  // only exists when there ARE pre-playoff knockout matches.
+  const PLAYOFF_LABELS = ['Qualifier 1', 'Eliminator', 'Qualifier 2', 'Final'];
+  const secondRoundMatches = isQualifier
+    ? knockoutMatches.filter((m) => typeof m.matchLabel === 'string' && m.matchLabel.startsWith('Knockout'))
+        .sort((a, b) => (a.round || 0) - (b.round || 0) || (a.bracketSlot || 0) - (b.bracketSlot || 0))
+    : [];
+  const hasSecondRound = isQualifier && secondRoundMatches.length > 0;
+  const q1Match = isQualifier ? knockoutMatches.find((m) => m.matchLabel === 'Qualifier 1') : null;
   const qualifierAvailable = advancingTotal === 4;
   const playoffsStarted = knockoutMatches.some((m) => m.status && m.status !== 'scheduled');
 
@@ -588,14 +594,17 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
     // IPL-style playoffs are shown together under one "Playoffs" tab (their
     // labels — Qualifier 1, Eliminator, … — distinguish them). A standard
     // knockout uses one tab per round.
-    const k = playoffGraphic
-      ? [{ key: 'po', kind: 'playoffs', id: 'po', label: advancingTotal === 6 ? 'Playoffs' : '2nd Round' }]
+    const k = isQualifier
+      ? [
+          ...(hasSecondRound ? [{ key: 'sr', kind: 'secondround', id: 'sr', label: '2nd Round' }] : []),
+          { key: 'po', kind: 'playoffs', id: 'po', label: 'Playoffs' },
+        ]
       : Array.from({ length: numKnockoutRounds }, (_, i) => ({
           key: `k_${i + 1}`, kind: 'knockout', id: i + 1,
           label: koRoundLabel(i + 1, numKnockoutRounds),
         }));
     return [...g, ...(hasKnockout ? k : [])];
-  }, [groups, numKnockoutRounds, hasKnockout, playoffGraphic, advancingTotal]);
+  }, [groups, numKnockoutRounds, hasKnockout, isQualifier, hasSecondRound]);
 
   const startMatchPayload = (match) => ({
     tournamentId: tournament?._id,
@@ -645,15 +654,20 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
         .filter((m) => m.group === activeTab.id)
         .sort((a, b) => (a.round || 0) - (b.round || 0));
     }
+    if (activeTab.kind === 'secondround') {
+      // Only the pre-playoff knockout matches (they feed the Eliminator).
+      return secondRoundMatches;
+    }
     if (activeTab.kind === 'playoffs') {
-      // All playoff matches in playing order (Qualifier 1, Eliminator, …).
+      // All knockout matches (the bracket filters to Q1/Elim/Q2/Final and uses
+      // the rest to resolve "Winner of Knockout N" feeder labels).
       return [...knockoutMatches].sort((a, b) =>
         (a.round || 0) - (b.round || 0) || (a.bracketSlot || 0) - (b.bracketSlot || 0));
     }
     return knockoutMatches
       .filter((m) => m.round === activeTab.id)
       .sort((a, b) => (a.bracketSlot || 0) - (b.bracketSlot || 0));
-  }, [activeTab, groupMatches, knockoutMatches]);
+  }, [activeTab, groupMatches, knockoutMatches, secondRoundMatches]);
 
   const onPressSettings = () => {
     if (!tournament?._id) return;
@@ -784,22 +798,52 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
               isOwner={isOwner}
             />
           ))
+        ) : activeTab.kind === 'secondround' ? (
+          <>
+            {/* Byes: teams that skip the 2nd round and go straight to Qualifier 1 */}
+            {q1Match ? (
+              <View style={styles.byesCard}>
+                <Text style={styles.byesTitle}>Directly qualified to Qualifier 1</Text>
+                <Text style={styles.byesSub}>These teams get a bye — they skip the 2nd round.</Text>
+                <View style={styles.byesTeams}>
+                  {[['A', q1Match.teamA], ['B', q1Match.teamB]].map(([sk, tm]) => {
+                    const known = tm?.name && tm.name !== 'TBD';
+                    const fallback = (tournament?.numberOfGroups === 2)
+                      ? (sk === 'A' ? 'Group A Winner' : 'Group B Winner')
+                      : slotSourceLabel(q1Match, sk, knockoutMatches, koGameNos);
+                    return (
+                      <View key={sk} style={styles.byeChip}>
+                        <Text style={styles.byeChipName} numberOfLines={1}>{known ? tm.name : fallback}</Text>
+                        <Text style={[styles.byeChipTag, known && styles.byeChipTagOk]}>{known ? '✓ Qualified' : 'To qualify'}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+            <Text style={styles.srHeading}>2nd Round · Knockout</Text>
+            {secondRoundMatches.map((m, i) => (
+              <KnockoutMatchCard
+                key={m._id}
+                index={i}
+                ordinal={i + 1}
+                roundLabel={m.matchLabel || '2nd Round'}
+                match={m}
+                onStart={handleStartMatch}
+                isOwner={isOwner}
+                koMatches={knockoutMatches}
+                gameNoMap={koGameNos}
+                onEditSlot={openEditSlot}
+              />
+            ))}
+          </>
         ) : activeTab.kind === 'playoffs' ? (
-          advancingTotal === 6 ? (
-            <SixTeamBracket
-              matches={matchesForActiveTab}
-              onStart={handleStartMatch}
-              isOwner={isOwner}
-              onEditSlot={openEditSlot}
-            />
-          ) : (
-            <QualifierBracket
-              matches={matchesForActiveTab}
-              onStart={handleStartMatch}
-              isOwner={isOwner}
-              onEditSlot={openEditSlot}
-            />
-          )
+          <QualifierBracket
+            matches={matchesForActiveTab}
+            onStart={handleStartMatch}
+            isOwner={isOwner}
+            onEditSlot={openEditSlot}
+          />
         ) : (
           matchesForActiveTab.map((m, i) => (
             <KnockoutMatchCard
@@ -821,14 +865,22 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
       )}
 
       {editSlot ? (() => {
-        // Group positions the owner can re-wire a slot to (league playoffs only).
+        // Sources the owner can re-wire a slot to (league playoffs only).
+        // Qualifier format uses merit SEEDS (S1..SM); a standard knockout uses
+        // group positions (A1, B2, …).
         const nGroups = tournament?.numberOfGroups || 0;
         const adv = tournament?.teamsAdvancePerGroup || 0;
         const groupSources = [];
-        for (let g = 0; g < nGroups; g += 1) {
-          for (let p = 1; p <= adv; p += 1) {
-            const key = `${groupLetter(g)}${p}`;
-            groupSources.push({ key, label: groupSourceLabel(key) });
+        if (tournament?.playoffFormat === 'qualifier') {
+          for (let s = 1; s <= nGroups * adv; s += 1) {
+            groupSources.push({ key: `S${s}`, label: `Seed ${s}` });
+          }
+        } else {
+          for (let g = 0; g < nGroups; g += 1) {
+            for (let p = 1; p <= adv; p += 1) {
+              const key = `${groupLetter(g)}${p}`;
+              groupSources.push({ key, label: groupSourceLabel(key) });
+            }
           }
         }
         // A slot is source-editable only if it isn't fed by another match's result.
@@ -920,6 +972,26 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#2563eb', fontWeight: '800' },
 
   scheduleList: { padding: 16, paddingBottom: 60 },
+
+  // "2nd Round" tab — byes card + section heading.
+  byesCard: {
+    backgroundColor: '#ecfdf5', borderRadius: 16, padding: 16, marginBottom: 18,
+    borderWidth: 1, borderColor: '#a7f3d0',
+  },
+  byesTitle: { fontSize: 14, fontWeight: '900', color: '#065f46', letterSpacing: 0.2 },
+  byesSub: { fontSize: 12, fontWeight: '600', color: '#059669', marginTop: 2, marginBottom: 12 },
+  byesTeams: { flexDirection: 'row', gap: 10 },
+  byeChip: {
+    flex: 1, backgroundColor: '#fff', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 12,
+    borderWidth: 1, borderColor: '#d1fae5', alignItems: 'center',
+  },
+  byeChipName: { fontSize: 14, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
+  byeChipTag: { fontSize: 10.5, fontWeight: '800', color: '#94a3b8', marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.4 },
+  byeChipTagOk: { color: '#059669' },
+  srHeading: {
+    fontSize: 12, fontWeight: '900', color: '#64748b', textTransform: 'uppercase',
+    letterSpacing: 0.6, marginBottom: 10, marginLeft: 2,
+  },
 
   // Playoff format switch
   formatBar: {

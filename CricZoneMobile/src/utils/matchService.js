@@ -67,6 +67,13 @@ const matchService = {
     }
   },
 
+  // Rename a player across a completed match's scorecard (owner only).
+  renamePlayer: async (matchId, teamName, oldName, newName, playerType, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(`/matches/${matchId}/rename-player`, { teamName, oldName, newName, playerType }, config);
+    return response.data;
+  },
+
   // Delete single match
   deleteMatch: async (matchId, token) => {
     try {

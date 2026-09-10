@@ -8,10 +8,20 @@ export const ordinal = (n) => {
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 };
 
+// Merit seed source: "S1" -> "Seed 1". Returns null if not a seed source.
+export const seedSourceLabel = (src, short = false) => {
+  if (!src || typeof src !== 'string') return null;
+  const m = /^S(\d+)$/.exec(src.trim());
+  if (!m) return null;
+  return short ? `#${m[1]}` : `Seed ${m[1]}`;
+};
+
 // "A1" -> "Group A 1st", "B2" -> "Group B 2nd". Returns null if not a group src.
 // short=true gives a compact form ("A 1st") for tight bracket nodes.
+// NOTE: check seedSourceLabel first — "S1" would otherwise match as "Group S".
 export const groupSourceLabel = (src, short = false) => {
   if (!src || typeof src !== 'string') return null;
+  if (/^S\d+$/.test(src.trim())) return null; // that's a merit seed, not a group
   const m = /^([A-Z])(\d+)$/.exec(src.trim());
   if (!m) return null;
   const pos = ordinal(parseInt(m[2], 10));
@@ -49,8 +59,10 @@ export const slotSourceLabel = (match, slot, koMatches = [], gameNoMap = null, o
   const short = !!opts.short;
   const gameNo = gameNoMap || knockoutGameNumbers(koMatches);
 
-  // 1) League group source ("A1" → "Group A 1st" / short "A 1st").
+  // 1) Merit seed ("S1" → "Seed 1") or league group source ("A1" → "Group A 1st").
   const src = slot === 'A' ? match.liveState?.sourceA : match.liveState?.sourceB;
+  const seed = seedSourceLabel(src, short);
+  if (seed) return seed;
   const g = groupSourceLabel(src, short);
   if (g) return g;
 

@@ -176,11 +176,14 @@ function qualifierSeeds(numGroups, teamsAdvance) {
 // occupies rounds 1..r (Eliminator = round r), Qualifier 1 shares round r,
 // Qualifier 2 = round r+1, Final = round r+2.
 function buildGeneralPlayoff(numGroups, teamsAdvance) {
-  const seeds = qualifierSeeds(numGroups, teamsAdvance);
-  const M = seeds.length;
+  const M = numGroups * teamsAdvance;
   if (M < 4) return buildKnockoutMatches(numGroups, teamsAdvance);
 
-  const [q1a, q1b, ...others] = seeds;            // top 2 → Qualifier 1
+  // Sources are MERIT seeds S1..SM (S1 = best qualifier), filled after the group
+  // stage by ranking all qualifiers across groups. This keeps the seeding fair
+  // for any number of groups — byes/easy draws go by record, never group letter.
+  const seeds = Array.from({ length: M }, (_, i) => `S${i + 1}`);
+  const [q1a, q1b, ...others] = seeds;            // top 2 seeds → Qualifier 1
   const sub = buildBracketFromSeeds(others);       // K = M-2 teams → Eliminator
   const r = sub.numRounds;                          // Eliminator is at round r, slot 1
   const q2Round = r + 1;

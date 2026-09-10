@@ -16,23 +16,23 @@ import Icon from '../components/Icon';
 
 // --- Icons (built from Views) ------------------------------------------------
 
-const CricketBatIcon = () => (
+const CricketBatIcon = ({ color = '#4f46e5' }) => (
   <View style={iconStyles.container}>
-    <View style={iconStyles.batHandle} />
-    <View style={iconStyles.batBlade} />
-    <View style={iconStyles.ball} />
+    <View style={[iconStyles.batHandle, { backgroundColor: color }]} />
+    <View style={[iconStyles.batBlade, { backgroundColor: color }]} />
+    <View style={[iconStyles.ball, { backgroundColor: color, opacity: 0.55 }]} />
   </View>
 );
 
-const TrophyIcon = () => (
-  <View style={iconStyles.container}><Icon name="trophy" size={22} color="#fff" /></View>
+const TrophyIcon = ({ color = '#4f46e5' }) => (
+  <View style={iconStyles.container}><Icon name="trophy" size={22} color={color} /></View>
 );
 
-const ClockIcon = () => (
-  <View style={iconStyles.container}><Icon name="clock" size={22} color="#fff" /></View>
+const ClockIcon = ({ color = '#4f46e5' }) => (
+  <View style={iconStyles.container}><Icon name="clock" size={22} color={color} /></View>
 );
 
-const ChevronIcon = ({ color = '#fff' }) => (
+const ChevronIcon = ({ color = '#4f46e5' }) => (
   <Icon name="chevron-right" size={17} color={color} strokeWidth={2.6} />
 );
 
@@ -62,7 +62,7 @@ const SectionCard = ({ section, index, onPress }) => {
   }, []);
 
   const onIn = () => {
-    Animated.spring(scale, { toValue: 0.97, friction: 8, tension: 200, useNativeDriver: true }).start();
+    Animated.spring(scale, { toValue: 0.98, friction: 8, tension: 200, useNativeDriver: true }).start();
   };
   const onOut = () => {
     Animated.spring(scale, { toValue: 1, friction: 5, tension: 200, useNativeDriver: true }).start();
@@ -73,38 +73,30 @@ const SectionCard = ({ section, index, onPress }) => {
       style={{
         opacity,
         transform: [{ translateY }, { scale }],
-        shadowColor: section.glow,
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.32,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.06,
         shadowRadius: 16,
-        elevation: 8,
+        elevation: 3,
       }}
     >
-      <Pressable onPress={onPress} onPressIn={onIn} onPressOut={onOut}>
-        <LinearGradient
-          colors={section.gradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.sectionCard}
-        >
-          <View style={styles.cardDecorLg} />
-          <View style={styles.cardDecorSm} />
-
-          <View style={styles.cardRow}>
-            <View style={styles.cardIconBadge}>
-              <section.icon />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>{section.title}</Text>
-              <Text style={styles.cardDescription}>{section.description}</Text>
-            </View>
+      <Pressable onPress={onPress} onPressIn={onIn} onPressOut={onOut} style={styles.sectionCard}>
+        <View style={styles.cardRow}>
+          <View style={[styles.cardIconBadge, { backgroundColor: section.tint }]}>
+            <section.icon color={section.accent} />
           </View>
-
-          <View style={styles.cardCta}>
-            <Text style={styles.cardCtaText}>{section.buttonText}</Text>
-            <ChevronIcon color={section.gradient[0]} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>{section.title}</Text>
+            <Text style={styles.cardDescription}>{section.description}</Text>
           </View>
-        </LinearGradient>
+        </View>
+
+        <View style={styles.cardDivider} />
+
+        <View style={styles.cardCta}>
+          <Text style={[styles.cardCtaText, { color: section.accent }]}>{section.buttonText}</Text>
+          <ChevronIcon color={section.accent} />
+        </View>
       </Pressable>
     </Animated.View>
   );
@@ -157,8 +149,8 @@ const DashboardScreen = ({ navigation }) => {
       title: 'Quick Match',
       description: 'Start a new match instantly. Pick teams, overs, and go.',
       icon: CricketBatIcon,
-      gradient: ['#6366f1', '#8b5cf6'],
-      glow: '#7c3aed',
+      accent: '#4f46e5',
+      tint: '#eef2ff',
       buttonText: 'Start Match',
       onPress: () => navigation.navigate('MatchSetup'),
     },
@@ -167,8 +159,8 @@ const DashboardScreen = ({ navigation }) => {
       title: 'Tournaments',
       description: 'Knockout, league, or quick — manage everything in one place.',
       icon: TrophyIcon,
-      gradient: ['#f59e0b', '#ef4444'],
-      glow: '#f97316',
+      accent: '#d97706',
+      tint: '#fef3c7',
       buttonText: 'View Tournaments',
       onPress: () => navigation.navigate('Tournaments'),
     },
@@ -177,8 +169,8 @@ const DashboardScreen = ({ navigation }) => {
       title: 'Match History',
       description: 'Replay scorecards and review your stats from past games.',
       icon: ClockIcon,
-      gradient: ['#10b981', '#0891b2'],
-      glow: '#06b6d4',
+      accent: '#0d9488',
+      tint: '#ccfbf1',
       buttonText: 'View History',
       onPress: () => navigation.navigate('PastMatches'),
     },
@@ -220,14 +212,9 @@ const DashboardScreen = ({ navigation }) => {
               onPress={() => navigation.navigate('Profile')}
               activeOpacity={0.8}
             >
-              <LinearGradient
-                colors={['#fbbf24', '#f59e0b']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.avatar}
-              >
+              <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{initial}</Text>
-              </LinearGradient>
+              </View>
             </TouchableOpacity>
           </Animated.View>
         </View>
@@ -334,11 +321,6 @@ const styles = StyleSheet.create({
   },
   avatarButton: {
     marginLeft: 16,
-    shadowColor: '#f59e0b',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 6,
   },
   avatar: {
     width: 56,
@@ -346,8 +328,9 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.5)',
   },
   avatarText: { color: '#fff', fontSize: 22, fontWeight: '800' },
 
@@ -371,73 +354,57 @@ const styles = StyleSheet.create({
   sectionsContainer: {
     paddingHorizontal: 22,
     paddingTop: 14,
-    gap: 16,
+    gap: 14,
   },
 
   // Card
   sectionCard: {
-    borderRadius: 22,
-    padding: 22,
-    overflow: 'hidden',
-    minHeight: 150,
-  },
-  cardDecorLg: {
-    position: 'absolute',
-    top: -50,
-    right: -40,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  cardDecorSm: {
-    position: 'absolute',
-    bottom: -20,
-    right: 100,
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#eef0f3',
   },
   cardRow: {
     flexDirection: 'row',
     gap: 16,
-    marginBottom: 18,
+    alignItems: 'center',
   },
   cardIconBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    width: 52,
+    height: 52,
+    borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
   },
   cardTitle: {
-    fontSize: 21,
+    fontSize: 19,
     fontWeight: '800',
-    color: '#fff',
+    color: '#0f172a',
     letterSpacing: -0.3,
   },
   cardDescription: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 5,
+    color: '#64748b',
+    marginTop: 4,
     lineHeight: 19,
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: '#f1f5f9',
+    marginTop: 16,
   },
   cardCta: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 14,
     alignSelf: 'flex-start',
-    gap: 10,
+    marginTop: 14,
+    gap: 6,
   },
   cardCtaText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#0f172a',
+    letterSpacing: 0.2,
   },
 
   // Footer
@@ -465,53 +432,17 @@ const iconStyles = StyleSheet.create({
   // Bat
   batHandle: {
     position: 'absolute', width: 4, height: 14, borderRadius: 2,
-    backgroundColor: '#fff', top: 0,
+    top: 0,
     transform: [{ rotate: '-45deg' }],
   },
   batBlade: {
     position: 'absolute', width: 10, height: 20, borderRadius: 3,
-    backgroundColor: '#fff', bottom: 2,
+    bottom: 2,
     transform: [{ rotate: '-45deg' }],
   },
   ball: {
     position: 'absolute', width: 9, height: 9, borderRadius: 5,
-    backgroundColor: '#fff', opacity: 0.7, right: 2, top: 2,
-  },
-  // Trophy
-  trophyCup: {
-    width: 22, height: 14,
-    borderWidth: 3, borderBottomWidth: 0, borderColor: '#fff',
-    borderTopLeftRadius: 3, borderTopRightRadius: 3,
-    borderBottomLeftRadius: 11, borderBottomRightRadius: 11,
-  },
-  trophyHandleL: {
-    position: 'absolute', left: 2, top: 4,
-    width: 5, height: 8,
-    borderWidth: 2, borderColor: '#fff', borderRightWidth: 0,
-    borderTopLeftRadius: 4, borderBottomLeftRadius: 4,
-  },
-  trophyHandleR: {
-    position: 'absolute', right: 2, top: 4,
-    width: 5, height: 8,
-    borderWidth: 2, borderColor: '#fff', borderLeftWidth: 0,
-    borderTopRightRadius: 4, borderBottomRightRadius: 4,
-  },
-  trophyStem: { width: 4, height: 6, backgroundColor: '#fff', marginTop: 1 },
-  trophyBase: { width: 16, height: 4, backgroundColor: '#fff', borderRadius: 2, marginTop: 1 },
-  // Clock
-  clockFace: { width: 22, height: 22, borderRadius: 11, borderWidth: 2.5, borderColor: '#fff' },
-  clockHandV: {
-    position: 'absolute', width: 2, height: 8, borderRadius: 1,
-    backgroundColor: '#fff', top: 5,
-  },
-  clockHandH: {
-    position: 'absolute', width: 6, height: 2, borderRadius: 1,
-    backgroundColor: '#fff', right: 6,
-  },
-  // Chevron
-  chevronContainer: { width: 12, height: 18, justifyContent: 'center', alignItems: 'center' },
-  chevronLine: {
-    position: 'absolute', width: 8, height: 2.5, borderRadius: 1.5,
+    right: 2, top: 2,
   },
 });
 

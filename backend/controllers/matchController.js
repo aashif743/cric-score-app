@@ -671,6 +671,10 @@ exports.endMatch = async (req, res) => {
     if (match.tournament && match.stage === 'group') {
       tryAdvanceLeagueGroup(match.tournament, match.group)
         .catch(e => console.error('League group-advance error:', e.message));
+      // Merit-seeded qualifier playoffs are filled once ALL groups finish
+      // (needs a cross-group ranking of the qualifiers).
+      tryAdvanceQualifierSeeds(match.tournament)
+        .catch(e => console.error('Qualifier seed-advance error:', e.message));
     }
 
     res.json({
@@ -876,6 +880,138 @@ const tryAdvanceLeagueGroup = async (tournamentId, groupLetter) => {
   }
 };
 
+// Merit-seeded qualifier playoff fill. Runs when EVERY group is complete: ranks
+// all qualifiers across groups into seeds S1..SM and fills the bracket's seed
+// slots. Ranking: finishing position first (all group winners above all
+// runners-up, etc.), then points, NRR and wins — so byes/easier draws go by
+// record, never by group letter. Only for league tournaments in 'qualifier'
+// format (their bracket sources are "S1".."SM").
+const tryAdvanceQualifierSeeds = async (tournamentId) => {
+  if (!tournamentId) return;
+  const Tournament = require('../models/Tournament');
+  const tournament = await Tournament.findById(tournamentId).lean();
+  if (!tournament || tournament.format !== 'league') return;
+  if (tournament.playoffFormat !== 'qualifier' || !tournament.teamsAdvancePerGroup) return;
+
+  const groups = tournament.groups || [];
+  if (!groups.length) return;
+
+  const groupMatches = await Match.find({ tournament: tournamentId, stage: 'group' }).lean();
+  if (!groupMatches.length) return;
+  // Need every group's fixtures finished before a cross-group ranking is valid.
+  const allDone = groupMatches.every((m) => m.status === 'completed' || m.status === 'abandoned');
+  if (!allDone) return;
+
+  // Collect the qualifiers (top N of each group) with their group-stage record.
+  const quals = [];
+  groups.forEach((teams, gi) => {
+    if (!teams || teams.length < 2) return;
+    const gl = String.fromCharCode(65 + gi);
+    const gms = groupMatches.filter((m) => m.group === gl);
+    const standings = computeGroupStandings(gms, teams);
+    standings.slice(0, tournament.teamsAdvancePerGroup).forEach((r, pos) => {
+      quals.push({ team: r.team, position: pos + 1, points: r.points || 0, nrr: r.nrr || 0, won: r.won || 0 });
+    });
+  });
+  if (!quals.length) return;
+
+  // Seed by tier (position) first, then merit within the tier.
+  quals.sort((a, b) =>
+    (a.position - b.position) ||
+    (b.points - a.points) ||
+    (b.nrr - a.nrr) ||
+    (b.won - a.won));
+  const seedTeam = {};
+  quals.forEach((q, i) => { seedTeam[`S${i + 1}`] = q.team; });
+
+  // Fill any scheduled knockout slot whose source is a seed label.
+  const knockouts = await Match.find({
+    tournament: tournamentId, stage: 'knockout', status: 'scheduled',
+  });
+  for (const ko of knockouts) {
+    const src = ko.liveState || {};
+    let dirty = false;
+    if (src.sourceA && seedTeam[src.sourceA] && (!ko.teamA?.name || ko.teamA.name === 'TBD')) {
+      await fillKnockoutSlot(ko, 'A', seedTeam[src.sourceA]); dirty = true;
+    }
+    if (src.sourceB && seedTeam[src.sourceB] && (!ko.teamB?.name || ko.teamB.name === 'TBD')) {
+      await fillKnockoutSlot(ko, 'B', seedTeam[src.sourceB]); dirty = true;
+    }
+    if (dirty) await ko.save();
+  }
+};
+
+// PATCH /matches/:id/rename-player
+// body: { teamName, oldName, newName }
+// Rename a player across a match's stored scorecard (batting, bowling, fall of
+// wickets, over history) so tournament stats/rosters — which aggregate by name —
+// stay correct. Owner-only (the match scorer, or the tournament owner). Enforces
+// unique names within the team.
+exports.renamePlayer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const teamName = (req.body?.teamName || '').trim();
+    const oldName = (req.body?.oldName || '').trim();
+    const newName = (req.body?.newName || '').trim();
+    const playerType = req.body?.playerType === 'bowler' ? 'bowler' : 'batsman';
+    if (!teamName || !oldName || !newName) {
+      return res.status(400).json({ success: false, error: "teamName, oldName and newName are required" });
+    }
+
+    const match = await Match.findById(id);
+    if (!match) return res.status(404).json({ success: false, error: "Match not found" });
+
+    // Owner check: the match scorer, or the tournament owner.
+    let isOwner = String(match.user) === req.user.id;
+    if (!isOwner && match.tournament) {
+      const Tournament = require('../models/Tournament');
+      const t = await Tournament.findById(match.tournament).select('user').lean();
+      if (t && String(t.user) === req.user.id) isOwner = true;
+    }
+    if (!isOwner) return res.status(403).json({ success: false, error: "Only the scorer can rename players." });
+
+    const eq = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+    const innings = [match.innings1, match.innings2].filter(Boolean);
+
+    // Uniqueness within the SAME role: two batsmen (or two bowlers) can't share a
+    // name (their stats would merge). A batsman & bowler sharing a name is fine —
+    // that's one all-rounder — so we only check the role being renamed.
+    const clash = innings.some((inn) => {
+      const roleArr = playerType === 'bowler'
+        ? (inn.bowlingTeam === teamName ? (inn.bowling || []) : [])
+        : (inn.battingTeam === teamName ? (inn.batting || []) : []);
+      return roleArr.some((p) => eq(p?.name, newName) && !eq(p?.name, oldName));
+    });
+    if (clash) {
+      return res.status(409).json({ success: false, error: "That name is already used by another player in this team." });
+    }
+
+    // Apply the rename everywhere the name appears for this team.
+    let changed = false;
+    innings.forEach((inn) => {
+      if (inn.battingTeam === teamName) {
+        (inn.batting || []).forEach((b) => { if (eq(b.name, oldName)) { b.name = newName; changed = true; } });
+        (inn.fallOfWickets || []).forEach((f) => { if (eq(f.batsman, oldName)) { f.batsman = newName; changed = true; } });
+      }
+      if (inn.bowlingTeam === teamName) {
+        (inn.bowling || []).forEach((b) => { if (eq(b.name, oldName)) { b.name = newName; changed = true; } });
+        (inn.overHistory || []).forEach((o) => { if (eq(o.bowlerName, oldName)) { o.bowlerName = newName; changed = true; } });
+      }
+    });
+    if (!changed) {
+      return res.status(404).json({ success: false, error: "That player wasn't found in this team's scorecard." });
+    }
+
+    match.markModified('innings1');
+    match.markModified('innings2');
+    await match.save();
+    return res.json({ success: true, data: { teamName, oldName, newName } });
+  } catch (error) {
+    console.error("Rename player error:", error);
+    res.status(500).json({ success: false, error: "Failed to rename the player." });
+  }
+};
+
 // Add this new exported function
 exports.deleteAllMatches = async (req, res) => {
   try {
@@ -895,8 +1031,10 @@ module.exports = {
   deleteMatch: exports.deleteMatch,
   endInnings: exports.endInnings,
   endMatch: exports.endMatch,
+  renamePlayer: exports.renamePlayer,
   deleteAllMatches: exports.deleteAllMatches,
   // Exposed so the tournament controller can re-fill knockout slots after the
   // playoff format is changed mid-tournament.
   tryAdvanceLeagueGroup,
+  tryAdvanceQualifierSeeds,
 };

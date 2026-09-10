@@ -37,22 +37,30 @@ const PlayerNameEditModal = ({
   type = 'player', // 'player' or 'team'
   prioritySuggestions = [], // this team's saved line-up, shown first
   priorityLabel = 'Team players',
+  takenNames = [], // names already used by OTHER players in this team (blocked)
 }) => {
   const [value, setValue] = useState(initialValue);
   const [suggestions, setSuggestions] = useState([]);
   const inputRef = useRef(null);
   const requestId = useRef(0);
 
+  // Names that would collide with another player already in this team — the user
+  // may not reuse them (each team member needs a distinct name so stats add up).
+  const takenSet = new Set((takenNames || []).map((n) => (n || '').trim().toLowerCase()));
+  const trimmed = value.trim();
+  const isDuplicate = trimmed.length > 0 && takenSet.has(trimmed.toLowerCase());
+
   // The team's saved players that match what's typed (prefix match), shown as a
-  // labelled section above the normal suggestions. General suggestions that
-  // duplicate a team player are dropped so nothing appears twice.
+  // labelled section above the normal suggestions. Already-taken names are
+  // dropped from every list so a duplicate can't be picked. General suggestions
+  // that duplicate a team player are dropped so nothing appears twice.
   const q = isPlaceholderName(value) ? '' : value.trim().toLowerCase();
   const teamMatches = (prioritySuggestions || [])
-    .filter((n) => n && (!q || n.toLowerCase().startsWith(q)))
+    .filter((n) => n && !takenSet.has(n.trim().toLowerCase()) && (!q || n.toLowerCase().startsWith(q)))
     .slice(0, 8);
   const teamSet = new Set(teamMatches.map((n) => n.toLowerCase()));
   const generalSuggestions = suggestions.filter(
-    (s) => !teamSet.has((s.name || '').toLowerCase()),
+    (s) => !teamSet.has((s.name || '').toLowerCase()) && !takenSet.has((s.name || '').trim().toLowerCase()),
   );
 
   // Reset value when modal opens
@@ -125,9 +133,14 @@ const PlayerNameEditModal = ({
     handleSave(suggestion.name);
   };
 
-  // Handle save/done
+  // Handle save/done. Blocks a name already used by another team member.
   const handleSave = (nameToSave = value) => {
     const trimmedName = nameToSave.trim();
+    if (trimmedName && takenSet.has(trimmedName.toLowerCase())) {
+      // Duplicate — keep the modal open so the warning is visible.
+      inputRef.current?.focus();
+      return;
+    }
     if (trimmedName) {
       suggestionService.addSuggestion(trimmedName, type);
       onSave(trimmedName);
@@ -140,8 +153,10 @@ const PlayerNameEditModal = ({
     onClose();
   };
 
-  // Handle backdrop press (save with current value)
+  // Handle backdrop press (save with current value, unless it's a duplicate —
+  // then just close without changing anything).
   const handleBackdropPress = () => {
+    if (isDuplicate) { onClose(); return; }
     handleSave();
   };
 
@@ -196,11 +211,11 @@ const PlayerNameEditModal = ({
                   <Text style={styles.title}>{title}</Text>
 
                   <TouchableOpacity
-                    style={styles.doneButton}
+                    style={[styles.doneButton, isDuplicate && styles.doneButtonDisabled]}
                     onPress={() => handleSave()}
-                    activeOpacity={0.7}
+                    activeOpacity={isDuplicate ? 1 : 0.7}
                   >
-                    <Text style={styles.doneButtonText}>Done</Text>
+                    <Text style={[styles.doneButtonText, isDuplicate && styles.doneButtonTextDisabled]}>Done</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -235,6 +250,15 @@ const PlayerNameEditModal = ({
                     </TouchableOpacity>
                   )}
                 </View>
+
+                {/* Duplicate-name warning */}
+                {isDuplicate && (
+                  <View style={styles.dupWarning}>
+                    <Text style={styles.dupWarningText}>
+                      "{trimmed}" is already used by another player in this team. Give a different name (at least one letter different).
+                    </Text>
+                  </View>
+                )}
 
                 {/* Suggestions — this team's saved line-up first, then general */}
                 {(teamMatches.length > 0 || generalSuggestions.length > 0) && (
@@ -355,6 +379,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.primary,
+  },
+  doneButtonDisabled: { opacity: 0.4 },
+  doneButtonTextDisabled: { color: '#94a3b8' },
+  dupWarning: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  dupWarningText: {
+    color: '#dc2626',
+    fontSize: 12.5,
+    fontWeight: '600',
+    lineHeight: 17,
   },
   inputContainer: {
     flexDirection: 'row',

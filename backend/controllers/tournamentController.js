@@ -119,11 +119,13 @@ const regenerateKnockoutStage = async (tournament, userId) => {
   }
 
   // Re-fill slots from any group that has already finished.
-  const { tryAdvanceLeagueGroup } = require('./matchController');
+  const { tryAdvanceLeagueGroup, tryAdvanceQualifierSeeds } = require('./matchController');
   const groupLetters = (tournament.groups || []).map((_, i) => String.fromCharCode(65 + i));
   for (const gl of groupLetters) {
     try { await tryAdvanceLeagueGroup(tournament._id, gl); } catch (e) { console.error('Re-fill error:', e.message); }
   }
+  // Merit-seeded qualifier playoffs fill once all groups are done.
+  try { await tryAdvanceQualifierSeeds(tournament._id); } catch (e) { console.error('Seed re-fill error:', e.message); }
 };
 
 // Create tournament
@@ -1028,16 +1030,27 @@ exports.setBracketSource = async (req, res) => {
       return res.status(409).json({ success: false, error: "This match has already started — it can no longer be changed." });
     }
 
-    // Validate the source: '' (clear) or a group position within range.
+    // Validate the source: '' (clear), else a merit seed (S1..SM) for the
+    // qualifier playoff, or a group position (A1, B2) for a standard knockout.
+    const totalQualifiers = (tournament.numberOfGroups || 1) * (tournament.teamsAdvancePerGroup || 0);
     let cleanSource = null;
     if (source) {
-      const m = /^([A-Z])(\d+)$/.exec(source);
-      const gIdx = m ? m[1].charCodeAt(0) - 65 : -1;
-      const pos = m ? parseInt(m[2], 10) : 0;
-      if (!m || gIdx < 0 || gIdx >= (tournament.numberOfGroups || 1) || pos < 1 || pos > (tournament.teamsAdvancePerGroup || 0)) {
-        return res.status(400).json({ success: false, error: "Pick a valid qualifying position (e.g. A1, B2)." });
+      if (tournament.playoffFormat === 'qualifier') {
+        const m = /^S(\d+)$/.exec(source);
+        const n = m ? parseInt(m[1], 10) : 0;
+        if (!m || n < 1 || n > totalQualifiers) {
+          return res.status(400).json({ success: false, error: `Pick a valid seed (S1–S${totalQualifiers}).` });
+        }
+        cleanSource = `S${n}`;
+      } else {
+        const m = /^([A-Z])(\d+)$/.exec(source);
+        const gIdx = m ? m[1].charCodeAt(0) - 65 : -1;
+        const pos = m ? parseInt(m[2], 10) : 0;
+        if (!m || gIdx < 0 || gIdx >= (tournament.numberOfGroups || 1) || pos < 1 || pos > (tournament.teamsAdvancePerGroup || 0)) {
+          return res.status(400).json({ success: false, error: "Pick a valid qualifying position (e.g. A1, B2)." });
+        }
+        cleanSource = `${m[1]}${pos}`;
       }
-      cleanSource = `${m[1]}${pos}`;
     }
 
     // This slot must be an "entry" slot — not fed by another match's result.
@@ -1108,10 +1121,15 @@ exports.setBracketSource = async (req, res) => {
     resetSlot(match, slot);
     await match.save();
 
-    // Re-fill any affected group's finished standings into the freed slots.
-    const { tryAdvanceLeagueGroup } = require('./matchController');
-    for (const gl of groupsToRefill) {
-      try { await tryAdvanceLeagueGroup(id, gl); } catch (e) { console.error('Source re-fill error:', e.message); }
+    // Re-fill the freed slots from finished standings.
+    const { tryAdvanceLeagueGroup, tryAdvanceQualifierSeeds } = require('./matchController');
+    if (tournament.playoffFormat === 'qualifier') {
+      // Merit seeds are ranked globally once all groups finish.
+      try { await tryAdvanceQualifierSeeds(id); } catch (e) { console.error('Seed re-fill error:', e.message); }
+    } else {
+      for (const gl of groupsToRefill) {
+        try { await tryAdvanceLeagueGroup(id, gl); } catch (e) { console.error('Source re-fill error:', e.message); }
+      }
     }
 
     return res.json({ success: true, data: { matchId, slot, source: cleanSource } });

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useContext } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AuthContext } from '../context/AuthContext';
+import tournamentService from '../utils/tournamentService';
 
 // --- Icon primitives (built from Views — no asset deps) -----------------------
 
@@ -71,6 +73,8 @@ const LockIcon = () => (
     <View style={iconStyles.lockBody} />
   </View>
 );
+
+const PlayIcon = () => <View style={iconStyles.playTriangle} />;
 
 // --- Format definitions -------------------------------------------------------
 
@@ -204,9 +208,45 @@ const FormatCard = ({ fmt, index, onPress }) => {
 
 // --- Screen -------------------------------------------------------------------
 
+// Map a tournament to its "open" screen by format.
+const openTournamentScreen = (navigation, t) => {
+  const fmt = t.format || 'quick';
+  if (fmt === 'knockout') navigation.navigate('KnockoutSchedule', { tournamentId: t._id });
+  else if (fmt === 'league') navigation.navigate('LeagueSchedule', { tournamentId: t._id });
+  else navigation.navigate('TournamentDetail', { tournamentId: t._id });
+};
+
+const FORMAT_LABEL = { quick: 'Quick', knockout: 'Knockout', league: 'League' };
+const STATUS_LABEL = { upcoming: 'Not started', in_progress: 'In progress', completed: 'Completed' };
+
 const TournamentListScreen = ({ navigation }) => {
+  const { user } = useContext(AuthContext);
   const headerOpacity = useRef(new Animated.Value(0)).current;
   const headerY = useRef(new Animated.Value(-20)).current;
+
+  // The most recently worked-on tournament, surfaced at the top so the user can
+  // jump straight back in without hunting for it among many. Prefers the newest
+  // that isn't finished; refreshes whenever the screen regains focus.
+  const [recent, setRecent] = useState(null);
+  useEffect(() => {
+    const load = async () => {
+      if (!user?.token) return;
+      try {
+        const list = await tournamentService.getMyTournaments(user.token);
+        if (Array.isArray(list) && list.length) {
+          const sorted = [...list].sort(
+            (a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0),
+          );
+          setRecent(sorted.find((t) => t.status !== 'completed') || sorted[0]);
+        } else {
+          setRecent(null);
+        }
+      } catch (_) { /* silently skip — the format list still works */ }
+    };
+    load();
+    const unsub = navigation.addListener('focus', load);
+    return unsub;
+  }, [user?.token, navigation]);
 
   useEffect(() => {
     Animated.parallel([
@@ -270,13 +310,49 @@ const TournamentListScreen = ({ navigation }) => {
         contentContainerStyle={styles.cardsContainer}
         showsVerticalScrollIndicator={false}
       >
+        {/* Recent tournament — jump straight back in */}
+        {recent ? (
+          <Animated.View style={{ opacity: headerOpacity, transform: [{ translateY: headerY }] }}>
+            <Text style={styles.sectionLabel}>CONTINUE WHERE YOU LEFT OFF</Text>
+            <Pressable onPress={() => openTournamentScreen(navigation, recent)} style={styles.recentShadow}>
+              <LinearGradient
+                colors={['#4f46e5', '#7c3aed']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={styles.recentCard}
+              >
+                <View style={styles.decorCircleLg} />
+                <View style={styles.decorCircleSm} />
+                <View style={styles.recentContent}>
+                  <View style={styles.recentIconBadge}>
+                    <PlayIcon />
+                  </View>
+                  <View style={styles.recentTextWrap}>
+                    <Text style={styles.recentKicker}>RECENT TOURNAMENT</Text>
+                    <Text style={styles.recentName} numberOfLines={1}>{recent.name}</Text>
+                    <Text style={styles.recentMeta} numberOfLines={1}>
+                      {[FORMAT_LABEL[recent.format] || 'Tournament',
+                        recent.numberOfTeams ? `${recent.numberOfTeams} teams` : null,
+                        STATUS_LABEL[recent.status] || null].filter(Boolean).join('  ·  ')}
+                    </Text>
+                  </View>
+                  <View style={styles.recentCta}>
+                    <Text style={styles.recentCtaText}>{recent.status === 'completed' ? 'View' : 'Continue'}</Text>
+                    <ChevronRight />
+                  </View>
+                </View>
+              </LinearGradient>
+            </Pressable>
+          </Animated.View>
+        ) : null}
+
         <Animated.Text
           style={[
             styles.sectionLabel,
+            recent ? { marginTop: 8 } : null,
             { opacity: headerOpacity, transform: [{ translateY: headerY }] },
           ]}
         >
-          PICK A FORMAT
+          {recent ? 'START A NEW TOURNAMENT' : 'PICK A FORMAT'}
         </Animated.Text>
         {FORMATS.map((fmt, i) => (
           <FormatCard key={fmt.key} fmt={fmt} index={i} onPress={handlePick} />
@@ -347,6 +423,36 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     marginLeft: 4,
   },
+
+  // Recent tournament card
+  recentShadow: {
+    shadowColor: '#4f46e5',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 9,
+    borderRadius: 20,
+  },
+  recentCard: {
+    borderRadius: 20,
+    padding: 18,
+    overflow: 'hidden',
+  },
+  recentContent: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  recentIconBadge: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  recentTextWrap: { flex: 1 },
+  recentKicker: {
+    fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.75)',
+    letterSpacing: 1, marginBottom: 3,
+  },
+  recentName: { fontSize: 18, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
+  recentMeta: { fontSize: 12.5, fontWeight: '600', color: 'rgba(255,255,255,0.82)', marginTop: 3 },
+  recentCta: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  recentCtaText: { fontSize: 13, fontWeight: '800', color: '#fff' },
 
   cardGradient: {
     borderRadius: 20,
@@ -589,6 +695,14 @@ const iconStyles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 1.5,
     marginTop: -0.5,
+  },
+
+  // Play / resume triangle
+  playTriangle: {
+    width: 0, height: 0,
+    borderTopWidth: 10, borderBottomWidth: 10, borderLeftWidth: 16,
+    borderTopColor: 'transparent', borderBottomColor: 'transparent', borderLeftColor: '#fff',
+    marginLeft: 4,
   },
 });
 

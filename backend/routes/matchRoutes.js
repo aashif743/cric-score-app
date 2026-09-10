@@ -21,5 +21,6 @@ router.route("/:id")
 // --- Match State Management ---
 router.post("/:id/end-innings", protect, matchController.endInnings);    // End current innings
 router.put("/:id/end", protect, validateEndMatch, matchController.endMatch); // Finalize match
+router.patch("/:id/rename-player", protect, matchController.renamePlayer);   // Rename a player (owner)
 
 module.exports = router;

@@ -125,6 +125,21 @@ const Dropdown = ({ label, value, options, onSelect, icon, info, disabled = fals
   );
 };
 
+// Which flat teamNames indices land in each group — mirrors the backend's
+// snakeDistribute (utils/leagueBracket.js) EXACTLY, so the grouping the user
+// sees here is the grouping the tournament is generated with. The teamNames
+// array order is the single source of truth for group membership; shuffling it
+// re-draws the groups.
+const computeGroupIndexMap = (numTeams, numGroups) => {
+  const groups = Array.from({ length: Math.max(1, numGroups) }, () => []);
+  for (let i = 0; i < numTeams; i++) {
+    const round = Math.floor(i / numGroups);
+    const idx = round % 2 === 0 ? i % numGroups : numGroups - 1 - (i % numGroups);
+    groups[idx].push(i);
+  }
+  return groups;
+};
+
 const TournamentCreateScreen = ({ navigation, route }) => {
   const { user } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
@@ -275,6 +290,62 @@ const TournamentCreateScreen = ({ navigation, route }) => {
       updated[index] = value;
       return updated;
     });
+  };
+
+  // Group-wise team entry (league only). The snake map splits the flat
+  // teamNames list into the same groups the backend will build.
+  const numGroupsInt = format === 'league' ? Math.max(1, parseInt(numberOfGroups, 10) || 1) : 1;
+  const isGrouped = format === 'league' && numGroupsInt > 1;
+  const groupIndexMap = useMemo(
+    () => computeGroupIndexMap(teamNames.length, numGroupsInt),
+    [teamNames.length, numGroupsInt],
+  );
+  // Shuffle re-draws the groups by randomising which team sits in which slot.
+  // Group sizes stay fixed (they're position-based), only membership changes.
+  // Create-mode only — reordering an existing league would move played results.
+  const shuffleTeams = () => {
+    setTeamNames((prev) => {
+      const arr = [...prev];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    });
+  };
+  const canShuffle = format === 'league' && !isEditMode && teamNames.length > 1;
+
+  const renderTeamRow = (flatIndex, badgeLabel, showDivider) => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRST';
+    const defaultName = `Team ${alphabet[flatIndex] || flatIndex + 1}`;
+    const teamName = teamNames[flatIndex];
+    const displayName = teamName?.trim() || defaultName;
+    const isDefault = !teamName?.trim();
+    return (
+      <View key={flatIndex}>
+        <TouchableOpacity
+          style={styles.teamNameItem}
+          onPress={() => openTeamNameModal(flatIndex)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.teamNameLeft}>
+            <View style={styles.teamNumberBadge}>
+              <Text style={styles.teamNumberText}>{badgeLabel}</Text>
+            </View>
+            <Text
+              style={[styles.teamNameText, isDefault && styles.teamNameTextDefault]}
+              numberOfLines={1}
+            >
+              {displayName}
+            </Text>
+          </View>
+          <View style={styles.editIconContainer}>
+            <Text style={styles.editIcon}>✎</Text>
+          </View>
+        </TouchableOpacity>
+        {showDivider && <View style={styles.teamDivider} />}
+      </View>
+    );
   };
 
   const openTeamNameModal = (index) => {
@@ -675,43 +746,53 @@ const TournamentCreateScreen = ({ navigation, route }) => {
               </TouchableOpacity>
               {teamNamesExpanded && (
                 <>
-                  <Text style={styles.sectionHint}>Tap to edit team names</Text>
-                  <View style={styles.teamNamesCard}>
-                    {teamNames.map((teamName, index) => {
-                  const alphabet = 'ABCDEFGHIJKLMNOPQRST';
-                  const defaultName = `Team ${alphabet[index] || index + 1}`;
-                  const displayName = teamName?.trim() || defaultName;
-                  const isDefault = !teamName?.trim();
-                  return (
-                    <View key={index}>
+                  <View style={styles.teamNamesToolbar}>
+                    <Text style={styles.sectionHintInline}>
+                      {isGrouped
+                        ? `Split into ${numGroupsInt} groups · tap a team to rename`
+                        : 'Tap to edit team names'}
+                    </Text>
+                    {canShuffle && (
                       <TouchableOpacity
-                        style={styles.teamNameItem}
-                        onPress={() => openTeamNameModal(index)}
-                        activeOpacity={0.7}
+                        style={styles.shuffleButton}
+                        onPress={shuffleTeams}
+                        activeOpacity={0.85}
                       >
-                        <View style={styles.teamNameLeft}>
-                          <View style={styles.teamNumberBadge}>
-                            <Text style={styles.teamNumberText}>{index + 1}</Text>
-                          </View>
-                          <Text
-                            style={[
-                              styles.teamNameText,
-                              isDefault && styles.teamNameTextDefault,
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {displayName}
-                          </Text>
-                        </View>
-                        <View style={styles.editIconContainer}>
-                          <Text style={styles.editIcon}>✎</Text>
-                        </View>
+                        <Text style={styles.shuffleIcon}>⇄</Text>
+                        <Text style={styles.shuffleText}>Shuffle</Text>
                       </TouchableOpacity>
-                      {index < teamNames.length - 1 && <View style={styles.teamDivider} />}
-                    </View>
-                  );
-                })}
+                    )}
                   </View>
+
+                  {isGrouped ? (
+                    groupIndexMap.map((indices, g) => {
+                      const letter = String.fromCharCode(65 + g);
+                      return (
+                        <View key={g} style={styles.groupBlock}>
+                          <View style={styles.groupHeaderRow}>
+                            <View style={styles.groupBadge}>
+                              <Text style={styles.groupBadgeText}>{letter}</Text>
+                            </View>
+                            <Text style={styles.groupHeaderText}>Group {letter}</Text>
+                            <Text style={styles.groupHeaderCount}>
+                              {indices.length} {indices.length === 1 ? 'team' : 'teams'}
+                            </Text>
+                          </View>
+                          <View style={styles.teamNamesCard}>
+                            {indices.map((flatIdx, pos) =>
+                              renderTeamRow(flatIdx, `${pos + 1}`, pos < indices.length - 1),
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })
+                  ) : (
+                    <View style={styles.teamNamesCard}>
+                      {teamNames.map((_, i) =>
+                        renderTeamRow(i, `${i + 1}`, i < teamNames.length - 1),
+                      )}
+                    </View>
+                  )}
                 </>
               )}
             </View>
@@ -1020,6 +1101,52 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...shadows.small,
   },
+  // Group-wise team entry
+  teamNamesToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+    marginLeft: spacing.xs,
+    gap: 12,
+  },
+  sectionHintInline: {
+    fontSize: 12,
+    color: '#94a3b8',
+    flex: 1,
+  },
+  shuffleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#eef2ff',
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  shuffleIcon: { fontSize: 15, fontWeight: '800', color: '#4f46e5' },
+  shuffleText: { fontSize: 13, fontWeight: '700', color: '#4f46e5' },
+  groupBlock: { marginBottom: spacing.lg },
+  groupHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    marginLeft: spacing.xs,
+    gap: 8,
+  },
+  groupBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    backgroundColor: '#4f46e5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  groupBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  groupHeaderText: { fontSize: 14, fontWeight: '800', color: '#0f172a', flex: 1 },
+  groupHeaderCount: { fontSize: 12, fontWeight: '600', color: '#94a3b8' },
   teamNameItem: {
     flexDirection: 'row',
     alignItems: 'center',

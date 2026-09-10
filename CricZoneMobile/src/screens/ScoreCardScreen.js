@@ -262,6 +262,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
     title: 'Edit Name',
     teamPlayers: [],   // this team's saved line-up (shown first in the picker)
     teamLabel: '',     // e.g. "Mumbai players"
+    takenNames: [],    // names of OTHER players in this team (can't be reused)
   });
 
   // Saved player names per team across this tournament's matches. Lets us
@@ -2212,22 +2213,23 @@ const ScoreCardScreen = ({ navigation, route }) => {
     const ballsInCurrentOver = balls % settings.ballsPerOver;
     const oversString = `${completedOvers}.${ballsInCurrentOver}`;
 
-    const liveOverHistory = overHistory.map(o => ({ ...o, balls: [...o.balls] }));
+    const liveOverHistory = (overHistory || []).map(o => ({ ...o, balls: [...(o.balls || [])] }));
     const pendingOver = lastCompletedOverRef.current;
     if (
       pendingOver &&
       !liveOverHistory.some(o => o.overNumber === pendingOver.overNumber && o.bowlerName === pendingOver.bowlerName)
     ) {
-      liveOverHistory.push({ ...pendingOver, balls: [...pendingOver.balls] });
+      liveOverHistory.push({ ...pendingOver, balls: [...(pendingOver.balls || [])] });
     }
     // Match ended mid-over → reconstruct the in-progress over from the mirror.
     const partial = partialOverRef.current;
-    if (partial && partial.balls.length > 0) {
+    const partialBowlerName = currentBowler?.name || '';
+    if (partial && (partial.balls || []).length > 0) {
       const partialOverNumber = Math.floor(balls / settings.ballsPerOver) + 1;
-      if (!liveOverHistory.some(o => o.overNumber === partialOverNumber && o.bowlerName === currentBowler.name)) {
+      if (!liveOverHistory.some(o => o.overNumber === partialOverNumber && o.bowlerName === partialBowlerName)) {
         liveOverHistory.push({
           overNumber: partialOverNumber,
-          bowlerName: currentBowler.name,
+          bowlerName: partialBowlerName,
           balls: [...partial.balls],
           runs: partial.runs,
           wickets: partial.wickets,
@@ -2240,25 +2242,57 @@ const ScoreCardScreen = ({ navigation, route }) => {
       wickets,
       balls,
       overs: oversString,
-      batting: allBatsmen.map(b => ({ ...b })),
-      bowling: allBowlers.map(b => ({ ...b })),
+      batting: (allBatsmen || []).map(b => ({ ...b })),
+      bowling: (allBowlers || []).map(b => ({ ...b })),
       extras: { ...extras },
-      fallOfWickets: fallOfWickets.map(f => ({ ...f })),
+      fallOfWickets: (fallOfWickets || []).map(f => ({ ...f })),
       overHistory: liveOverHistory,
+    };
+  };
+
+  // A minimal snapshot from committed state — used only if buildEndSnapshot's
+  // richer over-history reconstruction ever throws, so ending a match can NEVER
+  // crash the app (it just loses the partial-over reconstruction).
+  const buildFallbackSnapshot = (runs, wickets, balls) => {
+    const bpo = settings.ballsPerOver || 6;
+    return {
+      runs, wickets, balls,
+      overs: `${Math.floor(balls / bpo)}.${balls % bpo}`,
+      batting: (allBatsmen || []).map(b => ({ ...b })),
+      bowling: (allBowlers || []).map(b => ({ ...b })),
+      extras: { ...extras },
+      fallOfWickets: (fallOfWickets || []).map(f => ({ ...f })),
+      overHistory: (overHistory || []).map(o => ({ ...o, balls: [...(o.balls || [])] })),
     };
   };
 
   // Runs after the match-ending ball's state has committed. Builds the snapshot
   // from fresh state (so the last ball is included) and fires the end handler.
+  // Fully guarded: this is the ONE place the ball handlers can't wrap, so an
+  // error here would otherwise crash the whole app on the match-ending ball.
   useEffect(() => {
     if (!endRequest) return;
     const req = endRequest;
-    const snap = buildEndSnapshot(req.runs, req.wickets, req.balls);
     setEndRequest(null);
-    if (req.kind === 'innings') {
-      handleEndInnings(snap);
-    } else {
-      handleMatchEnd(req.result, snap);
+    let snap;
+    try {
+      snap = buildEndSnapshot(req.runs, req.wickets, req.balls);
+    } catch (e) {
+      console.error('buildEndSnapshot failed — using fallback:', e);
+      snap = buildFallbackSnapshot(req.runs, req.wickets, req.balls);
+    }
+    try {
+      if (req.kind === 'innings') {
+        handleEndInnings(snap);
+      } else {
+        handleMatchEnd(req.result, snap);
+      }
+    } catch (e) {
+      console.error('End handler failed:', e);
+      Alert.alert(
+        'Could not finish the match',
+        'Something went wrong finalising the result. Please tap the last ball again, or reopen the match from the schedule.',
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endRequest, allBatsmen, allBowlers, extras, fallOfWickets, overHistory, currentBowler]);
@@ -2424,6 +2458,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         bowling: [],
         extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 },
         fallOfWickets: [],
+        overHistory: [],
       };
 
       // Use snapshot data for second innings if available
@@ -2450,10 +2485,14 @@ const ScoreCardScreen = ({ navigation, route }) => {
     const matchEndData = {
       result,
       status: 'completed',
+      // Carry the tournament link so the full scorecard shows tournament buttons
+      // ("Tournament" / "Next Match") — even when the match is decided by a Super
+      // Over (that path finalises from this payload, not the original match).
+      tournament: matchData?.tournament || null,
       innings1,
       innings2,
-      teamA: { name: teams.teamA.name, shortName: teams.teamA.name.substring(0, 3).toUpperCase() },
-      teamB: { name: teams.teamB.name, shortName: teams.teamB.name.substring(0, 3).toUpperCase() },
+      teamA: { name: teams.teamA?.name || '', shortName: (teams.teamA?.name || '').substring(0, 3).toUpperCase() },
+      teamB: { name: teams.teamB?.name || '', shortName: (teams.teamB?.name || '').substring(0, 3).toUpperCase() },
       totalOvers: settings.overs,
       date: new Date().toISOString(),
       matchSummary: { winner, margin, playerOfMatch: '', netRunRates: {} },
@@ -2961,6 +3000,16 @@ const ScoreCardScreen = ({ navigation, route }) => {
     });
     const teamPlayers = collected;
 
+    // Names already used by OTHER players in the SAME role-list — batsmen share a
+    // batting card, bowlers share a bowling card, so two of them can't share a
+    // name or their stats would merge. (A batsman & bowler with the same name is
+    // fine — that's one all-rounder.)
+    const sameList = playerType === 'bowler' ? (allBowlers || []) : (allBatsmen || []);
+    const takenNames = sameList
+      .filter((p) => p && p.id !== playerId)
+      .map((p) => (p.name || '').trim())
+      .filter((n) => n && !isPlaceholderPlayerName(n, teamName));
+
     setPlayerNameEditModal({
       visible: true,
       playerId,
@@ -2969,6 +3018,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       title,
       teamPlayers,
       teamLabel: teamName ? `${teamName} players` : 'Team players',
+      takenNames,
     });
   };
 
@@ -4378,14 +4428,24 @@ const ScoreCardScreen = ({ navigation, route }) => {
                       </Text>
                     </View>
                     <View style={styles.historyBalls}>
-                      {over.balls.map((ball, ballIndex) => (
-                        <View
-                          key={ballIndex}
-                          style={[styles.historyBall, { backgroundColor: getBallColor(ball) }]}
-                        >
-                          <Text style={styles.historyBallText}>{ball}</Text>
-                        </View>
-                      ))}
+                      {(over.balls || []).map((ball, ballIndex) => {
+                        // Match the live "This Over" design: wides/no-balls (which
+                        // don't count as a ball) render as plain text; every legal
+                        // delivery gets the rounded chip/pill, coloured by outcome.
+                        const isNonCounted = /^WD/i.test(ball) || /^NB/i.test(ball);
+                        if (isNonCounted) {
+                          return <Text key={ballIndex} style={styles.ballTextPlain}>{ball}</Text>;
+                        }
+                        const isMultiChar = ball.length > 1;
+                        return (
+                          <View
+                            key={ballIndex}
+                            style={[styles.ball, isMultiChar && styles.ballWide, { backgroundColor: getBallColor(ball) }]}
+                          >
+                            <Text style={styles.ballText}>{ball}</Text>
+                          </View>
+                        );
+                      })}
                     </View>
                   </View>
                 ))
@@ -5674,6 +5734,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         type="player"
         prioritySuggestions={playerNameEditModal.teamPlayers}
         priorityLabel={playerNameEditModal.teamLabel}
+        takenNames={playerNameEditModal.takenNames}
         onSave={handlePlayerNameModalSave}
         onClose={closePlayerNameModal}
       />

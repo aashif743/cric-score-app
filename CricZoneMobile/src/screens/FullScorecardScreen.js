@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
 import tournamentService from '../utils/tournamentService';
+import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
@@ -182,6 +183,86 @@ const FullScorecardScreen = ({ navigation, route }) => {
   // Tournament data for "Next Match" navigation
   const [tournamentDefaults, setTournamentDefaults] = useState(null);
   const [tournamentFormat, setTournamentFormat] = useState(null);
+
+  // Owner-only player rename (fixes a mis-typed name after the match).
+  const [renameModal, setRenameModal] = useState({
+    visible: false, teamName: '', oldName: '', playerType: 'batsman', teamPlayers: [], takenNames: [],
+  });
+  const myId = user?.id || user?._id;
+  const matchOwnerId = matchData?.user?._id || matchData?.user;
+  const isOwner = !!(matchOwnerId && myId && String(matchOwnerId) === String(myId));
+
+  // A team's full line-up across both innings (its batsmen + its bowlers), deduped
+  // — used to suggest names when renaming.
+  const teamLineup = (teamName) => {
+    const names = [];
+    const push = (arr) => (arr || []).forEach((p) => {
+      const n = (p?.name || '').trim();
+      if (n && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
+    });
+    [matchData?.innings1, matchData?.innings2].forEach((inn) => {
+      if (!inn) return;
+      if (inn.battingTeam === teamName) push(inn.batting);
+      if (inn.bowlingTeam === teamName) push(inn.bowling);
+    });
+    return names;
+  };
+  // Other players in the SAME role (batsmen / bowlers) of this team — names that
+  // can't be reused (else two players' stats would merge).
+  const otherRoleNames = (teamName, playerType, currentName) => {
+    const cur = (currentName || '').trim().toLowerCase();
+    const names = [];
+    const push = (arr) => (arr || []).forEach((p) => {
+      const n = (p?.name || '').trim();
+      if (n && n.toLowerCase() !== cur && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
+    });
+    [matchData?.innings1, matchData?.innings2].forEach((inn) => {
+      if (!inn) return;
+      if (playerType === 'batsman' && inn.battingTeam === teamName) push(inn.batting);
+      if (playerType === 'bowler' && inn.bowlingTeam === teamName) push(inn.bowling);
+    });
+    return names;
+  };
+
+  const openRename = (playerType, teamName, currentName) => {
+    if (!isOwner || !teamName) return;
+    setRenameModal({
+      visible: true,
+      teamName,
+      oldName: currentName || '',
+      playerType,
+      teamPlayers: teamLineup(teamName),
+      takenNames: otherRoleNames(teamName, playerType, currentName),
+    });
+  };
+
+  const handleRenameSave = async (newName) => {
+    const { teamName, oldName, playerType } = renameModal;
+    setRenameModal((m) => ({ ...m, visible: false }));
+    const clean = (newName || '').trim();
+    if (!clean || clean === oldName) return;
+    const mid = matchData?._id || matchId;
+    try {
+      await matchService.renamePlayer(mid, teamName, oldName, clean, playerType, user.token);
+      const eq = (a) => (a || '').trim().toLowerCase() === (oldName || '').trim().toLowerCase();
+      const updInn = (inn) => {
+        if (!inn) return inn;
+        const copy = { ...inn };
+        if (inn.battingTeam === teamName) {
+          copy.batting = (inn.batting || []).map((b) => (eq(b.name) ? { ...b, name: clean } : b));
+          copy.fallOfWickets = (inn.fallOfWickets || []).map((f) => (eq(f.batsman) ? { ...f, batsman: clean } : f));
+        }
+        if (inn.bowlingTeam === teamName) {
+          copy.bowling = (inn.bowling || []).map((b) => (eq(b.name) ? { ...b, name: clean } : b));
+          copy.overHistory = (inn.overHistory || []).map((o) => (eq(o.bowlerName) ? { ...o, bowlerName: clean } : o));
+        }
+        return copy;
+      };
+      setMatchData((prev) => (prev ? { ...prev, innings1: updInn(prev.innings1), innings2: updInn(prev.innings2) } : prev));
+    } catch (e) {
+      Alert.alert('Could not rename', e?.response?.data?.error || e?.error || 'Please try again.');
+    }
+  };
 
   // Refs
   const shareableRef = useRef(null);
@@ -546,7 +627,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
     }).start();
   };
 
-  const renderBattingTable = (batting, label) => {
+  const renderBattingTable = (batting, teamName) => {
     const playedBatsmen = (batting || []).filter(
       b => (b.balls || 0) > 0 || (b.runs || 0) > 0 || b.isOut === true
     );
@@ -573,7 +654,13 @@ const FullScorecardScreen = ({ navigation, route }) => {
         {playedBatsmen.map((batsman, index) => (
           <AnimatedTableRow key={index} delay={index * 50} style={styles.tableRow}>
             <View style={styles.nameColumn}>
-              <Text style={styles.playerName}>{batsman.name}</Text>
+              {isOwner ? (
+                <TouchableOpacity onPress={() => openRename('batsman', teamName, batsman.name)} activeOpacity={0.6}>
+                  <Text style={[styles.playerName, styles.editablePlayerName]}>{batsman.name} <Text style={styles.renamePencil}>✎</Text></Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.playerName}>{batsman.name}</Text>
+              )}
               <Text style={[styles.playerStatus, batsman.isOut && styles.playerStatusOut]}>
                 {batsman.status || (batsman.isOut ? 'Out' : 'Not Out')}
               </Text>
@@ -591,7 +678,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
     );
   };
 
-  const renderBowlingTable = (bowling, label) => {
+  const renderBowlingTable = (bowling, teamName) => {
     const bowledBowlers = (bowling || []).filter(b => {
       if (!b.overs) return false;
       const [whole, part] = b.overs.toString().split('.').map(Number);
@@ -619,7 +706,13 @@ const FullScorecardScreen = ({ navigation, route }) => {
         </View>
         {bowledBowlers.map((bowler, index) => (
           <AnimatedTableRow key={index} delay={index * 50} style={styles.tableRow}>
-            <Text style={[styles.playerName, styles.nameColumn]}>{bowler.name}</Text>
+            {isOwner ? (
+              <TouchableOpacity style={styles.nameColumn} onPress={() => openRename('bowler', teamName, bowler.name)} activeOpacity={0.6}>
+                <Text style={[styles.playerName, styles.editablePlayerName]}>{bowler.name} <Text style={styles.renamePencil}>✎</Text></Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={[styles.playerName, styles.nameColumn]}>{bowler.name}</Text>
+            )}
             <Text style={styles.statText}>{bowler.overs || '0.0'}</Text>
             <Text style={styles.statText}>{bowler.maidens || 0}</Text>
             <Text style={styles.statText}>{bowler.runs || 0}</Text>
@@ -791,7 +884,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
             <CricketBatIcon size={18} color={colors.primary} />
             <Text style={styles.sectionLabel}>Batting</Text>
           </View>
-          {renderBattingTable(innings.batting, label)}
+          {renderBattingTable(innings.batting, innings.battingTeam || teamName)}
         </View>
 
         {/* Bowling Section */}
@@ -800,7 +893,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
             <BallIcon size={18} color={colors.error} />
             <Text style={styles.sectionLabel}>Bowling</Text>
           </View>
-          {renderBowlingTable(innings.bowling, label)}
+          {renderBowlingTable(innings.bowling, innings.bowlingTeam)}
         </View>
 
         {renderExtras(innings.extras)}
@@ -1508,6 +1601,20 @@ const FullScorecardScreen = ({ navigation, route }) => {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Owner-only: rename a player (fixes a typo; keeps stats correct) */}
+      <PlayerNameEditModal
+        visible={renameModal.visible}
+        initialValue={renameModal.oldName}
+        title="Rename player"
+        placeholder="Enter player name"
+        type="player"
+        prioritySuggestions={renameModal.teamPlayers}
+        priorityLabel={renameModal.teamName ? `${renameModal.teamName} players` : 'Team players'}
+        takenNames={renameModal.takenNames}
+        onSave={handleRenameSave}
+        onClose={() => setRenameModal((m) => ({ ...m, visible: false }))}
+      />
     </SafeAreaView>
   );
 };
@@ -2084,6 +2191,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textPrimary,
   },
+  editablePlayerName: {
+    color: colors.primary,
+    textDecorationLine: 'underline',
+    textDecorationColor: '#cbd5e1',
+  },
+  renamePencil: { fontSize: 11, color: '#94a3b8' },
   playerStatus: {
     fontSize: 11,
     color: colors.textMuted,
