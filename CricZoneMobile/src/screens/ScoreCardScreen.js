@@ -215,6 +215,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
   // the over-by-over view. We rebuild it from this ref inside the snapshot.
   const partialOverRef = useRef({ balls: [], runs: 0, wickets: 0 });
 
+  // When a run-out falls on the LAST ball of an over, we must show the striker
+  // picker first and only then the over recap — two modals can't be on screen
+  // at once (RN freezes/crashes). This stashes the over recap so it can be
+  // shown after the new batsman is chosen (see handleStrikerSelection).
+  const pendingOverCompleteRef = useRef(null);
+
   // Single point that every scoring path calls right after setCurrentOverBalls
   // so the mirror always reflects the latest ball without waiting for React.
   const recordBallInCurrentOver = (ballDisplay, runDelta = 0, isWicket = false) => {
@@ -749,7 +755,14 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Check for end of over
     if (ballCounted && (match.balls + 1) % settings.ballsPerOver === 0) {
-      handleEndOfOver({ display: ballDisplay, runs: totalRuns, isWicket: false });
+      const maxBalls = settings.overs * settings.ballsPerOver;
+      // Does this ball also end the innings/match? (overs complete, or the chase
+      // is won on this delivery). If so, suppress the over recap so it never
+      // collides with the end-innings / match-end modal.
+      const willEnd =
+        (match.balls + 1) >= maxBalls ||
+        (match.innings === 2 && (match.runs + totalRuns) >= match.target);
+      handleEndOfOver({ display: ballDisplay, runs: totalRuns, isWicket: false }, { willEnd });
     }
 
     // Compute pending bowler update for accurate snapshot
@@ -936,10 +949,22 @@ const ScoreCardScreen = ({ navigation, route }) => {
     const strikerBatsman = selectedBatsman.id === newBatsman.id ? newBatsman : (updatedSurvivingBatsman || survivingBatsman);
     const nonStrikerBatsman = selectedBatsman.id === newBatsman.id ? (updatedSurvivingBatsman || survivingBatsman) : newBatsman;
 
-    setCurrentBatsmen({
-      striker: strikerBatsman,
-      nonStriker: nonStrikerBatsman,
-    });
+    // If the run-out fell on the last ball of the over, finish the over
+    // transition now that the new pair is known: the chosen batsman is at the
+    // striker's end after the runs, so for the NEW over strike comes from the
+    // other end (rotate). Then show the recap that was deferred to avoid
+    // stacking two modals.
+    const pendingOver = pendingOverCompleteRef.current;
+    if (pendingOver) {
+      pendingOverCompleteRef.current = null;
+      setCurrentBatsmen({ striker: nonStrikerBatsman, nonStriker: strikerBatsman });
+      setOverComplete(pendingOver);
+    } else {
+      setCurrentBatsmen({
+        striker: strikerBatsman,
+        nonStriker: nonStrikerBatsman,
+      });
+    }
 
     // Close modal and clear pending data
     setShowStrikerSelectModal(false);
@@ -956,8 +981,13 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
   // Handle end of over
   // lastBall: { display, runs, isWicket } - the ball that completed the over (not yet in state)
-  const handleEndOfOver = (lastBall = null) => {
+  const handleEndOfOver = (lastBall = null, options = {}) => {
     try {
+      // willEnd: this ball also ends the innings/match → let that flow take over
+      //          (no rotate / next bowler / recap, so two modals never overlap).
+      // runoutPending: a run-out on this ball is showing the striker picker →
+      //          defer the over transition + recap until the new batsman is set.
+      const { willEnd = false, runoutPending = false } = options;
       // Include the last ball that triggered end-of-over (state updates are async)
       const allBalls = lastBall ? [...currentOverBalls, lastBall.display] : [...currentOverBalls];
       const allRuns = lastBall ? currentOverRuns + lastBall.runs : currentOverRuns;
@@ -998,40 +1028,42 @@ const ScoreCardScreen = ({ navigation, route }) => {
       setCurrentOverWickets(0);
       partialOverRef.current = { balls: [], runs: 0, wickets: 0 };
 
-      // Rotate strike at end of over
-      rotateStrike();
+      // Innings or match ends on this ball → hand off to the end-innings /
+      // match-end flow. Do NOT rotate, pick a bowler, or show the over recap:
+      // showing the recap alongside the end modal puts two modals on screen at
+      // once, which freezes/crashes the app (e.g. a 4/6 that wins the chase, or
+      // the all-out wicket, on the last ball of an over).
+      if (willEnd) return;
 
-      // Auto-select next bowler (user can manually change via bowler change button)
-      const newBalls = match.balls + 1;
-      const maxBalls = settings.overs * settings.ballsPerOver;
-      const isOversComplete = newBalls >= maxBalls;
-      const isAllOut = match.wickets >= settings.playersPerTeam - 1;
+      // Rotate strike at end of over — unless a run-out striker pick is pending,
+      // in which case the rotation happens after the new batsman is chosen
+      // (handleStrikerSelection), so the out batsman isn't rotated into strike.
+      if (!runoutPending) {
+        rotateStrike();
+      }
 
-      if (!isOversComplete && !isAllOut) {
-        // Find next bowler in sequential rotation
-        // Sort by ID to ensure consistent order, then find the next one after current
-        const sortedBowlers = [...allBowlers].sort((a, b) => a.id - b.id);
-        const currentIndex = sortedBowlers.findIndex(b => b.id === currentBowlerId);
+      // Auto-select next bowler (user can manually change via bowler change button).
+      // Sort by ID for a consistent order, then pick the next one after current.
+      const sortedBowlers = [...allBowlers].sort((a, b) => a.id - b.id);
+      const currentIndex = sortedBowlers.findIndex(b => b.id === currentBowlerId);
+      let nextIndex = (currentIndex + 1) % sortedBowlers.length;
+      let attempts = 0;
+      // Skip the previous bowler (can't bowl consecutive overs).
+      while (sortedBowlers[nextIndex].id === currentBowlerId && attempts < sortedBowlers.length) {
+        nextIndex = (nextIndex + 1) % sortedBowlers.length;
+        attempts++;
+      }
+      const nextBowler = sortedBowlers[nextIndex];
+      if (nextBowler && nextBowler.id !== currentBowlerId) {
+        const bowlerWithStats = allBowlers.find(b => b.id === nextBowler.id) || nextBowler;
+        setCurrentBowler({ ...bowlerWithStats });
+      }
 
-        // Find next eligible bowler (not the one who just bowled)
-        let nextIndex = (currentIndex + 1) % sortedBowlers.length;
-        let attempts = 0;
-
-        // Skip the previous bowler (the one who just finished - can't bowl consecutive overs)
-        while (sortedBowlers[nextIndex].id === currentBowlerId && attempts < sortedBowlers.length) {
-          nextIndex = (nextIndex + 1) % sortedBowlers.length;
-          attempts++;
-        }
-
-        const nextBowler = sortedBowlers[nextIndex];
-        if (nextBowler && nextBowler.id !== currentBowlerId) {
-          const bowlerWithStats = allBowlers.find(b => b.id === nextBowler.id) || nextBowler;
-          setCurrentBowler({ ...bowlerWithStats });
-        }
-
-        // Show a quick recap of the over just bowled. Skipped when the innings is
-        // ending on this over (the end-innings/match flow handles that instead),
-        // so the two popups never collide. isMaiden lets us badge a maiden over.
+      // Over recap popup. When a run-out selection is pending, stash it and show
+      // it only after the striker picker closes — never two modals at once.
+      if (runoutPending) {
+        pendingOverCompleteRef.current = { ...overData, isMaiden };
+      } else {
         setOverComplete({ ...overData, isMaiden });
       }
     } catch (error) {
@@ -1215,9 +1247,14 @@ const ScoreCardScreen = ({ navigation, route }) => {
         setShowStrikerSelectModal(true);
       }
 
-      // End of over (only legal deliveries advance the over)
+      // End of over (only legal deliveries advance the over). Same collision
+      // guards as handleWicket: suppress the recap if the innings ends here,
+      // else defer it behind the striker picker for this run-out.
       if (isLegalBall && (match.balls + 1) % settings.ballsPerOver === 0) {
-        handleEndOfOver({ display: ballDisplay, runs: totalRuns, isWicket: true });
+        handleEndOfOver(
+          { display: ballDisplay, runs: totalRuns, isWicket: true },
+          { willEnd: willEndInnings, runoutPending: !willEndInnings },
+        );
       }
 
       // Pending updates for end-of-innings/match checks
@@ -1425,9 +1462,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
     // Note: All-out check is handled by checkMatchEndConditions below
     // which passes the correct snapshot with pending wicket count
 
-    // Check for end of over (wicket counts as a ball)
+    // Check for end of over (wicket counts as a ball). When the innings ends on
+    // this ball, suppress the over recap (willEnd); when a run-out that DOESN'T
+    // end the innings falls here, defer the over transition until the striker
+    // picker closes (runoutPending) so the two modals never overlap.
     if ((match.balls + 1) % settings.ballsPerOver === 0) {
-      handleEndOfOver({ display: 'W', runs: runsScored, isWicket: true });
+      handleEndOfOver(
+        { display: wicketDisplay, runs: runsScored, isWicket: true },
+        { willEnd: willEndInnings, runoutPending: wicketType === 'Run Out' && !willEndInnings },
+      );
     }
 
     // Compute pending bowler update
@@ -1824,7 +1867,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Check for end of over
     if ((match.balls + 1) % settings.ballsPerOver === 0) {
-      handleEndOfOver({ display: ballDisplay, runs: runs, isWicket: false });
+      const maxBalls = settings.overs * settings.ballsPerOver;
+      const willEnd =
+        (match.balls + 1) >= maxBalls ||
+        (byeRunOut && (match.wickets + 1) >= (settings.playersPerTeam - 1)) ||
+        (match.innings === 2 && (match.runs + runs) >= match.target);
+      handleEndOfOver(
+        { display: ballDisplay, runs: runs, isWicket: !!byeRunOut },
+        { willEnd, runoutPending: !!byeRunOut && !willEnd },
+      );
     }
 
     // Reset and close modal
@@ -2019,7 +2070,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
     // Check for end of over
     if ((match.balls + 1) % settings.ballsPerOver === 0) {
-      handleEndOfOver({ display: runs.toString(), runs: runs, isWicket: false });
+      const maxBalls = settings.overs * settings.ballsPerOver;
+      const willEnd =
+        (match.balls + 1) >= maxBalls ||
+        (match.innings === 2 && (match.runs + runs) >= match.target);
+      handleEndOfOver({ display: runs.toString(), runs: runs, isWicket: false }, { willEnd });
     }
 
     // Reset and close modal
@@ -2296,6 +2351,27 @@ const ScoreCardScreen = ({ navigation, route }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endRequest, allBatsmen, allBowlers, extras, fallOfWickets, overHistory, currentBowler]);
+
+  // Resume safety net. If a 2nd-innings chase has ALREADY reached the target but
+  // the match is still in progress — e.g. the app was closed before the result
+  // was confirmed, or an older match got stuck — finish it now instead of
+  // leaving the scorer on a screen that shows "negative runs to win". Guarded so
+  // it never fires during normal play (the ball handlers set endRequest /
+  // pendingMatchEnd first, which this skips on).
+  useEffect(() => {
+    if (
+      match.innings === 2 &&
+      match.target > 0 &&
+      match.runs >= match.target &&
+      !endRequest &&
+      !showMatchEndModal &&
+      !showTieModal &&
+      !pendingMatchEnd
+    ) {
+      checkMatchEndConditions(match.runs, match.wickets, match.balls);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match.runs, match.target, match.innings, endRequest, showMatchEndModal, showTieModal, pendingMatchEnd]);
 
   // Handle end of innings
   const handleEndInnings = (matchSnapshot = null) => {

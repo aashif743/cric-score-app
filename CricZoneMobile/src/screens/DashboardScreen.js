@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useRef } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,18 @@ import {
   ScrollView,
   Animated,
   Pressable,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AuthContext } from '../context/AuthContext';
 import LiveMatchesStrip from '../components/LiveMatchesStrip';
 import Icon from '../components/Icon';
+import UpdatePromptModal from '../components/UpdatePromptModal';
+import { checkForUpdate } from '../utils/versionService';
+
+// Only prompt for an update once per app launch (not on every dashboard focus).
+let updateCheckedThisSession = false;
 
 // --- Icons (built from Views) ------------------------------------------------
 
@@ -106,6 +112,31 @@ const SectionCard = ({ section, index, onPress }) => {
 
 const DashboardScreen = ({ navigation }) => {
   const { user } = useContext(AuthContext);
+
+  // "Update available" prompt (shown a few seconds after the home screen opens).
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [showUpdate, setShowUpdate] = useState(false);
+
+  useEffect(() => {
+    if (updateCheckedThisSession) return;
+    const timer = setTimeout(async () => {
+      updateCheckedThisSession = true;
+      const info = await checkForUpdate();
+      if (info) {
+        setUpdateInfo(info);
+        setShowUpdate(true);
+      }
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const onUpdatePress = () => {
+    if (updateInfo?.storeUrl) {
+      Linking.openURL(updateInfo.storeUrl).catch(() => {});
+    }
+    // Keep a forced update on screen; dismiss an optional one.
+    if (!updateInfo?.forceUpdate) setShowUpdate(false);
+  };
 
   const heroOpacity = useRef(new Animated.Value(0)).current;
   const heroY = useRef(new Animated.Value(-20)).current;
@@ -243,6 +274,13 @@ const DashboardScreen = ({ navigation }) => {
           <Text style={styles.footerTagline}>Your Cricket Companion</Text>
         </View>
       </ScrollView>
+
+      <UpdatePromptModal
+        visible={showUpdate}
+        info={updateInfo}
+        onUpdate={onUpdatePress}
+        onLater={() => setShowUpdate(false)}
+      />
     </SafeAreaView>
   );
 };

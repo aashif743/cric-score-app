@@ -811,9 +811,9 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
                 {(() => {
                   const mkTeam = (sk, tm) => {
                     const known = tm?.name && tm.name !== 'TBD';
-                    const fallback = (tournament?.numberOfGroups === 2)
-                      ? (sk === 'A' ? 'Group A Winner' : 'Group B Winner')
-                      : slotSourceLabel(q1Match, sk, knockoutMatches, koGameNos);
+                    // Positional label for the (yet-unknown) qualifier — e.g.
+                    // "Group A 1st" / "Group B 1st" — from the slot's group source.
+                    const fallback = slotSourceLabel(q1Match, sk, knockoutMatches, koGameNos);
                     const label = known ? tm.name : fallback;
                     const initial = (label || '?').trim().charAt(0).toUpperCase();
                     return (

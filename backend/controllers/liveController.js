@@ -29,25 +29,49 @@ exports.getLiveMatches = async (req, res) => {
     const tournamentById = new Map(publicTournaments.map((t) => [String(t._id), t]));
     const tournamentIds = publicTournaments.map((t) => t._id);
 
-    // "Live now" means recently active. Matches left at in_progress for hours
-    // are abandoned, not live — without this guard the public strip fills with
-    // stale cards that were never formally ended. A real match updates every
-    // ball, so it stays well within this window; if a scorer walks away the card
-    // drops off, and the instant they resume (any ball) updatedAt refreshes and
-    // it reappears. So the filter is non-destructive — it only hides idle cards.
-    const LIVE_RECENCY_MS = 3 * 60 * 60 * 1000; // 3 hours of no scoring activity
-    const FINISHED_WINDOW_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
-    const liveSince = new Date(Date.now() - LIVE_RECENCY_MS);
-    const finishedSince = new Date(Date.now() - FINISHED_WINDOW_MS);
+    // Public-feed visibility windows:
+    //  • LIVE — an in-progress match shows while it's being scored. If the
+    //    scorer goes quiet for 6 hours it's treated as stale and drops off; the
+    //    instant they resume (any ball refreshes updatedAt) it reappears. So the
+    //    filter is non-destructive — it only hides idle cards.
+    //  • COMPLETED — kept based on the TOURNAMENT's state:
+    //      – every match in the tournament finished  → keep 2 days, then drop.
+    //      – tournament still has unfinished matches  → keep 1 day only.
+    const now = Date.now();
+    const LIVE_RECENCY_MS = 6 * 60 * 60 * 1000;       // 6h of scorer silence → stale
+    const FULL_DONE_MS = 2 * 24 * 60 * 60 * 1000;     // whole tournament done → 2 days
+    const PARTIAL_DONE_MS = 1 * 24 * 60 * 60 * 1000;  // tournament still running → 1 day
+    const liveSince = new Date(now - LIVE_RECENCY_MS);
+    const widestFinishedSince = new Date(now - FULL_DONE_MS);
 
-    // Live matches now, plus finished matches for 2 days after they end
-    // (updatedAt is the completion time once a match is finalised). After the
-    // window they drop off the public feed automatically.
+    // Per-tournament completion: is EVERY match in the tournament finished? A
+    // light status-only scan avoids pulling full match docs. A tournament with
+    // any scheduled/in-progress match counts as "still running" (partial).
+    const statusRows = await Match.find({ tournament: { $in: tournamentIds } })
+      .select("tournament status")
+      .lean();
+    const totalByTournament = new Map();
+    const doneByTournament = new Map();
+    for (const row of statusRows) {
+      const key = String(row.tournament);
+      totalByTournament.set(key, (totalByTournament.get(key) || 0) + 1);
+      if (row.status === "completed" || row.status === "abandoned") {
+        doneByTournament.set(key, (doneByTournament.get(key) || 0) + 1);
+      }
+    }
+    const isTournamentAllDone = (key) => {
+      const total = totalByTournament.get(key) || 0;
+      return total > 0 && (doneByTournament.get(key) || 0) === total;
+    };
+
+    // Candidates: live matches with recent activity, plus completed matches
+    // within the WIDEST (2-day) window. Partial-tournament completed matches are
+    // narrowed to 1 day after this query.
     const matches = await Match.find({
       tournament: { $in: tournamentIds },
       $or: [
         { status: { $in: ["in_progress", "innings_break"] }, updatedAt: { $gte: liveSince } },
-        { status: "completed", updatedAt: { $gte: finishedSince } },
+        { status: "completed", updatedAt: { $gte: widestFinishedSince } },
       ],
     })
       .select([
@@ -62,16 +86,26 @@ exports.getLiveMatches = async (req, res) => {
       .sort({ updatedAt: -1 })
       .lean();
 
+    // Narrow COMPLETED matches per tournament (live ones already passed the 6h
+    // recency filter): fully-finished tournaments keep them 2 days (already
+    // bounded by the query above); still-running tournaments keep them 1 day.
+    const partialCutoff = now - PARTIAL_DONE_MS;
+    const visible = matches.filter((m) => {
+      if (m.status !== "completed") return true;
+      if (isTournamentAllDone(String(m.tournament))) return true;
+      return new Date(m.updatedAt).getTime() >= partialCutoff;
+    });
+
     // Match number within its tournament — the position in creation order
     // (ObjectIds are monotonic, so _id order ≈ fixture/schedule order). Shown
     // on the card as "1st match", "2nd match", etc.
     const matchNumbers = await Promise.all(
-      matches.map((m) =>
+      visible.map((m) =>
         Match.countDocuments({ tournament: m.tournament, _id: { $lt: m._id } }).then((n) => n + 1),
       ),
     );
 
-    const data = matches.map((m, i) => {
+    const data = visible.map((m, i) => {
       const t = tournamentById.get(String(m.tournament));
       return {
         _id: m._id,

@@ -17,6 +17,7 @@ const tournamentRoutes = require("./routes/tournamentRoutes");
 const publicRoutes = require("./routes/publicRoutes");
 const liveRoutes = require("./routes/liveRoutes");
 const auctionRoutes = require("./routes/auctionRoutes");
+const appRoutes = require("./routes/appRoutes");
 
 const app = express();
 
@@ -76,6 +77,7 @@ app.use("/api/tournaments", tournamentRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/live", liveRoutes);
 app.use("/api/auctions", auctionRoutes);
+app.use("/api/app", appRoutes);
 
 // MongoDB Connection
 mongoose

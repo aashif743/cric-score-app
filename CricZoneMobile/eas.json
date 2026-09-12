@@ -37,6 +37,11 @@
         "appleId": "mhdaashif743@gmail.com",
         "ascAppId": "6758245259",
         "appleTeamId": "U6ZHLMGQ3J"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "production",
+        "releaseStatus": "completed"
       }
     }
   }

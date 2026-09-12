@@ -30,6 +30,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# Google Play service-account key (used by `eas submit -p android`) — never commit
+google-service-account.json
+
 # local env files
 .env*.local
 
