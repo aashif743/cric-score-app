@@ -6,6 +6,7 @@ import LiveBoard, {
   NoScroll, CenterScreen, Spinner, LoadingText, ErrorIcon, ErrorText, RetryButton,
 } from "./tv/LiveBoard";
 import SummaryBoard from "./tv/SummaryBoard";
+import TransitionCurtain from "./tv/TransitionCurtain";
 
 const SOCKET_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
@@ -20,8 +21,26 @@ const TournamentTVScoreboard = () => {
   const [payload, setPayload] = useState(null); // { tournamentName, mode, overlay|summary }
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
+  const [curtain, setCurtain] = useState(false);
   const payloadRef = useRef(null);
+  const prevKeyRef = useRef(null);
+  const curtainTimer = useRef(null);
   useEffect(() => { payloadRef.current = payload; }, [payload]);
+
+  // Play a branded transition whenever the shown content changes: a match ends
+  // (live → summary) or the next match starts (summary → live / new matchId).
+  useEffect(() => {
+    if (!payload) return;
+    const key = `${payload.mode}:${payload.matchId || ""}`;
+    if (prevKeyRef.current !== null && prevKeyRef.current !== key) {
+      setCurtain(true);
+      if (curtainTimer.current) clearTimeout(curtainTimer.current);
+      curtainTimer.current = setTimeout(() => setCurtain(false), 1400);
+    }
+    prevKeyRef.current = key;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payload && payload.mode, payload && payload.matchId]);
+  useEffect(() => () => { if (curtainTimer.current) clearTimeout(curtainTimer.current); }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -74,20 +93,22 @@ const TournamentTVScoreboard = () => {
 
   const title = payload.tournamentName || "Tournament";
 
+  let board;
   if (payload.mode === "live" && payload.overlay) {
-    return <LiveBoard data={payload.overlay} connected={connected} title={title} />;
-  }
-  if (payload.mode === "summary" && payload.summary) {
-    return <SummaryBoard summary={payload.summary} title={title} />;
+    board = <LiveBoard data={payload.overlay} connected={connected} title={title} />;
+  } else if (payload.mode === "summary" && payload.summary) {
+    board = <SummaryBoard summary={payload.summary} title={title} />;
+  } else {
+    // Idle — no match live and none completed yet.
+    board = (
+      <><NoScroll /><CenterScreen>
+        <IdleTitle>{title}</IdleTitle>
+        <IdleText>Waiting for the next match…</IdleText>
+      </CenterScreen></>
+    );
   }
 
-  // Idle — no match live and none completed yet.
-  return (
-    <><NoScroll /><CenterScreen>
-      <IdleTitle>{title}</IdleTitle>
-      <IdleText>Waiting for the next match…</IdleText>
-    </CenterScreen></>
-  );
+  return <>{board}{curtain && <TransitionCurtain />}</>;
 };
 
 const IdleTitle = styled.h1`

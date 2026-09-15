@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, Clipboard, Share } from 'react-native';
 
 const statusConfig = {
   upcoming: { label: 'Upcoming', bg: '#fef3c7', color: '#d97706' },
@@ -55,6 +55,42 @@ const TournamentCard = ({ tournament, index, onPress, onLongPress }) => {
   };
 
   const status = statusConfig[tournament.status] || statusConfig.upcoming;
+
+  // One broadcast link for the WHOLE tournament (TV + OBS). Set once — it
+  // auto-switches to each new match and shows the summary between games.
+  const handleBroadcast = () => {
+    const tvUrl = `https://cric-zone.com/tv/tournament/${tournament._id}`;
+    const obsUrl = `https://cric-zone.com/overlay/tournament/${tournament._id}`;
+    Alert.alert(
+      'Tournament Broadcast',
+      'One link for the whole tournament. Set it once — it automatically switches to each new match and shows the match summary between games.',
+      [
+        {
+          text: 'Copy TV Link',
+          onPress: () => {
+            Clipboard.setString(tvUrl);
+            Alert.alert('Copied!', 'Tournament TV link copied.\n\nOpen it in your TV browser — it runs the whole tournament.');
+          },
+        },
+        {
+          text: 'Copy OBS Overlay Link',
+          onPress: () => {
+            Clipboard.setString(obsUrl);
+            Alert.alert('Copied!', 'Tournament OBS overlay link copied.\n\nAdd as a Browser Source (transparent background) in OBS.');
+          },
+        },
+        {
+          text: 'Share',
+          onPress: async () => {
+            try {
+              await Share.share({ message: `${tournament.name} — Live Broadcast\n\nTV: ${tvUrl}\n\nOBS overlay: ${obsUrl}` });
+            } catch (e) { /* cancelled */ }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  };
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -122,9 +158,20 @@ const TournamentCard = ({ tournament, index, onPress, onLongPress }) => {
             {/* Footer */}
             <View style={styles.cardFooter}>
               <Text style={styles.dateText}>{formatDate(tournament.updatedAt)}</Text>
-              <View style={styles.arrowContainer}>
-                <View style={styles.arrowLine} />
-                <View style={styles.arrowHead} />
+              <View style={styles.footerRight}>
+                <TouchableOpacity
+                  style={styles.broadcastPill}
+                  onPress={handleBroadcast}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <View style={styles.tvIcon}><View style={styles.tvStand} /></View>
+                  <Text style={styles.broadcastText}>Broadcast</Text>
+                </TouchableOpacity>
+                <View style={styles.arrowContainer}>
+                  <View style={styles.arrowLine} />
+                  <View style={styles.arrowHead} />
+                </View>
               </View>
             </View>
           </View>
@@ -225,6 +272,42 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94a3b8',
     fontWeight: '500',
+  },
+  footerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  broadcastPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#eef2ff',
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 9,
+  },
+  tvIcon: {
+    width: 15,
+    height: 11,
+    borderWidth: 1.6,
+    borderColor: '#4f46e5',
+    borderRadius: 2,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  tvStand: {
+    width: 7,
+    height: 1.6,
+    backgroundColor: '#4f46e5',
+    marginBottom: -3,
+  },
+  broadcastText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#4f46e5',
   },
   arrowContainer: {
     flexDirection: 'row',

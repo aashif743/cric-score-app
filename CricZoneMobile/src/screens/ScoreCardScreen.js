@@ -2842,44 +2842,14 @@ const ScoreCardScreen = ({ navigation, route }) => {
       return;
     }
 
-    const tournamentId = matchData?.tournament;
-    const buttons = [
-      { text: 'TV Scoreboard (this match)', onPress: () => handleTVScoreboard(matchId) },
-    ];
-    if (tournamentId) {
-      buttons.push({ text: 'Tournament TV (all matches)', onPress: () => handleTournamentTV(tournamentId) });
-    }
-    buttons.push({ text: 'OBS Overlay', onPress: () => handleOBSOverlay(matchId) });
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-
-    Alert.alert('Live Broadcast', 'Choose how to display live scores:', buttons);
-  };
-
-  // One TV link for the whole tournament — the screen auto-switches to each new
-  // match and shows the summary between games. Set it once on the TV.
-  const handleTournamentTV = (tournamentId) => {
-    const tvUrl = `https://cric-zone.com/tv/tournament/${tournamentId}`;
+    // This-match links only. Whole-tournament TV/OBS links live on the
+    // tournament cards (Tournaments list), not here.
     Alert.alert(
-      'Tournament TV',
-      'One link for the whole tournament. Set it once on your TV — it automatically switches to each new match and shows the match summary between games.',
+      'Live Broadcast',
+      'Choose how to display live scores for this match:',
       [
-        {
-          text: 'Copy URL',
-          onPress: () => {
-            Clipboard.setString(tvUrl);
-            Alert.alert('Copied!', 'Tournament TV URL copied.\n\nOpen it once on your TV — it updates for every match automatically.');
-          },
-        },
-        {
-          text: 'Share',
-          onPress: async () => {
-            try {
-              await Share.share({
-                message: `Live Tournament Scoreboard\n\n${tvUrl}\n\nOpen this once on your TV — it switches to each new match automatically.`,
-              });
-            } catch (err) { /* user cancelled */ }
-          },
-        },
+        { text: 'TV Scoreboard', onPress: () => handleTVScoreboard(matchId) },
+        { text: 'OBS Overlay', onPress: () => handleOBSOverlay(matchId) },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
@@ -2920,40 +2890,30 @@ const ScoreCardScreen = ({ navigation, route }) => {
   // Handle OBS Overlay sharing
   const handleOBSOverlay = (matchId) => {
     const matchUrl = `https://cric-zone.com/overlay/${matchId}`;
-    const tournamentId = matchData?.tournament;
-    const tournUrl = tournamentId ? `https://cric-zone.com/overlay/tournament/${tournamentId}` : null;
-
-    const buttons = [
-      {
-        text: 'Copy this match URL',
-        onPress: () => {
-          Clipboard.setString(matchUrl);
-          Alert.alert('Copied!', 'Overlay URL copied.\n\nIn OBS: add a Browser Source with this URL and a transparent background.');
+    Alert.alert(
+      'OBS Overlay',
+      'Add as a Browser Source in OBS with a transparent background.',
+      [
+        {
+          text: 'Copy URL',
+          onPress: () => {
+            Clipboard.setString(matchUrl);
+            Alert.alert('Copied!', 'Overlay URL copied.\n\nIn OBS: add a Browser Source with this URL and a transparent background.');
+          },
         },
-      },
-    ];
-    if (tournUrl) {
-      buttons.push({
-        text: 'Copy tournament URL (all matches)',
-        onPress: () => {
-          Clipboard.setString(tournUrl);
-          Alert.alert('Copied!', 'Tournament overlay URL copied.\n\nAdd once in OBS — it switches to each new match automatically and shows the result between games.');
+        {
+          text: 'Share',
+          onPress: async () => {
+            try {
+              await Share.share({
+                message: `Live Cricket Score Overlay for OBS:\n\n${matchUrl}\n\nAdd as a Browser Source (transparent background) in OBS.`,
+              });
+            } catch (err) { /* user cancelled */ }
+          },
         },
-      });
-    }
-    buttons.push({
-      text: 'Share',
-      onPress: async () => {
-        try {
-          await Share.share({
-            message: `Live Cricket Score Overlay for OBS:\n\nThis match: ${matchUrl}${tournUrl ? `\n\nWhole tournament: ${tournUrl}` : ''}\n\nAdd as a Browser Source (transparent background) in OBS.`,
-          });
-        } catch (err) { /* user cancelled */ }
-      },
-    });
-    buttons.push({ text: 'Back', style: 'cancel', onPress: () => handleShareOverlay() });
-
-    Alert.alert('OBS Overlay', 'Add as a Browser Source in OBS with a transparent background.', buttons);
+        { text: 'Back', style: 'cancel', onPress: () => handleShareOverlay() },
+      ]
+    );
   };
 
   // Save current state to history before any action
