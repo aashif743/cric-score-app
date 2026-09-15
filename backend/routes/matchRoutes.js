@@ -22,5 +22,7 @@ router.route("/:id")
 router.post("/:id/end-innings", protect, matchController.endInnings);    // End current innings
 router.put("/:id/end", protect, validateEndMatch, matchController.endMatch); // Finalize match
 router.patch("/:id/rename-player", protect, matchController.renamePlayer);   // Rename a player (owner)
+router.patch("/:id/rename-team", protect, matchController.renameMatchTeam);  // Rename a team (owner)
+router.patch("/:id/restore-scorecard", protect, matchController.restoreScorecard); // Undo (owner)
 
 module.exports = router;

@@ -186,11 +186,31 @@ const FullScorecardScreen = ({ navigation, route }) => {
 
   // Owner-only player rename (fixes a mis-typed name after the match).
   const [renameModal, setRenameModal] = useState({
-    visible: false, teamName: '', oldName: '', playerType: 'batsman', teamPlayers: [], takenNames: [],
+    visible: false, teamName: '', oldName: '', playerType: 'batsman', teamPlayers: [],
+    takenNames: [], allowMerge: false, mergeOptions: [],
+  });
+  // Owner-only team rename (fixes a mis-typed team name).
+  const [teamRenameModal, setTeamRenameModal] = useState({ visible: false, oldName: '', otherName: '' });
+  // Undo stack for scorecard edits (rename / merge / team rename).
+  const [undoStack, setUndoStack] = useState([]);
+
+  // Snapshot the mutable scorecard fields so an edit can be undone.
+  const snapshotScorecard = (md) => ({
+    innings1: md?.innings1 ? JSON.parse(JSON.stringify(md.innings1)) : undefined,
+    innings2: md?.innings2 ? JSON.parse(JSON.stringify(md.innings2)) : undefined,
+    teamA: md?.teamA ? { ...md.teamA } : undefined,
+    teamB: md?.teamB ? { ...md.teamB } : undefined,
+    result: md?.result,
+    matchSummary: md?.matchSummary ? JSON.parse(JSON.stringify(md.matchSummary)) : undefined,
   });
   const myId = user?.id || user?._id;
   const matchOwnerId = matchData?.user?._id || matchData?.user;
-  const isOwner = !!(matchOwnerId && myId && String(matchOwnerId) === String(myId));
+  const ownerMatches = !!(matchOwnerId && myId && String(matchOwnerId) === String(myId));
+  // Straight after scoring, the scorecard is handed the local match object which
+  // may not carry the owner id — so if it's absent, allow any signed-in user to
+  // attempt edits. The backend still enforces real ownership on every rename
+  // (403 otherwise), so no one can change someone else's scorecard.
+  const isOwner = ownerMatches || (!!user?.token && !matchOwnerId);
 
   // A team's full line-up across both innings (its batsmen + its bowlers), deduped
   // — used to suggest names when renaming.
@@ -226,25 +246,95 @@ const FullScorecardScreen = ({ navigation, route }) => {
 
   const openRename = (playerType, teamName, currentName) => {
     if (!isOwner || !teamName) return;
+    const others = otherRoleNames(teamName, playerType, currentName);
+    const isBowler = playerType === 'bowler';
     setRenameModal({
       visible: true,
       teamName,
       oldName: currentName || '',
       playerType,
       teamPlayers: teamLineup(teamName),
-      takenNames: otherRoleNames(teamName, playerType, currentName),
+      // Batsmen must stay unique (a batsman can't bat twice), so their other
+      // names are blocked. A bowler can bowl several overs, so their other rows
+      // are offered as MERGE targets instead of being blocked.
+      takenNames: isBowler ? [] : others,
+      allowMerge: isBowler,
+      mergeOptions: isBowler ? others : [],
     });
   };
 
-  const handleRenameSave = async (newName) => {
+  const handleRenameSave = async (newName, opts = {}) => {
     const { teamName, oldName, playerType } = renameModal;
     setRenameModal((m) => ({ ...m, visible: false }));
     const clean = (newName || '').trim();
     if (!clean || clean === oldName) return;
+    const merge = !!opts.merge && playerType === 'bowler';
     const mid = matchData?._id || matchId;
+    const eq = (a) => (a || '').trim().toLowerCase() === (oldName || '').trim().toLowerCase();
+    const eqNew = (a) => (a || '').trim().toLowerCase() === clean.toLowerCase();
+
+    // A bowler can't bowl consecutive overs, so a merge that would give one
+    // bowler two back-to-back overs is impossible — block it up front (the
+    // backend re-checks too). This also caps a bowler at ~half the overs.
+    if (merge) {
+      const overNumsFor = (name) => {
+        const nums = [];
+        [matchData?.innings1, matchData?.innings2].forEach((inn) => {
+          if (!inn || inn.bowlingTeam !== teamName) return;
+          (inn.overHistory || []).forEach((o) => {
+            if ((o.bowlerName || '').trim().toLowerCase() === (name || '').trim().toLowerCase() && o.overNumber != null) {
+              nums.push(o.overNumber);
+            }
+          });
+        });
+        return nums;
+      };
+      const mergedNums = [...overNumsFor(oldName), ...overNumsFor(clean)].sort((a, b) => a - b);
+      for (let i = 1; i < mergedNums.length; i++) {
+        if (mergedNums[i] - mergedNums[i - 1] === 1) {
+          Alert.alert(
+            "Can't merge",
+            `A bowler can't bowl consecutive overs — this would make ${clean} bowl over ${mergedNums[i - 1]} and over ${mergedNums[i]} back-to-back.`,
+          );
+          return;
+        }
+      }
+    }
+
+    const undoSnap = snapshotScorecard(matchData);
     try {
-      await matchService.renamePlayer(mid, teamName, oldName, clean, playerType, user.token);
-      const eq = (a) => (a || '').trim().toLowerCase() === (oldName || '').trim().toLowerCase();
+      await matchService.renamePlayer(mid, teamName, oldName, clean, playerType, user.token, merge);
+      setUndoStack((s) => [...s, undoSnap]);
+
+      if (merge) {
+        // Merge the old bowler row INTO the existing 'clean' bowler row locally.
+        const bpo = matchData?.ballsPerOver || 6;
+        const toBalls = (o) => { const [ov, b] = String(o ?? '0.0').split('.').map(Number); return (ov || 0) * bpo + (b || 0); };
+        const toOvers = (n) => `${Math.floor(n / bpo)}.${n % bpo}`;
+        const mergeInn = (inn) => {
+          if (!inn || inn.bowlingTeam !== teamName) return inn;
+          const arr = inn.bowling || [];
+          const source = arr.find((b) => eq(b.name));
+          const target = arr.find((b) => eqNew(b.name) && !eq(b.name));
+          if (!source || !target) return inn;
+          const mergedTarget = {
+            ...target,
+            overs: toOvers(toBalls(target.overs) + toBalls(source.overs)),
+            runs: (target.runs || 0) + (source.runs || 0),
+            wickets: (target.wickets || 0) + (source.wickets || 0),
+            maidens: (target.maidens || 0) + (source.maidens || 0),
+          };
+          return {
+            ...inn,
+            bowling: arr.filter((b) => b !== source).map((b) => (b === target ? mergedTarget : b)),
+            overHistory: (inn.overHistory || []).map((o) => (eq(o.bowlerName) ? { ...o, bowlerName: clean } : o)),
+          };
+        };
+        setMatchData((prev) => (prev ? { ...prev, innings1: mergeInn(prev.innings1), innings2: mergeInn(prev.innings2) } : prev));
+        return;
+      }
+
+      // Plain rename everywhere the old name appears for this team.
       const updInn = (inn) => {
         if (!inn) return inn;
         const copy = { ...inn };
@@ -261,6 +351,67 @@ const FullScorecardScreen = ({ navigation, route }) => {
       setMatchData((prev) => (prev ? { ...prev, innings1: updInn(prev.innings1), innings2: updInn(prev.innings2) } : prev));
     } catch (e) {
       Alert.alert('Could not rename', e?.response?.data?.error || e?.error || 'Please try again.');
+    }
+  };
+
+  const openTeamRename = (teamName) => {
+    if (!isOwner || !teamName) return;
+    const a = matchData?.teamA?.name;
+    const b = matchData?.teamB?.name;
+    const other = (a || '').trim().toLowerCase() === (teamName || '').trim().toLowerCase() ? b : a;
+    setTeamRenameModal({ visible: true, oldName: teamName, otherName: other || '' });
+  };
+
+  const handleTeamRenameSave = async (newName) => {
+    const { oldName } = teamRenameModal;
+    setTeamRenameModal((m) => ({ ...m, visible: false }));
+    const clean = (newName || '').trim();
+    if (!clean || clean === oldName) return;
+    const mid = matchData?._id || matchId;
+    const eq = (a) => (a || '').trim().toLowerCase() === (oldName || '').trim().toLowerCase();
+    const short = clean.substring(0, 3).toUpperCase();
+    const undoSnap = snapshotScorecard(matchData);
+    try {
+      await matchService.renameMatchTeam(mid, oldName, clean, user.token);
+      setUndoStack((s) => [...s, undoSnap]);
+      setMatchData((prev) => {
+        if (!prev) return prev;
+        const renameTeamObj = (t) => (t && eq(t.name) ? { ...t, name: clean, shortName: short } : t);
+        const renameInn = (inn) => {
+          if (!inn) return inn;
+          const copy = { ...inn };
+          if (eq(inn.battingTeam)) copy.battingTeam = clean;
+          if (eq(inn.bowlingTeam)) copy.bowlingTeam = clean;
+          return copy;
+        };
+        return {
+          ...prev,
+          teamA: renameTeamObj(prev.teamA),
+          teamB: renameTeamObj(prev.teamB),
+          innings1: renameInn(prev.innings1),
+          innings2: renameInn(prev.innings2),
+          result: prev.result && prev.result.includes(oldName) ? prev.result.split(oldName).join(clean) : prev.result,
+          matchSummary: prev.matchSummary && eq(prev.matchSummary.winner)
+            ? { ...prev.matchSummary, winner: clean } : prev.matchSummary,
+        };
+      });
+    } catch (e) {
+      Alert.alert('Could not rename', e?.response?.data?.error || e?.error || 'Please try again.');
+    }
+  };
+
+  // Undo the most recent rename / merge / team-rename.
+  const handleUndo = async () => {
+    if (undoStack.length === 0) return;
+    const snap = undoStack[undoStack.length - 1];
+    setUndoStack((s) => s.slice(0, -1));
+    // Optimistically restore locally, then persist.
+    setMatchData((prev) => (prev ? { ...prev, ...snap } : prev));
+    const mid = matchData?._id || matchId;
+    try {
+      await matchService.restoreScorecard(mid, snap, user.token);
+    } catch (e) {
+      Alert.alert('Undo failed', e?.response?.data?.error || e?.error || 'Please try again.');
     }
   };
 
@@ -864,9 +1015,22 @@ const FullScorecardScreen = ({ navigation, route }) => {
                 {(innings.battingTeam || innings.teamName || teamName).charAt(0)}
               </Text>
             </View>
-            <Text style={styles.inningsTeamName}>
-              {innings.battingTeam || innings.teamName || teamName}
-            </Text>
+            {isOwner ? (
+              <TouchableOpacity
+                onPress={() => openTeamRename(innings.battingTeam || innings.teamName || teamName)}
+                activeOpacity={0.6}
+                style={styles.editableTeamRow}
+              >
+                <Text style={[styles.inningsTeamName, styles.editablePlayerName]} numberOfLines={1}>
+                  {innings.battingTeam || innings.teamName || teamName}
+                </Text>
+                <Text style={styles.renamePencil}>✎</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.inningsTeamName}>
+                {innings.battingTeam || innings.teamName || teamName}
+              </Text>
+            )}
           </View>
           <View style={styles.inningsScoreContainer}>
             <Text style={styles.inningsScore}>
@@ -889,9 +1053,17 @@ const FullScorecardScreen = ({ navigation, route }) => {
 
         {/* Bowling Section */}
         <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <BallIcon size={18} color={colors.error} />
-            <Text style={styles.sectionLabel}>Bowling</Text>
+          <View style={styles.sectionHeaderRow}>
+            <View style={styles.sectionHeader}>
+              <BallIcon size={18} color={colors.error} />
+              <Text style={styles.sectionLabel}>Bowling</Text>
+            </View>
+            {isOwner && undoStack.length > 0 ? (
+              <TouchableOpacity style={styles.undoButton} onPress={handleUndo} activeOpacity={0.7}>
+                <Text style={styles.undoIcon}>↶</Text>
+                <Text style={styles.undoText}>Undo</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
           {renderBowlingTable(innings.bowling, innings.bowlingTeam)}
         </View>
@@ -1612,8 +1784,22 @@ const FullScorecardScreen = ({ navigation, route }) => {
         prioritySuggestions={renameModal.teamPlayers}
         priorityLabel={renameModal.teamName ? `${renameModal.teamName} players` : 'Team players'}
         takenNames={renameModal.takenNames}
+        allowMerge={renameModal.allowMerge}
+        mergeOptions={renameModal.mergeOptions}
         onSave={handleRenameSave}
         onClose={() => setRenameModal((m) => ({ ...m, visible: false }))}
+      />
+
+      {/* Owner-only: rename a team */}
+      <PlayerNameEditModal
+        visible={teamRenameModal.visible}
+        initialValue={teamRenameModal.oldName}
+        title="Rename team"
+        placeholder="Enter team name"
+        type="team"
+        takenNames={teamRenameModal.otherName ? [teamRenameModal.otherName] : []}
+        onSave={handleTeamRenameSave}
+        onClose={() => setTeamRenameModal((m) => ({ ...m, visible: false }))}
       />
     </SafeAreaView>
   );
@@ -2147,6 +2333,25 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 8,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  undoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#eef2ff',
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 9,
+    marginBottom: 12,
+  },
+  undoIcon: { fontSize: 15, fontWeight: '900', color: colors.primary, marginTop: -1 },
+  undoText: { fontSize: 13, fontWeight: '800', color: colors.primary },
   sectionLabel: {
     fontSize: 16,
     fontWeight: '700',
@@ -2196,7 +2401,8 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     textDecorationColor: '#cbd5e1',
   },
-  renamePencil: { fontSize: 11, color: '#94a3b8' },
+  renamePencil: { fontSize: 12, color: colors.primary, fontWeight: '700' },
+  editableTeamRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   playerStatus: {
     fontSize: 11,
     color: colors.textMuted,

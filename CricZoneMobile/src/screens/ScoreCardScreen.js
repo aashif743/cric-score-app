@@ -221,6 +221,11 @@ const ScoreCardScreen = ({ navigation, route }) => {
   // shown after the new batsman is chosen (see handleStrikerSelection).
   const pendingOverCompleteRef = useRef(null);
 
+  // The current bowler's stats at the START of the current over. Lets a mid-over
+  // bowler change move exactly THIS over's balls/runs/wickets to the correct
+  // bowler when the scorer picked the wrong one — nothing ball-by-ball is erased.
+  const bowlerOverStartRef = useRef(null);
+
   // Single point that every scoring path calls right after setCurrentOverBalls
   // so the mirror always reflects the latest ball without waiting for React.
   const recordBallInCurrentOver = (ballDisplay, runDelta = 0, isWicket = false) => {
@@ -297,6 +302,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [showByeModal, setShowByeModal] = useState(false);
   const [showMoreRunsModal, setShowMoreRunsModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  // Collapsible team-player lists in the settings sheet (hidden by default so
+  // both teams' players aren't dumped on screen at once).
+  const [teamAPlayersOpen, setTeamAPlayersOpen] = useState(false);
+  const [teamBPlayersOpen, setTeamBPlayersOpen] = useState(false);
 
   // Selected values in modals
   const [selectedRuns, setSelectedRuns] = useState(0);
@@ -555,10 +564,19 @@ const ScoreCardScreen = ({ navigation, route }) => {
         // Restore bowlers
         if (savedInnings.bowling && savedInnings.bowling.length > 0) {
           setAllBowlers(savedInnings.bowling);
-          if (savedState.currentBowler) {
-            setCurrentBowler(savedState.currentBowler);
-          } else {
-            setCurrentBowler(savedInnings.bowling[0]);
+          const restoredBowler = savedState.currentBowler || savedInnings.bowling[0];
+          setCurrentBowler(restoredBowler);
+          // Seed the over-start snapshot from the restored figures. If we resume
+          // mid-over we can't know this over's split, so snapshot = current
+          // (a reassign then just switches the bowler forward — never corrupts).
+          if (restoredBowler) {
+            const [ov, b] = String(restoredBowler.overs ?? '0.0').split('.').map(Number);
+            bowlerOverStartRef.current = {
+              id: restoredBowler.id,
+              runs: restoredBowler.runs || 0,
+              wickets: restoredBowler.wickets || 0,
+              absBalls: (ov || 0) * settings.ballsPerOver + (b || 0),
+            };
           }
         }
 
@@ -2989,25 +3007,113 @@ const ScoreCardScreen = ({ navigation, route }) => {
   };
 
   // Change bowler
-  const handleChangeBowler = (bowler) => {
-    if (currentOverBalls.length > 0 && currentOverBalls.length < settings.ballsPerOver) {
-      Alert.alert('Cannot Change', 'Complete the current over first');
-      return;
+  // Snapshot the current bowler's stats at the START of every over (when the
+  // over-ball list is empty). Runs on the initial ball selection and each time a
+  // new over begins, so a mid-over reassign knows exactly what this over added.
+  useEffect(() => {
+    if (currentOverBalls.length === 0) {
+      const [ov, b] = String(currentBowler.overs ?? '0.0').split('.').map(Number);
+      bowlerOverStartRef.current = {
+        id: currentBowler.id,
+        runs: currentBowler.runs || 0,
+        wickets: currentBowler.wickets || 0,
+        absBalls: (ov || 0) * settings.ballsPerOver + (b || 0),
+      };
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentOverBalls.length, currentBowler.id, currentBowler.runs, currentBowler.wickets, currentBowler.overs]);
 
-    // Prevent same bowler from bowling consecutive overs
+  // Move the balls already bowled in the CURRENT (in-progress) over from the
+  // mistakenly-selected bowler to the correct one. The ball-by-ball log is
+  // untouched; only the two bowlers' aggregate figures shift by this over's
+  // contribution, and the correct bowler takes over the rest of the over.
+  const reassignCurrentOver = (newBowler) => {
+    const bpo = settings.ballsPerOver;
+    const toBalls = (o) => {
+      const [ov, b] = String(o ?? '0.0').split('.').map(Number);
+      return (ov || 0) * bpo + (b || 0);
+    };
+    const toOvers = (n) => `${Math.floor(n / bpo)}.${n % bpo}`;
+
+    const wrong = currentBowler;
+    const snap = bowlerOverStartRef.current;
+    const wrongAbsNow = toBalls(wrong.overs);
+    // This over's contribution = current stats minus the over-start snapshot. If
+    // the snapshot is missing/mismatched (e.g. reassign right after a mid-over
+    // resume), fall back to moving only this over's balls, leaving figures safe.
+    const startAbs = snap && snap.id === wrong.id ? snap.absBalls : Math.floor(wrongAbsNow / bpo) * bpo;
+    const startRuns = snap && snap.id === wrong.id ? snap.runs : wrong.runs;
+    const startWkts = snap && snap.id === wrong.id ? snap.wickets : wrong.wickets;
+
+    const deltaBalls = Math.max(0, wrongAbsNow - startAbs);
+    const deltaRuns = Math.max(0, (wrong.runs || 0) - startRuns);
+    const deltaWkts = Math.max(0, (wrong.wickets || 0) - startWkts);
+
+    saveToHistory(`Reassign over to ${newBowler.name}`);
+
+    const wrongUpdated = {
+      ...wrong,
+      overs: toOvers(wrongAbsNow - deltaBalls),
+      runs: (wrong.runs || 0) - deltaRuns,
+      wickets: (wrong.wickets || 0) - deltaWkts,
+    };
+
+    const rightBase = allBowlers.find(b => b.id === newBowler.id) || newBowler;
+    const rightUpdated = {
+      ...rightBase,
+      overs: toOvers(toBalls(rightBase.overs) + deltaBalls),
+      runs: (rightBase.runs || 0) + deltaRuns,
+      wickets: (rightBase.wickets || 0) + deltaWkts,
+    };
+
+    setAllBowlers(prev => prev.map(b =>
+      b.id === wrong.id ? wrongUpdated : (b.id === newBowler.id ? rightUpdated : b)
+    ));
+    setCurrentBowler(rightUpdated);
+
+    // New over-start snapshot for the correct bowler (their figures BEFORE this
+    // over) so a further reassign this over still computes the right delta.
+    bowlerOverStartRef.current = {
+      id: rightUpdated.id,
+      runs: rightBase.runs || 0,
+      wickets: rightBase.wickets || 0,
+      absBalls: toBalls(rightBase.overs),
+    };
+
+    setShowChangeBowlerModal(false);
+  };
+
+  const handleChangeBowler = (bowler) => {
+    // Previous over's bowler can't bowl consecutive overs.
     if (bowler.id === previousBowlerId) {
       Alert.alert('Cannot Select', 'This bowler bowled the previous over. Select a different bowler.');
       return;
     }
+    // Same bowler — nothing to change.
+    if (bowler.id === currentBowler.id) {
+      setShowChangeBowlerModal(false);
+      return;
+    }
 
-    // Save state before action for undo
+    // Mid-over: the scorer realised the wrong bowler was selected after marking
+    // some balls. Reassign THIS over to the correct bowler (no data is erased).
+    if (currentOverBalls.length > 0) {
+      const n = currentOverBalls.length;
+      Alert.alert(
+        'Change this over’s bowler?',
+        `Move the ${n} ball${n === 1 ? '' : 's'} already bowled this over from ${currentBowler.name} to ${bowler.name}? The ball-by-ball record stays intact.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Change Bowler', onPress: () => reassignCurrentOver(bowler) },
+        ],
+      );
+      return;
+    }
+
+    // Over boundary: normal bowler change — their spell continues from prior stats.
     saveToHistory(`Change Bowler to ${bowler.name}`);
-
-    // Get the bowler's current stats from allBowlers (spell continues)
     const bowlerWithStats = allBowlers.find(b => b.id === bowler.id) || bowler;
     setCurrentBowler({ ...bowlerWithStats });
-
     setShowChangeBowlerModal(false);
   };
 
@@ -3922,113 +4028,60 @@ const ScoreCardScreen = ({ navigation, route }) => {
           },
         ]}
       >
-        {/* Line 1: End Innings (full width) */}
-        <TouchableOpacity
-          style={styles.endInningsButton}
-          onPress={() => setShowEndInningsModal(true)}
-        >
-          <Text style={styles.endInningsText}>End Innings</Text>
-        </TouchableOpacity>
+        {/* Unified scoring keypad — every control in one panel, cells separated
+            by hairline dividers (no gaps). Colour-coded text keeps it readable
+            while staying clean and modern. */}
+        <View style={styles.keypadPanel}>
+          {/* End Innings (full width) */}
+          <TouchableOpacity
+            style={[styles.keypadFull, styles.keypadRowDivider]}
+            onPress={() => setShowEndInningsModal(true)}
+            activeOpacity={0.6}
+          >
+            <Text style={styles.keypadEndText}>End Innings</Text>
+          </TouchableOpacity>
 
-        {/* Line 2: Retire, Change Striker */}
-        <View style={styles.actionButtonsRow}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => setShowRetireModal(true)}
-          >
-            <Text style={styles.actionButtonText}>Retire</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleChangeStriker}
-            disabled={isSwapping}
-          >
-            <Text style={styles.actionButtonText}>Change Striker</Text>
-          </TouchableOpacity>
-        </View>
+          {/* Retire | Change Striker */}
+          <View style={[styles.keypadRow, styles.keypadRowDivider]}>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => setShowRetireModal(true)} activeOpacity={0.6}>
+              <Text style={styles.keypadActionText}>Retire</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadCell} onPress={handleChangeStriker} disabled={isSwapping} activeOpacity={0.6}>
+              <Text style={styles.keypadActionText}>Change Striker</Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Line 3: WD, NB, BYE, UNDO (same size) */}
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={[styles.gridButton, styles.wideButton]}
-            onPress={() => setShowWideModal(true)}
-          >
-            <Text style={[styles.gridButtonText, styles.wideButtonText]}>WD</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.gridButton, styles.noballButton]}
-            onPress={() => setShowNoBallModal(true)}
-          >
-            <Text style={[styles.gridButtonText, styles.noballButtonText]}>NB</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.gridButton, styles.byeButton]}
-            onPress={() => setShowByeModal(true)}
-          >
-            <Text style={[styles.gridButtonText, styles.byeButtonText]}>BYE</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.gridButton, styles.undoButton]}
-            onPress={handleUndo}
-          >
-            <Text style={[styles.gridButtonText, styles.undoButtonText]}>UNDO</Text>
-          </TouchableOpacity>
-        </View>
+          {/* WD | NB | BYE | UNDO */}
+          <View style={[styles.keypadRow, styles.keypadRowDivider]}>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider, styles.cellExtra]} onPress={() => setShowWideModal(true)} activeOpacity={0.6}>
+              <Text style={styles.textExtra}>WD</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider, styles.cellExtra]} onPress={() => setShowNoBallModal(true)} activeOpacity={0.6}>
+              <Text style={styles.textExtra}>NB</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider, styles.cellBye]} onPress={() => setShowByeModal(true)} activeOpacity={0.6}>
+              <Text style={styles.textBye}>BYE</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.keypadCell, styles.cellUndo]} onPress={handleUndo} activeOpacity={0.6}>
+              <Text style={styles.textUndo}>UNDO</Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Line 3: 0, 1, 2, (5,7..) (same size) */}
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={styles.gridButton}
-            onPress={() => handleRuns(0)}
-          >
-            <Text style={styles.gridButtonText}>0</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.gridButton}
-            onPress={() => handleRuns(1)}
-          >
-            <Text style={styles.gridButtonText}>1</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.gridButton}
-            onPress={() => handleRuns(2)}
-          >
-            <Text style={styles.gridButtonText}>2</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.gridButton}
-            onPress={() => setShowMoreRunsModal(true)}
-          >
-            <Text style={styles.gridButtonText}>5,7..</Text>
-          </TouchableOpacity>
-        </View>
+          {/* 0 | 1 | 2 | 5,7.. */}
+          <View style={[styles.keypadRow, styles.keypadRowDivider]}>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(0)} activeOpacity={0.6}><Text style={styles.keypadNumText}>0</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(1)} activeOpacity={0.6}><Text style={styles.keypadNumText}>1</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(2)} activeOpacity={0.6}><Text style={styles.keypadNumText}>2</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.keypadCell} onPress={() => setShowMoreRunsModal(true)} activeOpacity={0.6}><Text style={styles.keypadNumText}>5,7..</Text></TouchableOpacity>
+          </View>
 
-        {/* Line 4: 3, 4, 6, OUT (same size) */}
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={styles.gridButton}
-            onPress={() => handleRuns(3)}
-          >
-            <Text style={styles.gridButtonText}>3</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.gridButton}
-            onPress={() => handleRuns(4)}
-          >
-            <Text style={styles.gridButtonText}>4</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.gridButton}
-            onPress={() => handleRuns(6)}
-          >
-            <Text style={styles.gridButtonText}>6</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.gridButton, styles.outButton]}
-            onPress={() => setShowWicketModal(true)}
-          >
-            <Text style={[styles.gridButtonText, styles.outButtonText]}>OUT</Text>
-          </TouchableOpacity>
+          {/* 3 | 4 | 6 | OUT (last row — no bottom divider) */}
+          <View style={styles.keypadRow}>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(3)} activeOpacity={0.6}><Text style={styles.keypadNumText}>3</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(4)} activeOpacity={0.6}><Text style={styles.keypadNumText}>4</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(6)} activeOpacity={0.6}><Text style={styles.keypadNumText}>6</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.keypadCell, styles.cellOut]} onPress={() => setShowWicketModal(true)} activeOpacity={0.6}><Text style={styles.textOut}>OUT</Text></TouchableOpacity>
+          </View>
         </View>
       </View>
       )}
@@ -4362,11 +4415,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Select Bowler</Text>
-            {previousBowlerId && (
+            {currentOverBalls.length > 0 ? (
+              <Text style={styles.bowlerModalHint}>
+                Picked the wrong bowler? Choose the correct one — this over’s balls move across, nothing is erased.
+              </Text>
+            ) : previousBowlerId ? (
               <Text style={styles.bowlerModalHint}>
                 Previous over's bowler cannot bowl consecutive overs
               </Text>
-            )}
+            ) : null}
             <ScrollView style={styles.bowlerList} nestedScrollEnabled={true}>
               {allBowlers.map((bowler) => {
                 const isPreviousBowler = bowler.id === previousBowlerId;
@@ -5675,13 +5732,88 @@ const ScoreCardScreen = ({ navigation, route }) => {
                 </View>
               </View>
 
+              {/* Match Format — fix a wrong overs / balls setting after the match
+                  has started. 1st innings only; never below overs already bowled;
+                  balls-per-over locks after the first ball; fully locked in the
+                  2nd innings and once the innings is over. */}
+              {match.innings === 1 && (
+                <View style={styles.settingsSection}>
+                  <Text style={styles.settingsSectionTitle}>Match Format</Text>
+
+                  <View style={styles.settingsRow}>
+                    <Text style={styles.settingsLabel}>Total Overs</Text>
+                    <View style={styles.settingsValueControl}>
+                      <TouchableOpacity
+                        style={styles.settingsValueButton}
+                        onPress={() => {
+                          // Can't drop below the overs already bowled: keep at
+                          // least the current over + all completed ones.
+                          const minOvers = Math.floor(match.balls / settings.ballsPerOver) + 1;
+                          setSettings(prev => ({ ...prev, overs: Math.max(minOvers, prev.overs - 1) }));
+                          emitScoreUpdate();
+                        }}
+                      >
+                        <Text style={styles.settingsValueButtonText}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={styles.settingsValue}>{settings.overs}</Text>
+                      <TouchableOpacity
+                        style={styles.settingsValueButton}
+                        onPress={() => {
+                          setSettings(prev => ({ ...prev, overs: Math.min(50, prev.overs + 1) }));
+                          emitScoreUpdate();
+                        }}
+                      >
+                        <Text style={styles.settingsValueButtonText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.settingsRow}>
+                    <Text style={styles.settingsLabel}>Balls per Over</Text>
+                    {match.balls === 0 ? (
+                      <View style={styles.settingsValueControl}>
+                        <TouchableOpacity
+                          style={styles.settingsValueButton}
+                          onPress={() => { setSettings(prev => ({ ...prev, ballsPerOver: Math.max(1, prev.ballsPerOver - 1) })); emitScoreUpdate(); }}
+                        >
+                          <Text style={styles.settingsValueButtonText}>−</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.settingsValue}>{settings.ballsPerOver}</Text>
+                        <TouchableOpacity
+                          style={styles.settingsValueButton}
+                          onPress={() => { setSettings(prev => ({ ...prev, ballsPerOver: Math.min(12, prev.ballsPerOver + 1) })); emitScoreUpdate(); }}
+                        >
+                          <Text style={styles.settingsValueButtonText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={styles.settingsLockedValue}>
+                        <Text style={styles.settingsValue}>{settings.ballsPerOver}</Text>
+                        <Text style={styles.settingsLockedNote}>locked</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.settingsHint}>
+                    Overs can be changed until the innings ends, but not below overs already bowled. Balls per over locks after the first ball.
+                  </Text>
+                </View>
+              )}
+
               {/* Team A Players */}
               <View style={styles.settingsSection}>
-                <View style={styles.settingsSectionTitleRow}>
-                  <Text style={styles.settingsSectionTitle}>{teams.teamA.name} Players</Text>
-                  <Text style={styles.settingsSectionSubtitle}>(Batting Order: 1→{settings.playersPerTeam})</Text>
-                </View>
-                {teams.teamA.playerNames.map((playerName, index) => (
+                <TouchableOpacity
+                  style={styles.settingsSectionTitleRow}
+                  onPress={() => setTeamAPlayersOpen(v => !v)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.collapsibleTitleLeft}>
+                    <Text style={styles.settingsSectionTitle}>{teams.teamA.name} Players</Text>
+                    <Text style={styles.settingsSectionSubtitle}>({settings.playersPerTeam})</Text>
+                  </View>
+                  <Text style={styles.collapsibleChevron}>{teamAPlayersOpen ? '▾' : '▸'}</Text>
+                </TouchableOpacity>
+                {teamAPlayersOpen && teams.teamA.playerNames.map((playerName, index) => (
                   <View key={`teamA-${index}`} style={[styles.playerNameRow, { zIndex: 1000 - index }]}>
                     <View style={styles.playerNumberBadge}>
                       <Text style={styles.playerNumberText}>{index + 1}</Text>
@@ -5712,11 +5844,18 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
               {/* Team B Players */}
               <View style={styles.settingsSection}>
-                <View style={styles.settingsSectionTitleRow}>
-                  <Text style={styles.settingsSectionTitle}>{teams.teamB.name} Players</Text>
-                  <Text style={styles.settingsSectionSubtitle}>(Bowling Order: {settings.playersPerTeam}→1)</Text>
-                </View>
-                {teams.teamB.playerNames.map((playerName, index) => (
+                <TouchableOpacity
+                  style={styles.settingsSectionTitleRow}
+                  onPress={() => setTeamBPlayersOpen(v => !v)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.collapsibleTitleLeft}>
+                    <Text style={styles.settingsSectionTitle}>{teams.teamB.name} Players</Text>
+                    <Text style={styles.settingsSectionSubtitle}>({settings.playersPerTeam})</Text>
+                  </View>
+                  <Text style={styles.collapsibleChevron}>{teamBPlayersOpen ? '▾' : '▸'}</Text>
+                </TouchableOpacity>
+                {teamBPlayersOpen && teams.teamB.playerNames.map((playerName, index) => (
                   <View key={`teamB-${index}`} style={[styles.playerNameRow, { zIndex: 1000 - index }]}>
                     <View style={styles.playerNumberBadge}>
                       <Text style={styles.playerNumberText}>{index + 1}</Text>
@@ -6518,10 +6657,66 @@ const styles = StyleSheet.create({
     paddingHorizontal: isSmallScreen ? 8 : 12,
     paddingTop: isSmallScreen ? 6 : 10,
     paddingBottom: Platform.OS === 'ios' ? (isSmallScreen ? 20 : 30) : (isSmallScreen ? 8 : 12),
-    gap: isSmallScreen ? 5 : 8,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+
+  // Unified scoring keypad (one panel, hairline dividers, no gaps)
+  keypadPanel: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#cbd5e1',
+    ...shadows.sm,
+  },
+  keypadRow: {
+    flexDirection: 'row',
+  },
+  keypadRowDivider: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#cbd5e1',
+  },
+  keypadCell: {
+    flex: 1,
+    minHeight: isSmallScreen ? 46 : 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  keypadCellDivider: {
+    borderRightWidth: 2,
+    borderRightColor: '#cbd5e1',
+  },
+  keypadFull: {
+    minHeight: isSmallScreen ? 44 : 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  keypadNumText: {
+    fontSize: responsiveFontSize.lg,
+    fontWeight: fontWeights.bold,
+    color: '#0f172a',
+  },
+  keypadActionText: {
+    fontSize: isSmallScreen ? fontSizes.sm : fontSizes.md,
+    fontWeight: fontWeights.semibold,
+    color: '#475569',
+  },
+  keypadEndText: {
+    fontSize: isSmallScreen ? fontSizes.md : fontSizes.lg,
+    fontWeight: fontWeights.bold,
+    color: '#0f172a',
+  },
+  cellExtra: { backgroundColor: '#fde68a' },
+  textExtra: { color: '#92400e', fontWeight: '800', fontSize: responsiveFontSize.md },
+  cellBye: { backgroundColor: '#ddd6fe' },
+  textBye: { color: '#6d28d9', fontWeight: '800', fontSize: responsiveFontSize.md },
+  cellUndo: { backgroundColor: '#e2e8f0' },
+  textUndo: { color: '#334155', fontWeight: '800', fontSize: responsiveFontSize.md },
+  cellOut: { backgroundColor: '#fecaca' },
+  textOut: { color: '#b91c1c', fontWeight: '800', fontSize: responsiveFontSize.md },
   // End Innings Button (full width)
   endInningsButton: {
     backgroundColor: colors.surface,
@@ -8440,6 +8635,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
+  },
+  collapsibleTitleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  collapsibleChevron: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  settingsHint: {
+    fontSize: fontSizes.xs,
+    color: colors.textMuted,
+    lineHeight: 17,
+    marginTop: spacing.xs,
+  },
+  settingsLockedValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  settingsLockedNote: {
+    fontSize: fontSizes.xs,
+    color: colors.textMuted,
+    fontStyle: 'italic',
   },
   settingsSectionTitle: {
     fontSize: fontSizes.md,

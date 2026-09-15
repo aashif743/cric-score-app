@@ -350,9 +350,18 @@ exports.getOverlayData = async (req, res) => {
       return parseInt(parts[0] || 0) + (parseInt(parts[1] || 0) / 6);
     };
 
-    // Calculate current run rate
-    const currentOvers = parseOvers(currentInnings?.overs);
-    const currentRuns = currentInnings?.runs || 0;
+    // Prefer the live currentState the scorer persists EVERY ball — it's the
+    // freshest and unambiguous source. The saved innings arrays don't carry the
+    // on-strike flag or the in-progress over, so batsmen / bowler / this-over
+    // would otherwise look stale or wrong on the TV board.
+    const cs = match.currentState || {};
+    const effRuns = (cs.runs != null) ? cs.runs : (currentInnings?.runs || 0);
+    const effWickets = (cs.wickets != null) ? cs.wickets : (currentInnings?.wickets || 0);
+    const effOvers = cs.overs || currentInnings?.overs || "0.0";
+
+    // Calculate current run rate from the live figures.
+    const currentOvers = parseOvers(effOvers);
+    const currentRuns = effRuns;
     const currentRunRate = currentOvers > 0 ? (currentRuns / currentOvers).toFixed(2) : "0.00";
 
     // Calculate required info for second innings
@@ -361,15 +370,43 @@ exports.getOverlayData = async (req, res) => {
     let ballsRemaining = null;
     if (match.innings === 2 && match.target) {
       requiredRuns = match.target - currentRuns;
-      const totalBalls = match.totalOvers * (match.ballsPerOver || 6);
-      const currentBalls = Math.floor(currentOvers) * (match.ballsPerOver || 6) +
-                          Math.round((currentOvers % 1) * 6);
+      const bpo = match.ballsPerOver || 6;
+      const totalBalls = match.totalOvers * bpo;
+      const currentBalls = (cs.balls != null)
+        ? cs.balls
+        : Math.floor(currentOvers) * bpo + Math.round((currentOvers % 1) * 6);
       ballsRemaining = totalBalls - currentBalls;
-      const oversRemaining = ballsRemaining / (match.ballsPerOver || 6);
+      const oversRemaining = ballsRemaining / bpo;
       if (oversRemaining > 0 && requiredRuns > 0) {
         requiredRunRate = (requiredRuns / oversRemaining).toFixed(2);
       }
     }
+
+    // Live batsmen / bowler / this-over from currentState (fallback to innings).
+    const mkBat = (b) => b ? {
+      name: b.name || "Batsman",
+      runs: b.runs || 0,
+      balls: b.balls || 0,
+      fours: b.fours || 0,
+      sixes: b.sixes || 0,
+      strikeRate: (b.balls > 0) ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0",
+    } : null;
+    const strikerObj = cs.striker ? mkBat(cs.striker)
+      : mkBat(activeBatsmen.find(b => b.onStrike) || activeBatsmen[0]);
+    const nonStrikerObj = cs.nonStriker ? mkBat(cs.nonStriker)
+      : mkBat(activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1]);
+    const bowlerSrc = cs.currentBowler || currentBowler;
+    const bowlerObj = bowlerSrc ? {
+      name: bowlerSrc.name || "Bowler",
+      overs: bowlerSrc.overs || "0.0",
+      maidens: bowlerSrc.maidens || 0,
+      runs: bowlerSrc.runs || 0,
+      wickets: bowlerSrc.wickets || 0,
+      economy: (() => { const o = parseOvers(bowlerSrc.overs); return o > 0 ? (bowlerSrc.runs / o).toFixed(2) : "0.00"; })(),
+    } : null;
+    const liveThisOver = (Array.isArray(cs.currentOverBalls) && cs.currentOverBalls.length)
+      ? cs.currentOverBalls
+      : (currentInnings?.thisOver || []);
 
     // Get extras
     const extras = currentInnings?.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, total: 0 };
@@ -406,10 +443,10 @@ exports.getOverlayData = async (req, res) => {
       battingTeam: currentInnings?.battingTeam || match.teamA?.name,
       bowlingTeam: match.innings === 1 ? match.teamB?.name : match.teamA?.name,
 
-      // Score
-      runs: currentRuns,
-      wickets: currentInnings?.wickets || 0,
-      overs: currentInnings?.overs || "0.0",
+      // Score (live from currentState)
+      runs: effRuns,
+      wickets: effWickets,
+      overs: effOvers,
       runRate: currentRunRate,
 
       // First innings summary (for 2nd innings display)
@@ -426,46 +463,15 @@ exports.getOverlayData = async (req, res) => {
       requiredRunRate,
       ballsRemaining,
 
-      // Current batsmen (striker first)
-      striker: activeBatsmen.find(b => b.onStrike) || activeBatsmen[0] ? {
-        name: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.name || "Batsman",
-        runs: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.runs || 0,
-        balls: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.balls || 0,
-        fours: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.fours || 0,
-        sixes: (activeBatsmen.find(b => b.onStrike) || activeBatsmen[0])?.sixes || 0,
-        strikeRate: (() => {
-          const b = activeBatsmen.find(b => b.onStrike) || activeBatsmen[0];
-          return b && b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0";
-        })(),
-      } : null,
+      // Current batsmen (striker first) — live from currentState
+      striker: strikerObj,
+      nonStriker: nonStrikerObj,
 
-      nonStriker: activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1] ? {
-        name: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.name || "Batsman",
-        runs: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.runs || 0,
-        balls: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.balls || 0,
-        fours: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.fours || 0,
-        sixes: (activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1])?.sixes || 0,
-        strikeRate: (() => {
-          const b = activeBatsmen.find(b => !b.onStrike) || activeBatsmen[1];
-          return b && b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0";
-        })(),
-      } : null,
+      // Current bowler with spell — live from currentState
+      bowler: bowlerObj,
 
-      // Current bowler with spell
-      bowler: currentBowler ? {
-        name: currentBowler.name,
-        overs: currentBowler.overs || "0.0",
-        maidens: currentBowler.maidens || 0,
-        runs: currentBowler.runs || 0,
-        wickets: currentBowler.wickets || 0,
-        economy: (() => {
-          const o = parseOvers(currentBowler.overs);
-          return o > 0 ? (currentBowler.runs / o).toFixed(2) : "0.00";
-        })(),
-      } : null,
-
-      // This over
-      thisOver: thisOver.slice(-6), // Last 6 balls
+      // This over (in-progress) — includes extras, so keep the last several
+      thisOver: liveThisOver.slice(-8),
 
       // Extras
       extras: {

@@ -67,10 +67,26 @@ const matchService = {
     }
   },
 
-  // Rename a player across a completed match's scorecard (owner only).
-  renamePlayer: async (matchId, teamName, oldName, newName, playerType, token) => {
+  // Rename a player across a completed match's scorecard (owner only). Pass
+  // merge=true (bowlers only) to combine this row into an existing bowler of the
+  // same name instead of rejecting the duplicate.
+  renamePlayer: async (matchId, teamName, oldName, newName, playerType, token, merge = false) => {
     const config = { headers: { Authorization: `Bearer ${token}` } };
-    const response = await API.patch(`/matches/${matchId}/rename-player`, { teamName, oldName, newName, playerType }, config);
+    const response = await API.patch(`/matches/${matchId}/rename-player`, { teamName, oldName, newName, playerType, merge }, config);
+    return response.data;
+  },
+
+  // Rename a team across a match's scorecard (owner only).
+  renameMatchTeam: async (matchId, oldName, newName, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(`/matches/${matchId}/rename-team`, { oldName, newName }, config);
+    return response.data;
+  },
+
+  // Restore a prior scorecard snapshot (owner only) — powers Undo.
+  restoreScorecard: async (matchId, snapshot, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(`/matches/${matchId}/restore-scorecard`, snapshot, config);
     return response.data;
   },
 

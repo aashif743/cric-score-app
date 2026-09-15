@@ -954,6 +954,10 @@ exports.renamePlayer = async (req, res) => {
     const oldName = (req.body?.oldName || '').trim();
     const newName = (req.body?.newName || '').trim();
     const playerType = req.body?.playerType === 'bowler' ? 'bowler' : 'batsman';
+    // merge=true means "this row is actually an existing bowler" → combine the
+    // two bowler rows instead of rejecting the duplicate name. Only valid for
+    // bowlers (a batsman can't bat twice, so their names stay unique).
+    const merge = req.body?.merge === true && playerType === 'bowler';
     if (!teamName || !oldName || !newName) {
       return res.status(400).json({ success: false, error: "teamName, oldName and newName are required" });
     }
@@ -982,6 +986,65 @@ exports.renamePlayer = async (req, res) => {
         : (inn.battingTeam === teamName ? (inn.batting || []) : []);
       return roleArr.some((p) => eq(p?.name, newName) && !eq(p?.name, oldName));
     });
+
+    // A name clash is normally rejected. For a bowler MERGE, it's expected: the
+    // scorer is saying "these two rows are the same person" → combine their
+    // figures, reattribute the over history, and drop the now-duplicate row.
+    if (clash && merge) {
+      const bpo = match.ballsPerOver || 6;
+      const oversToBalls = (o) => {
+        const [ov, b] = String(o ?? '0.0').split('.').map(Number);
+        return (ov || 0) * bpo + (b || 0);
+      };
+      const ballsToOvers = (n) => `${Math.floor(n / bpo)}.${n % bpo}`;
+
+      // A bowler can't bowl consecutive overs — so a merge that would give the
+      // same bowler two back-to-back overs is a real-world impossibility. Reject
+      // it (this also caps a bowler at ~half the innings' overs).
+      const overNumsFor = (name) => {
+        const nums = [];
+        innings.forEach((inn) => {
+          if (inn.bowlingTeam !== teamName) return;
+          (inn.overHistory || []).forEach((o) => {
+            if (eq(o.bowlerName, name) && o.overNumber != null) nums.push(o.overNumber);
+          });
+        });
+        return nums;
+      };
+      const mergedNums = [...overNumsFor(oldName), ...overNumsFor(newName)].sort((a, b) => a - b);
+      for (let i = 1; i < mergedNums.length; i++) {
+        if (mergedNums[i] - mergedNums[i - 1] === 1) {
+          return res.status(409).json({
+            success: false,
+            error: `A bowler can't bowl consecutive overs — this would make ${newName} bowl over ${mergedNums[i - 1]} and over ${mergedNums[i]} back-to-back.`,
+          });
+        }
+      }
+
+      let merged = false;
+      innings.forEach((inn) => {
+        if (inn.bowlingTeam !== teamName) return;
+        const arr = inn.bowling || [];
+        const target = arr.find((b) => eq(b.name, newName) && !eq(b.name, oldName));
+        const source = arr.find((b) => eq(b.name, oldName));
+        if (!target || !source) return;
+        target.overs = ballsToOvers(oversToBalls(target.overs) + oversToBalls(source.overs));
+        target.runs = (target.runs || 0) + (source.runs || 0);
+        target.wickets = (target.wickets || 0) + (source.wickets || 0);
+        target.maidens = (target.maidens || 0) + (source.maidens || 0);
+        (inn.overHistory || []).forEach((o) => { if (eq(o.bowlerName, oldName)) o.bowlerName = newName; });
+        inn.bowling = arr.filter((b) => b !== source);
+        merged = true;
+      });
+      if (!merged) {
+        return res.status(404).json({ success: false, error: "Couldn't find both bowlers to merge." });
+      }
+      match.markModified('innings1');
+      match.markModified('innings2');
+      await match.save();
+      return res.json({ success: true, merged: true, data: { teamName, oldName, newName } });
+    }
+
     if (clash) {
       return res.status(409).json({ success: false, error: "That name is already used by another player in this team." });
     }
@@ -1012,6 +1075,109 @@ exports.renamePlayer = async (req, res) => {
   }
 };
 
+// Rename a TEAM across this match's scorecard (owner only). Updates teamA/teamB,
+// every innings' batting/bowling team, the result string and the winner. Does
+// not touch the tournament — this is a match-level fix for a mis-typed team name.
+exports.renameMatchTeam = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const oldName = (req.body?.oldName || '').trim();
+    const newName = (req.body?.newName || '').trim();
+    if (!oldName || !newName) {
+      return res.status(400).json({ success: false, error: "oldName and newName are required" });
+    }
+
+    const match = await Match.findById(id);
+    if (!match) return res.status(404).json({ success: false, error: "Match not found" });
+
+    // Owner check: the match scorer, or the tournament owner.
+    let isOwner = String(match.user) === req.user.id;
+    if (!isOwner && match.tournament) {
+      const Tournament = require('../models/Tournament');
+      const t = await Tournament.findById(match.tournament).select('user').lean();
+      if (t && String(t.user) === req.user.id) isOwner = true;
+    }
+    if (!isOwner) return res.status(403).json({ success: false, error: "Only the scorer can rename teams." });
+
+    const eq = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+
+    // The other team can't share the new name.
+    const otherName = eq(match.teamA?.name, oldName) ? match.teamB?.name
+      : eq(match.teamB?.name, oldName) ? match.teamA?.name : null;
+    if (otherName && eq(otherName, newName)) {
+      return res.status(409).json({ success: false, error: "Both teams can't have the same name." });
+    }
+
+    const shortOf = (n) => (n || '').substring(0, 3).toUpperCase();
+    let changed = false;
+    ['teamA', 'teamB'].forEach((k) => {
+      if (match[k] && eq(match[k].name, oldName)) {
+        match[k].name = newName;
+        match[k].shortName = shortOf(newName);
+        changed = true;
+      }
+    });
+    [match.innings1, match.innings2].filter(Boolean).forEach((inn) => {
+      if (eq(inn.battingTeam, oldName)) { inn.battingTeam = newName; changed = true; }
+      if (eq(inn.bowlingTeam, oldName)) { inn.bowlingTeam = newName; changed = true; }
+    });
+    if (match.result && match.result.includes(oldName)) {
+      match.result = match.result.split(oldName).join(newName);
+      changed = true;
+    }
+    if (match.matchSummary && eq(match.matchSummary.winner, oldName)) {
+      match.matchSummary.winner = newName;
+      changed = true;
+    }
+    if (!changed) {
+      return res.status(404).json({ success: false, error: "That team wasn't found in this match." });
+    }
+
+    match.markModified('teamA');
+    match.markModified('teamB');
+    match.markModified('innings1');
+    match.markModified('innings2');
+    match.markModified('matchSummary');
+    await match.save();
+    return res.json({ success: true, data: { oldName, newName } });
+  } catch (error) {
+    console.error("Rename team error:", error);
+    res.status(500).json({ success: false, error: "Failed to rename the team." });
+  }
+};
+
+// Restore a prior scorecard snapshot (owner only) — powers the Undo button on
+// the full scorecard, reverting the last rename/merge/team-rename. The client
+// sends the exact fields it captured before the edit; we overwrite just those.
+exports.restoreScorecard = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const match = await Match.findById(id);
+    if (!match) return res.status(404).json({ success: false, error: "Match not found" });
+
+    let isOwner = String(match.user) === req.user.id;
+    if (!isOwner && match.tournament) {
+      const Tournament = require('../models/Tournament');
+      const t = await Tournament.findById(match.tournament).select('user').lean();
+      if (t && String(t.user) === req.user.id) isOwner = true;
+    }
+    if (!isOwner) return res.status(403).json({ success: false, error: "Only the scorer can undo changes." });
+
+    const b = req.body || {};
+    if (b.innings1 !== undefined) { match.innings1 = b.innings1; match.markModified('innings1'); }
+    if (b.innings2 !== undefined) { match.innings2 = b.innings2; match.markModified('innings2'); }
+    if (b.teamA !== undefined) { match.teamA = b.teamA; match.markModified('teamA'); }
+    if (b.teamB !== undefined) { match.teamB = b.teamB; match.markModified('teamB'); }
+    if (b.result !== undefined) match.result = b.result;
+    if (b.matchSummary !== undefined) { match.matchSummary = b.matchSummary; match.markModified('matchSummary'); }
+    await match.save();
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Restore scorecard error:", error);
+    res.status(500).json({ success: false, error: "Failed to undo the change." });
+  }
+};
+
 // Add this new exported function
 exports.deleteAllMatches = async (req, res) => {
   try {
@@ -1032,6 +1198,8 @@ module.exports = {
   endInnings: exports.endInnings,
   endMatch: exports.endMatch,
   renamePlayer: exports.renamePlayer,
+  renameMatchTeam: exports.renameMatchTeam,
+  restoreScorecard: exports.restoreScorecard,
   deleteAllMatches: exports.deleteAllMatches,
   // Exposed so the tournament controller can re-fill knockout slots after the
   // playoff format is changed mid-tournament.

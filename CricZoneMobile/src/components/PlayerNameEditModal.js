@@ -38,6 +38,12 @@ const PlayerNameEditModal = ({
   prioritySuggestions = [], // this team's saved line-up, shown first
   priorityLabel = 'Team players',
   takenNames = [], // names already used by OTHER players in this team (blocked)
+  // Bowlers can bowl multiple overs, so a bowler row may legitimately merge into
+  // an existing bowler. mergeOptions are those existing names; picking one (or
+  // typing it) merges instead of being blocked as a duplicate.
+  allowMerge = false,
+  mergeOptions = [],
+  mergeLabel = 'Same bowler (combine overs)',
 }) => {
   const [value, setValue] = useState(initialValue);
   const [suggestions, setSuggestions] = useState([]);
@@ -47,20 +53,30 @@ const PlayerNameEditModal = ({
   // Names that would collide with another player already in this team — the user
   // may not reuse them (each team member needs a distinct name so stats add up).
   const takenSet = new Set((takenNames || []).map((n) => (n || '').trim().toLowerCase()));
+  const mergeSet = new Set((allowMerge ? (mergeOptions || []) : []).map((n) => (n || '').trim().toLowerCase()));
   const trimmed = value.trim();
   const isDuplicate = trimmed.length > 0 && takenSet.has(trimmed.toLowerCase());
+  // Typed name matches an existing bowler → this will MERGE (not blocked).
+  const isMergeTarget = trimmed.length > 0 && mergeSet.has(trimmed.toLowerCase());
 
   // The team's saved players that match what's typed (prefix match), shown as a
   // labelled section above the normal suggestions. Already-taken names are
   // dropped from every list so a duplicate can't be picked. General suggestions
   // that duplicate a team player are dropped so nothing appears twice.
   const q = isPlaceholderName(value) ? '' : value.trim().toLowerCase();
+  // Existing bowlers this row can merge into (prefix-matched by the query).
+  const mergeMatches = (allowMerge ? (mergeOptions || []) : [])
+    .filter((n) => n && (!q || n.toLowerCase().startsWith(q)))
+    .slice(0, 8);
+  const mergeMatchSet = new Set(mergeMatches.map((n) => n.toLowerCase()));
   const teamMatches = (prioritySuggestions || [])
-    .filter((n) => n && !takenSet.has(n.trim().toLowerCase()) && (!q || n.toLowerCase().startsWith(q)))
+    .filter((n) => n && !takenSet.has(n.trim().toLowerCase()) && !mergeMatchSet.has(n.toLowerCase()) && (!q || n.toLowerCase().startsWith(q)))
     .slice(0, 8);
   const teamSet = new Set(teamMatches.map((n) => n.toLowerCase()));
   const generalSuggestions = suggestions.filter(
-    (s) => !teamSet.has((s.name || '').toLowerCase()) && !takenSet.has((s.name || '').trim().toLowerCase()),
+    (s) => !teamSet.has((s.name || '').toLowerCase())
+      && !takenSet.has((s.name || '').trim().toLowerCase())
+      && !mergeMatchSet.has((s.name || '').toLowerCase()),
   );
 
   // Reset value when modal opens
@@ -133,18 +149,31 @@ const PlayerNameEditModal = ({
     handleSave(suggestion.name);
   };
 
-  // Handle save/done. Blocks a name already used by another team member.
+  // Handle save/done. Blocks a name already used by another team member (unless
+  // it's a bowler merge target, which combines instead).
   const handleSave = (nameToSave = value) => {
     const trimmedName = nameToSave.trim();
-    if (trimmedName && takenSet.has(trimmedName.toLowerCase())) {
-      // Duplicate — keep the modal open so the warning is visible.
+    if (!trimmedName) { onClose(); return; }
+    if (takenSet.has(trimmedName.toLowerCase())) {
+      // Genuine duplicate — keep the modal open so the warning is visible.
       inputRef.current?.focus();
       return;
     }
-    if (trimmedName) {
-      suggestionService.addSuggestion(trimmedName, type);
+    suggestionService.addSuggestion(trimmedName, type);
+    if (allowMerge && mergeSet.has(trimmedName.toLowerCase())) {
+      onSave(trimmedName, { merge: true });
+    } else {
       onSave(trimmedName);
     }
+    onClose();
+  };
+
+  // Pick an existing bowler to merge this row into.
+  const handleSelectMerge = (name) => {
+    const clean = (name || '').trim();
+    if (!clean) return;
+    suggestionService.addSuggestion(clean, type);
+    onSave(clean, { merge: true });
     onClose();
   };
 
@@ -260,8 +289,9 @@ const PlayerNameEditModal = ({
                   </View>
                 )}
 
-                {/* Suggestions — this team's saved line-up first, then general */}
-                {(teamMatches.length > 0 || generalSuggestions.length > 0) && (
+                {/* Suggestions — existing bowlers to merge into first, then the
+                    team line-up, then general suggestions. */}
+                {(mergeMatches.length > 0 || teamMatches.length > 0 || generalSuggestions.length > 0) && (
                   <View style={styles.suggestionsContainer}>
                     <ScrollView
                       style={styles.suggestionsList}
@@ -269,6 +299,26 @@ const PlayerNameEditModal = ({
                       showsVerticalScrollIndicator
                       bounces={false}
                     >
+                      {mergeMatches.length > 0 && (
+                        <>
+                          <View style={styles.sectionHeader}>
+                            <Text style={styles.suggestionsLabel} numberOfLines={1}>{mergeLabel}</Text>
+                            <View style={styles.mergePill}><Text style={styles.mergePillText}>Combines overs</Text></View>
+                          </View>
+                          {mergeMatches.map((name, idx) => (
+                            <TouchableOpacity
+                              key={`merge-${name}-${idx}`}
+                              style={styles.suggestionItem}
+                              onPress={() => handleSelectMerge(name)}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={styles.suggestionText} numberOfLines={1}>{name}</Text>
+                              <View style={styles.mergeBadge}><Text style={styles.mergeBadgeText}>Merge</Text></View>
+                            </TouchableOpacity>
+                          ))}
+                        </>
+                      )}
+
                       {teamMatches.length > 0 && (
                         <>
                           <View style={styles.sectionHeader}>
@@ -452,6 +502,13 @@ const styles = StyleSheet.create({
   savedPillText: { fontSize: 9.5, fontWeight: '800', color: '#1d4ed8', letterSpacing: 0.3 },
   teamBadge: { backgroundColor: '#eff6ff', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginLeft: 8 },
   teamBadgeText: { fontSize: 10, color: '#1d4ed8', fontWeight: '700' },
+  mergePill: {
+    backgroundColor: '#eef2ff', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2,
+    borderWidth: 1, borderColor: '#c7d2fe', marginBottom: 6,
+  },
+  mergePillText: { fontSize: 9.5, fontWeight: '800', color: '#4338ca', letterSpacing: 0.3 },
+  mergeBadge: { backgroundColor: '#eef2ff', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginLeft: 8 },
+  mergeBadgeText: { fontSize: 10, color: '#4338ca', fontWeight: '800' },
   suggestionsList: {
     backgroundColor: '#f8fafc',
     borderRadius: 10,

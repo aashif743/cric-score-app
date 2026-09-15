@@ -450,18 +450,22 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState('');
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (opts = {}) => {
     if (!user?.token || !tournamentId) return;
+    // A silent refetch (e.g. after an in-place team rename/swap) skips the
+    // full-screen spinner so the current view — including the selected group
+    // tab in the points table — isn't unmounted and reset.
+    const silent = opts && opts.silent === true;
     try {
-      setLoading(true); setError('');
+      if (!silent) { setLoading(true); setError(''); }
       const res = await tournamentService.getTournament(tournamentId, user.token);
       setTournament(res.data);
       setMatches(res.data.matches || []);
     } catch (err) {
       console.warn('Fetch league schedule error:', err);
-      setError('Failed to load schedule.');
+      if (!silent) setError('Failed to load schedule.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [user?.token, tournamentId]);
 
@@ -728,7 +732,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
           isOwner={isOwner}
           tournamentId={tournament?._id}
           token={user?.token}
-          onChanged={fetchData}
+          onChanged={() => fetchData({ silent: true })}
         />
       ) : activeView === 'stats' ? (
         statsLoading ? (
