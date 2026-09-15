@@ -248,6 +248,7 @@ const handleResumeMatch = (matchToResume) => {
           <Route path="/tournament/:shareId/match/:matchId" element={<PublicMatchScorecard />} />
           <Route path="/tournament/:shareId/tv" element={<TournamentTVScoreboard />} />
           <Route path="/overlay/:matchId" element={<Overlay />} />
+          <Route path="/tv/tournament/:tournamentId" element={<TournamentTVScoreboard />} />
           <Route path="/tv/:matchId" element={<TVScoreboard />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<TermsOfService />} />

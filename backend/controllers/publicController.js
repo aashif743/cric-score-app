@@ -315,21 +315,9 @@ exports.getPublicMatch = async (req, res) => {
   }
 };
 
-// Get live overlay data for a match (optimized for OBS/streaming overlays)
-exports.getOverlayData = async (req, res) => {
-  try {
-    const { matchId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(matchId)) {
-      return res.status(400).json({ success: false, error: "Invalid match ID" });
-    }
-
-    const match = await Match.findById(matchId).lean();
-
-    if (!match) {
-      return res.status(404).json({ success: false, error: "Match not found" });
-    }
-
+// Build the full overlay / TV payload from a (lean) match document. Shared by
+// the per-match overlay endpoint and the tournament TV endpoint.
+function buildOverlayData(match) {
     // Extract current innings data
     const currentInnings = match.innings === 1 ? match.innings1 : match.innings2;
     const batting = currentInnings?.batting || [];
@@ -503,10 +491,122 @@ exports.getOverlayData = async (req, res) => {
       updatedAt: match.updatedAt,
     };
 
-    res.json({ success: true, data: overlayData });
+    return overlayData;
+}
+
+// Build a Cricbuzz-style end-of-match summary from a completed match.
+function buildSummaryData(match) {
+  const parseOvers = (o) => { if (!o) return 0; const p = String(o).split("."); return (parseInt(p[0] || 0)) + ((parseInt(p[1] || 0)) / 6); };
+  const inningsSummary = (inn) => {
+    if (!inn) return null;
+    const batting = (inn.batting || []).filter(b => (b.balls || 0) > 0 || (b.runs || 0) > 0 || b.isOut);
+    const topBatters = [...batting].sort((a, b) => (b.runs || 0) - (a.runs || 0)).slice(0, 3).map(b => ({
+      name: b.name, runs: b.runs || 0, balls: b.balls || 0, notOut: !b.isOut,
+    }));
+    const bowling = (inn.bowling || []).filter(b => parseOvers(b.overs) > 0);
+    const topBowlers = [...bowling].sort((a, b) => (b.wickets || 0) - (a.wickets || 0) || (a.runs || 0) - (b.runs || 0)).slice(0, 3).map(b => ({
+      name: b.name, wickets: b.wickets || 0, runs: b.runs || 0, overs: b.overs || "0.0",
+    }));
+    return {
+      battingTeam: inn.battingTeam,
+      bowlingTeam: inn.bowlingTeam,
+      runs: inn.runs || 0, wickets: inn.wickets || 0, overs: inn.overs || "0.0",
+      topBatters, topBowlers,
+    };
+  };
+
+  // Player of the match: explicit if set, else the best combined performer.
+  let potm = match.matchSummary?.playerOfMatch || "";
+  let potmLine = "";
+  if (!potm) {
+    const agg = {};
+    [match.innings1, match.innings2].filter(Boolean).forEach(inn => {
+      (inn.batting || []).forEach(b => { if (!b.name) return; agg[b.name] = agg[b.name] || { runs: 0, balls: 0, wkts: 0, rc: 0 }; agg[b.name].runs += b.runs || 0; agg[b.name].balls += b.balls || 0; });
+      (inn.bowling || []).forEach(b => { if (!b.name) return; agg[b.name] = agg[b.name] || { runs: 0, balls: 0, wkts: 0, rc: 0 }; agg[b.name].wkts += b.wickets || 0; agg[b.name].rc += b.runs || 0; });
+    });
+    let best = null;
+    Object.entries(agg).forEach(([name, s]) => { const score = s.runs + s.wkts * 25; if (!best || score > best.score) best = { name, score, ...s }; });
+    if (best && best.score > 0) {
+      potm = best.name;
+      const parts = [];
+      if (best.wkts > 0) parts.push(`${best.wkts}/${best.rc}`);
+      if (best.runs > 0) parts.push(`${best.runs} (${best.balls})`);
+      potmLine = parts.join(" & ");
+    }
+  }
+
+  return {
+    teamA: { name: match.teamA?.name || "Team A", shortName: (match.teamA?.name || "TMA").substring(0, 3).toUpperCase() },
+    teamB: { name: match.teamB?.name || "Team B", shortName: (match.teamB?.name || "TMB").substring(0, 3).toUpperCase() },
+    innings1: inningsSummary(match.innings1),
+    innings2: inningsSummary(match.innings2),
+    result: match.result || "",
+    playerOfMatch: potm,
+    playerOfMatchLine: potmLine,
+    toss: match.toss?.winner ? `${match.toss.winner} won the toss and chose to ${match.toss.decision || "bat"}` : "",
+    venue: match.venue || "",
+  };
+}
+
+// GET /api/public/overlay/:matchId
+exports.getOverlayData = async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(matchId)) {
+      return res.status(400).json({ success: false, error: "Invalid match ID" });
+    }
+    const match = await Match.findById(matchId).lean();
+    if (!match) {
+      return res.status(404).json({ success: false, error: "Match not found" });
+    }
+    res.json({ success: true, data: buildOverlayData(match) });
   } catch (error) {
     console.error("Get overlay data error:", error);
     res.status(500).json({ success: false, error: "Failed to fetch overlay data." });
+  }
+};
+
+// GET /api/public/tournament-tv/:tournamentId
+// One link for the whole tournament: returns the live match's board when a
+// match is in progress, otherwise the last completed match's summary, otherwise
+// an idle state. The TV auto-switches as the admin starts each new match.
+exports.getTournamentTV = async (req, res) => {
+  try {
+    const { tournamentId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(tournamentId)) {
+      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
+    }
+    const Tournament = require("../models/Tournament");
+    const tournament = await Tournament.findById(tournamentId).select("name").lean();
+    if (!tournament) return res.status(404).json({ success: false, error: "Tournament not found" });
+    // No visibility gate — same trust model as the per-match overlay: the link is
+    // unlisted (needs the tournament id), so the owner can broadcast their own
+    // tournament to a TV whether it's public or private.
+    const tournamentName = tournament.name || "Tournament";
+
+    // A live match takes priority (most recently active).
+    const liveMatch = await Match.findOne({
+      tournament: tournamentId,
+      status: { $in: ["in_progress", "innings_break"] },
+    }).sort({ updatedAt: -1 }).lean();
+    if (liveMatch) {
+      return res.json({ success: true, data: { tournamentName, mode: "live", matchId: String(liveMatch._id), overlay: buildOverlayData(liveMatch) } });
+    }
+
+    // Otherwise show the most recently completed match's summary until the next
+    // match starts.
+    const lastCompleted = await Match.findOne({
+      tournament: tournamentId,
+      status: "completed",
+    }).sort({ updatedAt: -1 }).lean();
+    if (lastCompleted) {
+      return res.json({ success: true, data: { tournamentName, mode: "summary", matchId: String(lastCompleted._id), summary: buildSummaryData(lastCompleted) } });
+    }
+
+    return res.json({ success: true, data: { tournamentName, mode: "idle" } });
+  } catch (error) {
+    console.error("Get tournament TV error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch tournament TV data." });
   }
 };
 

@@ -2842,17 +2842,43 @@ const ScoreCardScreen = ({ navigation, route }) => {
       return;
     }
 
+    const tournamentId = matchData?.tournament;
+    const buttons = [
+      { text: 'TV Scoreboard (this match)', onPress: () => handleTVScoreboard(matchId) },
+    ];
+    if (tournamentId) {
+      buttons.push({ text: 'Tournament TV (all matches)', onPress: () => handleTournamentTV(tournamentId) });
+    }
+    buttons.push({ text: 'OBS Overlay', onPress: () => handleOBSOverlay(matchId) });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+
+    Alert.alert('Live Broadcast', 'Choose how to display live scores:', buttons);
+  };
+
+  // One TV link for the whole tournament — the screen auto-switches to each new
+  // match and shows the summary between games. Set it once on the TV.
+  const handleTournamentTV = (tournamentId) => {
+    const tvUrl = `https://cric-zone.com/tv/tournament/${tournamentId}`;
     Alert.alert(
-      'Live Broadcast',
-      'Choose how to display live scores:',
+      'Tournament TV',
+      'One link for the whole tournament. Set it once on your TV — it automatically switches to each new match and shows the match summary between games.',
       [
         {
-          text: 'TV Scoreboard',
-          onPress: () => handleTVScoreboard(matchId),
+          text: 'Copy URL',
+          onPress: () => {
+            Clipboard.setString(tvUrl);
+            Alert.alert('Copied!', 'Tournament TV URL copied.\n\nOpen it once on your TV — it updates for every match automatically.');
+          },
         },
         {
-          text: 'OBS Overlay',
-          onPress: () => handleOBSOverlay(matchId),
+          text: 'Share',
+          onPress: async () => {
+            try {
+              await Share.share({
+                message: `Live Tournament Scoreboard\n\n${tvUrl}\n\nOpen this once on your TV — it switches to each new match automatically.`,
+              });
+            } catch (err) { /* user cancelled */ }
+          },
         },
         { text: 'Cancel', style: 'cancel' },
       ]
