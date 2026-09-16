@@ -370,10 +370,14 @@ const FullScorecardScreen = ({ navigation, route }) => {
     const mid = matchData?._id || matchId;
     const eq = (a) => (a || '').trim().toLowerCase() === (oldName || '').trim().toLowerCase();
     const short = clean.substring(0, 3).toUpperCase();
+    // A team rename in a tournament propagates across every match/points table,
+    // so a single-match undo can't fully revert it — skip the undo entry there
+    // (a standalone match rename stays undoable).
+    const isTournamentMatch = !!(matchData?.tournament);
     const undoSnap = snapshotScorecard(matchData);
     try {
       await matchService.renameMatchTeam(mid, oldName, clean, user.token);
-      setUndoStack((s) => [...s, undoSnap]);
+      if (!isTournamentMatch) setUndoStack((s) => [...s, undoSnap]);
       setMatchData((prev) => {
         if (!prev) return prev;
         const renameTeamObj = (t) => (t && eq(t.name) ? { ...t, name: clean, shortName: short } : t);

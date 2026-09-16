@@ -215,6 +215,14 @@ const TeamSchema = new mongoose.Schema({
   shortName: {
     type: String,
     trim: true
+  },
+  // Team crest (Cloudinary URL). For standalone matches it can be set directly;
+  // for tournament matches the crest is resolved at read time from the
+  // tournament's teamLogos (single source of truth — never goes stale when a
+  // logo is added/changed after the fixtures were generated).
+  logoUrl: {
+    type: String,
+    default: ""
   }
 }, { _id: false });
 

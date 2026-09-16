@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   ScrollView,
   Modal,
@@ -26,6 +27,24 @@ import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import StrikerSelectModal from '../components/StrikerSelectModal';
 import Icon from '../components/Icon';
 import Svg, { Path } from 'react-native-svg';
+
+// Scoring keypad button with a clear pressed ("hover") state: while held it
+// shrinks slightly and shows a highlight tint, then springs back on release —
+// so a scorer always gets tactile confirmation the tap registered. Pass the
+// cell's own colour via `pressedStyle` so coloured buttons (WD/BYE/OUT…) darken
+// on press instead of turning grey.
+const KeyBtn = ({ style, pressedStyle, children, ...props }) => (
+  <Pressable
+    style={({ pressed }) => [
+      style,
+      pressed && styles.keypadCellPressed,
+      pressed && pressedStyle,
+    ]}
+    {...props}
+  >
+    {children}
+  </Pressable>
+);
 
 // A generated/placeholder player name (e.g. "Batsman 3", "Bowler 1",
 // "New Batsman", "Mumbai Player 5") that shouldn't be remembered as a real
@@ -4017,54 +4036,54 @@ const ScoreCardScreen = ({ navigation, route }) => {
             while staying clean and modern. */}
         <View style={styles.keypadPanel}>
           {/* End Innings (full width) */}
-          <TouchableOpacity
+          <KeyBtn
             style={[styles.keypadFull, styles.keypadRowDivider]}
+            pressedStyle={styles.cellEndPressed}
             onPress={() => setShowEndInningsModal(true)}
-            activeOpacity={0.6}
           >
             <Text style={styles.keypadEndText}>End Innings</Text>
-          </TouchableOpacity>
+          </KeyBtn>
 
           {/* Retire | Change Striker */}
           <View style={[styles.keypadRow, styles.keypadRowDivider]}>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => setShowRetireModal(true)} activeOpacity={0.6}>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => setShowRetireModal(true)}>
               <Text style={styles.keypadActionText}>Retire</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadCell} onPress={handleChangeStriker} disabled={isSwapping} activeOpacity={0.6}>
+            </KeyBtn>
+            <KeyBtn style={styles.keypadCell} onPress={handleChangeStriker} disabled={isSwapping}>
               <Text style={styles.keypadActionText}>Change Striker</Text>
-            </TouchableOpacity>
+            </KeyBtn>
           </View>
 
           {/* WD | NB | BYE | UNDO */}
           <View style={[styles.keypadRow, styles.keypadRowDivider]}>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider, styles.cellExtra]} onPress={() => setShowWideModal(true)} activeOpacity={0.6}>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider, styles.cellExtra]} pressedStyle={styles.cellExtraPressed} onPress={() => setShowWideModal(true)}>
               <Text style={styles.textExtra}>WD</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider, styles.cellExtra]} onPress={() => setShowNoBallModal(true)} activeOpacity={0.6}>
+            </KeyBtn>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider, styles.cellExtra]} pressedStyle={styles.cellExtraPressed} onPress={() => setShowNoBallModal(true)}>
               <Text style={styles.textExtra}>NB</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider, styles.cellBye]} onPress={() => setShowByeModal(true)} activeOpacity={0.6}>
+            </KeyBtn>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider, styles.cellBye]} pressedStyle={styles.cellByePressed} onPress={() => setShowByeModal(true)}>
               <Text style={styles.textBye}>BYE</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.keypadCell, styles.cellUndo]} onPress={handleUndo} activeOpacity={0.6}>
+            </KeyBtn>
+            <KeyBtn style={[styles.keypadCell, styles.cellUndo]} pressedStyle={styles.cellUndoPressed} onPress={handleUndo}>
               <Text style={styles.textUndo}>UNDO</Text>
-            </TouchableOpacity>
+            </KeyBtn>
           </View>
 
           {/* 0 | 1 | 2 | 5,7.. */}
           <View style={[styles.keypadRow, styles.keypadRowDivider]}>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(0)} activeOpacity={0.6}><Text style={styles.keypadNumText}>0</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(1)} activeOpacity={0.6}><Text style={styles.keypadNumText}>1</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(2)} activeOpacity={0.6}><Text style={styles.keypadNumText}>2</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.keypadCell} onPress={() => setShowMoreRunsModal(true)} activeOpacity={0.6}><Text style={styles.keypadNumText}>5,7..</Text></TouchableOpacity>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(0)}><Text style={styles.keypadNumText}>0</Text></KeyBtn>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(1)}><Text style={styles.keypadNumText}>1</Text></KeyBtn>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(2)}><Text style={styles.keypadNumText}>2</Text></KeyBtn>
+            <KeyBtn style={styles.keypadCell} onPress={() => setShowMoreRunsModal(true)}><Text style={styles.keypadNumText}>5,7..</Text></KeyBtn>
           </View>
 
           {/* 3 | 4 | 6 | OUT (last row — no bottom divider) */}
           <View style={styles.keypadRow}>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(3)} activeOpacity={0.6}><Text style={styles.keypadNumText}>3</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(4)} activeOpacity={0.6}><Text style={styles.keypadNumText}>4</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(6)} activeOpacity={0.6}><Text style={styles.keypadNumText}>6</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.keypadCell, styles.cellOut]} onPress={() => setShowWicketModal(true)} activeOpacity={0.6}><Text style={styles.textOut}>OUT</Text></TouchableOpacity>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(3)}><Text style={styles.keypadNumText}>3</Text></KeyBtn>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(4)}><Text style={styles.keypadNumText}>4</Text></KeyBtn>
+            <KeyBtn style={[styles.keypadCell, styles.keypadCellDivider]} onPress={() => handleRuns(6)}><Text style={styles.keypadNumText}>6</Text></KeyBtn>
+            <KeyBtn style={[styles.keypadCell, styles.cellOut]} pressedStyle={styles.cellOutPressed} onPress={() => setShowWicketModal(true)}><Text style={styles.textOut}>OUT</Text></KeyBtn>
           </View>
         </View>
       </View>
@@ -6693,6 +6712,17 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.bold,
     color: '#0f172a',
   },
+  // Pressed ("hover") feedback: a slight shrink applied to every keypad button,
+  // plus a per-cell highlight tint layered on top for the coloured buttons.
+  keypadCellPressed: {
+    transform: [{ scale: 0.93 }],
+    backgroundColor: '#e0e7ff',
+  },
+  cellEndPressed: { backgroundColor: '#e2e8f0' },
+  cellExtraPressed: { backgroundColor: '#fcd34d' },
+  cellByePressed: { backgroundColor: '#c4b5fd' },
+  cellUndoPressed: { backgroundColor: '#cbd5e1' },
+  cellOutPressed: { backgroundColor: '#fca5a5' },
   cellExtra: { backgroundColor: '#fde68a' },
   textExtra: { color: '#92400e', fontWeight: '800', fontSize: responsiveFontSize.md },
   cellBye: { backgroundColor: '#ddd6fe' },

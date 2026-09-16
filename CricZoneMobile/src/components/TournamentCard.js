@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, Clipboard, Share } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, Clipboard, Share, Image } from 'react-native';
 
 const statusConfig = {
   upcoming: { label: 'Upcoming', bg: '#fef3c7', color: '#d97706' },
@@ -125,7 +125,11 @@ const TournamentCard = ({ tournament, index, onPress, onLongPress }) => {
             {/* Header: Name + Status */}
             <View style={styles.cardHeader}>
               <View style={styles.nameRow}>
-                <TrophyIconSmall color="#d97706" />
+                {tournament.logoUrl ? (
+                  <Image source={{ uri: tournament.logoUrl }} style={styles.tournamentLogo} />
+                ) : (
+                  <TrophyIconSmall color="#d97706" />
+                )}
                 <Text style={styles.tournamentName} numberOfLines={1}>
                   {tournament.name}
                 </Text>
@@ -216,6 +220,12 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 10,
     gap: 8,
+  },
+  tournamentLogo: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: '#fff',
   },
   tournamentName: {
     fontSize: 17,

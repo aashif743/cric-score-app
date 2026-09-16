@@ -12,6 +12,7 @@ import { computeGroupStandings, formatNRR, computeQualification } from '../utils
 import tournamentService from '../utils/tournamentService';
 import AutocompleteInput from './AutocompleteInput';
 import ShareablePointsTable from './ShareablePointsTable';
+import { TeamCrest } from './LogoPicker';
 
 const ShareIcon = ({ color = '#fff', size = 15 }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
@@ -59,7 +60,7 @@ const HeaderRow = () => (
   </View>
 );
 
-const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQualifyingSlot, index, onPress }) => {
+const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQualifyingSlot, index, onPress, logo }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
 
@@ -93,7 +94,8 @@ const TableRow = ({ row, rank, qualified, eliminated, isQualifyingSlot, isLastQu
         </View>
 
         <View style={[styles.teamCol, { flex: COL.team }]}>
-          <Text style={styles.teamCode} numberOfLines={1}>{displayName(row.team)}</Text>
+          <TeamCrest uri={logo} name={row.team} size={26} />
+          <Text style={[styles.teamCode, { marginLeft: 8 }]} numberOfLines={1}>{displayName(row.team)}</Text>
           {qualified && <Text style={styles.qSuffix}>(Q)</Text>}
           {eliminated && <Text style={styles.eSuffix}>(E)</Text>}
           {onPress ? <Text style={styles.editHint}>✎</Text> : null}
@@ -126,6 +128,7 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
   const [activeGroup, setActiveGroup] = useState(0);
 
   const groups = tournament?.groups || [];
+  const teamLogos = tournament?.teamLogos || {};
   const matches = tournament?.matches || [];
   const advance = tournament?.teamsAdvancePerGroup || 0;
 
@@ -369,6 +372,7 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
                   isQualifyingSlot={isQualifyingSlot}
                   isLastQualifyingSlot={isLastQualifyingSlot}
                   onPress={canEdit ? () => openEdit(row.team) : undefined}
+                  logo={teamLogos[row.team]}
                 />
               );
             })

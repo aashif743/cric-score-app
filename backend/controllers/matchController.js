@@ -1108,6 +1108,18 @@ exports.renameMatchTeam = async (req, res) => {
       return res.status(409).json({ success: false, error: "Both teams can't have the same name." });
     }
 
+    // Tournament match → propagate the rename across the WHOLE tournament: the
+    // team list, the groups (points table), and every match (teams, innings,
+    // result, winner). This keeps the same team consistent in the schedule,
+    // standings and all scorecards — not just this one match.
+    if (match.tournament) {
+      const r = await propagateTeamNameToTournament(match.tournament, oldName, newName);
+      if (r && r.skipped === 'name-already-exists') {
+        return res.status(409).json({ success: false, error: "Another team in this tournament already uses that name." });
+      }
+      return res.json({ success: true, data: { oldName, newName }, tournamentWide: true });
+    }
+
     const shortOf = (n) => (n || '').substring(0, 3).toUpperCase();
     let changed = false;
     ['teamA', 'teamB'].forEach((k) => {

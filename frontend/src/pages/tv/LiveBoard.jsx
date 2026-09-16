@@ -28,7 +28,10 @@ const LiveBoard = ({ data, connected, title }) => {
       </Header>
 
       <Hero>
-        <BatTeam>{battingTeam}</BatTeam>
+        <BatTeamRow>
+          {data.logos && data.logos[battingTeam] ? <BatLogo src={data.logos[battingTeam]} alt="" /> : null}
+          <BatTeam>{battingTeam}</BatTeam>
+        </BatTeamRow>
         <ScoreLine>
           <Runs>{data.runs ?? 0}</Runs>
           <Slash>/</Slash>
@@ -186,7 +189,9 @@ const Status = styled.div`
   ${p => p.$live && css`animation:${pulse} 1.6s ease-in-out infinite;`}
 `;
 const Hero = styled.section`flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:.4vh;`;
-const BatTeam = styled.div`font-size:clamp(26px,5.4vh,96px);font-weight:900;letter-spacing:-1px;color:#60a5fa;max-width:92vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.05;`;
+const BatTeamRow = styled.div`display:flex;align-items:center;justify-content:center;gap:1.4vh;max-width:92vw;`;
+const BatLogo = styled.img`height:clamp(30px,6vh,100px);width:clamp(30px,6vh,100px);border-radius:50%;object-fit:cover;background:#fff;flex-shrink:0;`;
+const BatTeam = styled.div`font-size:clamp(26px,5.4vh,96px);font-weight:900;letter-spacing:-1px;color:#60a5fa;max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.05;`;
 const ScoreLine = styled.div`display:flex;align-items:baseline;justify-content:center;line-height:.82;`;
 const Runs = styled.span`font-size:clamp(120px,33vh,480px);font-weight:900;letter-spacing:-6px;background:linear-gradient(180deg,#fff,#cbd5e1);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;`;
 const Slash = styled.span`font-size:clamp(64px,16vh,220px);color:#475569;font-weight:300;margin:0 .5vw;`;

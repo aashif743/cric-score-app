@@ -137,7 +137,7 @@ exports.createTournament = async (req, res) => {
 
     const {
       name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
-      venue, description, format, visibility,
+      venue, description, format, visibility, logoUrl, teamLogos,
       // League-only:
       numberOfGroups, teamsAdvancePerGroup, matchesPerPair, playoffFormat,
     } = req.body;
@@ -157,6 +157,8 @@ exports.createTournament = async (req, res) => {
       name: name.trim(),
       numberOfTeams,
       teamNames: teamNames || [],
+      logoUrl: logoUrl || "",
+      teamLogos: teamLogos || {},
       playersPerTeam: playersPerTeam || 11,
       totalOvers: totalOvers || 20,
       ballsPerOver: ballsPerOver || 6,
@@ -383,7 +385,7 @@ exports.updateTournament = async (req, res) => {
 
     const {
       name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
-      venue, description, status, visibility,
+      venue, description, status, visibility, logoUrl, teamLogos,
       numberOfGroups, teamsAdvancePerGroup, matchesPerPair, playoffFormat,
     } = req.body;
 
@@ -407,6 +409,13 @@ exports.updateTournament = async (req, res) => {
     if (status !== undefined) tournament.status = status;
     if (visibility !== undefined && (visibility === "public" || visibility === "private")) {
       tournament.visibility = visibility;
+    }
+    // Logos are non-structural — applied here so they persist through every
+    // return path below (including the league group/knockout rebuilds).
+    if (logoUrl !== undefined) tournament.logoUrl = logoUrl;
+    if (teamLogos !== undefined) {
+      tournament.teamLogos = teamLogos || {};
+      tournament.markModified("teamLogos");
     }
 
     // --- League structure -----------------------------------------------------

@@ -2,15 +2,17 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
 import io from "socket.io-client";
 import styled, { keyframes, css, createGlobalStyle } from "styled-components";
-import brand from "../assets/criczone_icon.png";
+import fullLogo from "../assets/criczone_full_logo.png";
+import SummaryBoard from "./tv/SummaryBoard";
+import { getBallType, formatBall } from "./tv/LiveBoard";
 
 const SOCKET_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 const POLL_MS = 2500;
 
-// Professional broadcast lower-third for OBS. Works for a single match
-// (/overlay/:matchId) or a whole tournament (/overlay/tournament/:tournamentId),
-// auto-switching to each new match and showing a result bar between games.
+// Professional broadcast overlay for OBS. Single match (/overlay/:matchId) or a
+// whole tournament (/overlay/tournament/:tournamentId): auto-switches to each
+// new match and shows a full summary card between games.
 const Overlay = () => {
   const params = useParams();
   const isTournament = !!params.tournamentId;
@@ -29,7 +31,6 @@ const Overlay = () => {
       const res = await fetch(url, { cache: "no-store" });
       const json = await res.json();
       if (json.success) {
-        // Normalise both endpoints to { mode, live, summary, tournamentName }.
         setPayload(isTournament
           ? { mode: json.data.mode, live: json.data.overlay, summary: json.data.summary, tournamentName: json.data.tournamentName }
           : { mode: "live", live: json.data, summary: null, tournamentName: null });
@@ -66,120 +67,106 @@ const Overlay = () => {
     };
   }, [id, isTournament, fetchData]);
 
-  const Transparent = <ObsGlobal />;
-
-  if (!payload) return Transparent;
+  if (!payload) return <ObsGlobal />;
 
   if (payload.mode === "summary" && payload.summary) {
-    return <>{Transparent}<SummaryBar summary={payload.summary} tournamentName={payload.tournamentName} /></>;
+    return <><ObsGlobal /><SummaryBoard summary={payload.summary} title={payload.tournamentName} variant="overlay" /></>;
   }
   if (payload.mode === "idle") {
-    return <>{Transparent}<IdleBadge><Logo src={brand} alt="" /><span>{payload.tournamentName || "CricZone"}</span><Up>Next match starting soon</Up></IdleBadge></>;
+    return <><ObsGlobal /><IdleBadge><img src={fullLogo} alt="" /><span>{payload.tournamentName || "CricZone"}</span><Up>Next match starting soon</Up></IdleBadge></>;
   }
   if (payload.live) {
-    return <>{Transparent}<LiveBar data={payload.live} connected={connected} /></>;
+    return <><ObsGlobal /><LiveOverlay data={payload.live} connected={connected} /></>;
   }
-  return Transparent;
+  return <ObsGlobal />;
 };
 
-// ---- Live lower-third ------------------------------------------------------
-const LiveBar = ({ data, connected }) => {
+// ---- Live overlay ----------------------------------------------------------
+const LiveOverlay = ({ data, connected }) => {
   const isSecond = data.currentInnings === 2;
   const done = data.status === "completed";
   const battingTeam = data.battingTeam || data.teamA?.name || "Team";
-  const battingShort = (battingTeam || "TM").substring(0, 3).toUpperCase();
   const need = isSecond && data.requiredRuns != null ? Math.max(0, data.requiredRuns) : null;
-  const scoreKey = `${data.runs}-${data.wickets}`; // re-key to pop on change
+  const scoreKey = `${data.runs}-${data.wickets}`;
+  const battingLogo = (data.logos && data.logos[battingTeam]) || "";
 
   return (
-    <BarWrap>
-      <Bar>
-        <LogoCell><Logo src={brand} alt="CricZone" /></LogoCell>
+    <>
+      {/* Corners */}
+      <CornerLogo src={fullLogo} alt="CricZone" />
+      <CornerRight>
+        {done
+          ? <ResultTag>RESULT</ResultTag>
+          : <LivePill $on={connected}><LiveDot />LIVE</LivePill>}
+      </CornerRight>
 
-        <ScoreCell>
-          <TeamTag>{battingShort}</TeamTag>
-          <ScoreBig key={scoreKey}>{data.runs ?? 0}<i>/</i>{data.wickets ?? 0}</ScoreBig>
-          <OversTag>{data.overs || "0.0"} ov</OversTag>
-        </ScoreCell>
+      {/* Lower-third scorebar */}
+      <BarWrap>
+        <Bar>
+          <ScoreCell>
+            <TeamNameRow>
+              {battingLogo ? <TeamLogo src={battingLogo} alt="" /> : null}
+              <TeamName>{battingTeam}</TeamName>
+            </TeamNameRow>
+            <ScoreRow>
+              <ScoreBig key={scoreKey}>{data.runs ?? 0}<i>/</i>{data.wickets ?? 0}</ScoreBig>
+              <OversSide>{data.overs || "0.0"}<small> OV</small></OversSide>
+            </ScoreRow>
+          </ScoreCell>
 
-        <BattersCell>
-          {data.striker && (
-            <PLine $on><Dotm /><Nm>{lastName(data.striker.name)}</Nm><Rn>{data.striker.runs}<em> ({data.striker.balls})</em></Rn></PLine>
+          <CrrCell>
+            <CellLabel>CRR</CellLabel>
+            <CrrNum>{data.runRate || "0.00"}</CrrNum>
+          </CrrCell>
+
+          <BattersCell>
+            {data.striker && (
+              <PLine $on>
+                <StrikerArrow /><Nm>{data.striker.name}</Nm>
+                <Rn>{data.striker.runs}<em> ({data.striker.balls})</em></Rn>
+              </PLine>
+            )}
+            {data.nonStriker && (
+              <PLine>
+                <Nm>{data.nonStriker.name}</Nm>
+                <Rn>{data.nonStriker.runs}<em> ({data.nonStriker.balls})</em></Rn>
+              </PLine>
+            )}
+          </BattersCell>
+
+          {data.bowler && (
+            <BowlerCell>
+              <Nm>{data.bowler.name}</Nm>
+              <BowlFig>{data.bowler.wickets}-{data.bowler.runs} <em>({data.bowler.overs})</em></BowlFig>
+            </BowlerCell>
           )}
-          {data.nonStriker && (
-            <PLine><Nm>{lastName(data.nonStriker.name)}</Nm><Rn>{data.nonStriker.runs}<em> ({data.nonStriker.balls})</em></Rn></PLine>
-          )}
-        </BattersCell>
 
-        {data.bowler && (
-          <BowlerCell>
-            <CellLabel>BOWLING</CellLabel>
-            <Nm>{lastName(data.bowler.name)}</Nm>
-            <BowlFig>{data.bowler.wickets}-{data.bowler.runs} <em>({data.bowler.overs})</em></BowlFig>
-          </BowlerCell>
-        )}
+          <OverCell>
+            <Balls>
+              {data.thisOver && data.thisOver.length > 0
+                ? data.thisOver.slice(-10).map((b, i) => <Ball key={i} $type={getBallType(b)}>{formatBall(b)}</Ball>)
+                : <NewOver>New over</NewOver>}
+            </Balls>
+          </OverCell>
 
-        <RateCell>
-          {!done && isSecond && need != null ? (
-            <>
-              <CellLabel>NEED</CellLabel>
-              <NeedBig>{need}<small> off {data.ballsRemaining ?? 0}</small></NeedBig>
+          {done && data.result ? (
+            <RateCell><ResultInline>{data.result}</ResultInline></RateCell>
+          ) : (!done && isSecond && need != null) ? (
+            <RateCell>
+              <NeedLine>NEED {need} OFF {data.ballsRemaining ?? 0} BALLS</NeedLine>
               <RateSub>RRR {data.requiredRunRate || "-"}</RateSub>
-            </>
-          ) : (
-            <>
-              <CellLabel>CRR</CellLabel>
-              <RateBig>{data.runRate || "0.00"}</RateBig>
-              {isSecond && data.target != null && <RateSub>Trgt {data.target}</RateSub>}
-            </>
-          )}
-        </RateCell>
-
-        <StatusCell>
-          {done ? <ResultTag>RESULT</ResultTag> : <LivePill $on={connected}><LiveDot />LIVE</LivePill>}
-        </StatusCell>
-      </Bar>
-
-      {done && data.result && <SubStrip>{data.result}</SubStrip>}
-    </BarWrap>
+            </RateCell>
+          ) : null}
+        </Bar>
+      </BarWrap>
+    </>
   );
-};
-
-// ---- Summary lower-third (between matches) ---------------------------------
-const SummaryBar = ({ summary, tournamentName }) => {
-  const a = summary.innings1, b = summary.innings2;
-  return (
-    <BarWrap>
-      <Bar $summary>
-        <LogoCell><Logo src={brand} alt="CricZone" /></LogoCell>
-        <SumResult>
-          <CellLabel>{tournamentName || "MATCH RESULT"}</CellLabel>
-          <SumResultText>{summary.result || "Match complete"}</SumResultText>
-        </SumResult>
-        <SumScores>
-          {a && <SumScore><b>{a.battingTeam}</b> {a.runs}/{a.wickets} <i>({a.overs})</i></SumScore>}
-          {b && <SumScore><b>{b.battingTeam}</b> {b.runs}/{b.wickets} <i>({b.overs})</i></SumScore>}
-        </SumScores>
-        {summary.playerOfMatch && (
-          <SumPotm>
-            <CellLabel>PLAYER OF THE MATCH</CellLabel>
-            <PotmName>{summary.playerOfMatch}{summary.playerOfMatchLine ? <em> · {summary.playerOfMatchLine}</em> : null}</PotmName>
-          </SumPotm>
-        )}
-      </Bar>
-    </BarWrap>
-  );
-};
-
-const lastName = (n) => {
-  if (!n) return "";
-  const parts = String(n).trim().split(/\s+/);
-  return parts.length > 1 ? parts[parts.length - 1] : parts[0];
 };
 
 // ---- styles ----------------------------------------------------------------
 const slideUp = keyframes`from{transform:translateY(120%);opacity:0}to{transform:translateY(0);opacity:1}`;
-const pop = keyframes`0%{transform:scale(1)}35%{transform:scale(1.18)}100%{transform:scale(1)}`;
+const dropIn = keyframes`from{transform:translateY(-120%);opacity:0}to{transform:translateY(0);opacity:1}`;
+const pop = keyframes`0%{transform:scale(1)}35%{transform:scale(1.16)}100%{transform:scale(1)}`;
 const pulse = keyframes`0%,100%{opacity:1}50%{opacity:.35}`;
 
 const ObsGlobal = createGlobalStyle`
@@ -187,91 +174,90 @@ const ObsGlobal = createGlobalStyle`
   * { box-sizing:border-box; }
 `;
 
-const BarWrap = styled.div`
-  position: fixed; left: 0; right: 0; bottom: 3.2vh;
-  display: flex; flex-direction: column; align-items: center; gap: 0.9vh;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  animation: ${slideUp} .6s cubic-bezier(.18,.9,.32,1.1) both;
-`;
-const Bar = styled.div`
-  display: flex; align-items: stretch; height: clamp(64px, 11vh, 128px);
-  width: min(1560px, 95vw); border-radius: 16px; overflow: hidden;
-  color: #fff;
-  background: linear-gradient(180deg, rgba(15,23,42,.94), rgba(11,17,32,.96));
-  border: 1px solid rgba(255,255,255,.12);
-  box-shadow: 0 18px 50px rgba(0,0,0,.5);
-  backdrop-filter: blur(6px);
-  ${p => p.$summary && css`background: linear-gradient(180deg, rgba(13,20,38,.96), rgba(9,14,28,.97));`}
-`;
+const FONT = css`font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;`;
 
-const Cell = styled.div`
-  display: flex; flex-direction: column; justify-content: center; gap: .3vh;
-  padding: 0 clamp(12px, 1.4vw, 30px);
-  border-right: 1px solid rgba(255,255,255,.09);
+const CornerLogo = styled.img`
+  position: fixed; top: 2.6vh; left: 2.4vw; height: clamp(64px, 13vh, 190px); width: auto; object-fit: contain;
+  filter: drop-shadow(0 6px 16px rgba(0,0,0,.5)); animation: ${dropIn} .6s ease both;
 `;
-const LogoCell = styled(Cell)`align-items:center; padding:0 clamp(10px,1vw,22px); background:rgba(255,255,255,.04);`;
-const Logo = styled.img`height: clamp(34px, 6vh, 74px); width:auto; object-fit:contain;`;
+const CornerRight = styled.div`position: fixed; top: 3vh; right: 2.6vw; animation: ${dropIn} .6s ease both; ${FONT}`;
+const LivePill = styled.div`
+  display:flex; align-items:center; gap:.5vw; padding:.6vh 1vw; border-radius:999px; color:#fff;
+  background:#dc2626; font-weight:900; letter-spacing:1.5px; font-size:clamp(11px,1.8vh,24px);
+  box-shadow:0 8px 24px rgba(220,38,38,.45); ${p => p.$on && css`animation:${pulse} 1.6s ease-in-out infinite;`}
+`;
+const LiveDot = styled.span`width:1vh;height:1vh;min-width:7px;min-height:7px;border-radius:50%;background:#fff;`;
+const ResultTag = styled.div`padding:.6vh 1vw;border-radius:999px;background:#6366f1;color:#fff;font-weight:900;letter-spacing:1.5px;font-size:clamp(11px,1.8vh,24px);`;
+
+const BarWrap = styled.div`position: fixed; left: 0; right: 0; bottom: 2.6vh; display: flex; justify-content: center; ${FONT} animation: ${slideUp} .6s cubic-bezier(.18,.9,.32,1.1) both;`;
+const Bar = styled.div`
+  display: flex; align-items: stretch; height: clamp(58px, 10vh, 116px); width: 96vw;
+  border-radius: 14px; overflow: hidden; color: #fff;
+  background: linear-gradient(180deg, rgba(15,23,42,.95), rgba(11,17,32,.97));
+  border: 1px solid rgba(255,255,255,.12); box-shadow: 0 16px 44px rgba(0,0,0,.55); backdrop-filter: blur(6px);
+`;
+const Cell = styled.div`display: flex; flex-direction: column; justify-content: center; gap: .3vh; padding: 0 clamp(12px,1.4vw,30px); border-right: 1px solid rgba(255,255,255,.1);`;
+const CellLabel = styled.div`font-size: clamp(9px,1.3vh,17px); font-weight: 900; letter-spacing: 2px; color: #64748b;`;
 
 const ScoreCell = styled(Cell)`
-  align-items: center; justify-content: center; gap: 0;
+  flex: 1.25; align-items: center; justify-content: center; text-align: center; gap: .4vh; min-width: 0;
   background: linear-gradient(135deg, #4f46e5, #7c3aed);
-  min-width: clamp(150px, 15vw, 280px);
 `;
-const TeamTag = styled.div`font-size: clamp(11px, 1.7vh, 22px); font-weight: 900; letter-spacing: 2px; color: rgba(255,255,255,.85);`;
-const ScoreBig = styled.div`
-  font-size: clamp(30px, 6vh, 78px); font-weight: 900; line-height: 1; letter-spacing: -1px;
-  animation: ${pop} .5s ease; i{ font-style:normal; color: rgba(255,255,255,.6); margin:0 2px; }
-`;
-const OversTag = styled.div`font-size: clamp(11px, 1.7vh, 22px); font-weight: 800; color: rgba(255,255,255,.85); margin-top:2px;`;
+const TeamNameRow = styled.div`display: flex; align-items: center; justify-content: center; gap: .6vw; max-width: 100%;`;
+const TeamLogo = styled.img`height: clamp(16px,3vh,40px); width: clamp(16px,3vh,40px); border-radius: 50%; object-fit: cover; background: #fff; flex-shrink: 0;`;
+const TeamName = styled.div`font-size: clamp(12px,2.2vh,30px); font-weight: 900; letter-spacing: .5px; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;`;
+const ScoreRow = styled.div`display: flex; align-items: baseline; justify-content: center; gap: 1.8vw;`;
+const ScoreBig = styled.div`font-size: clamp(26px,5.2vh,72px); font-weight: 900; line-height: 1; letter-spacing: -1px; animation: ${pop} .5s ease; i{ font-style:normal; color: rgba(255,255,255,.6); margin: 0 2px; }`;
+const OversSide = styled.div`font-size: clamp(15px,2.8vh,38px); font-weight: 900; color: rgba(255,255,255,.92); small{ font-size:.5em; font-weight:800; color: rgba(255,255,255,.8); letter-spacing:1px; }`;
+const CrrCell = styled(Cell)`flex: .6; min-width: 0; align-items: center; justify-content: center; text-align: center;`;
+const CrrNum = styled.div`font-size: clamp(18px,3.4vh,46px); font-weight: 900; color: #22c55e; line-height: 1.05;`;
 
-const BattersCell = styled(Cell)`min-width: clamp(150px, 15vw, 300px); justify-content:center; gap:.5vh;`;
+const BattersCell = styled(Cell)`flex: 1.35; min-width: 0; justify-content: center; gap: .5vh;`;
 const PLine = styled.div`
-  display: flex; align-items: baseline; gap: .5vw;
-  font-size: clamp(14px, 2.4vh, 32px); font-weight: 700; color: ${p => p.$on ? "#fff" : "#cbd5e1"};
+  display: flex; align-items: center; gap: .5vw; font-size: clamp(13px,2.3vh,32px); color: ${p => p.$on ? "#fff" : "#cbd5e1"};
 `;
-const Dotm = styled.span`width:.8vh;height:.8vh;min-width:7px;min-height:7px;border-radius:50%;background:#22c55e;align-self:center;`;
-const Nm = styled.span`font-weight: 800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: 12vw;`;
-const Rn = styled.span`margin-left:auto; font-weight:900; em{ font-style:normal; color:#94a3b8; font-size:.62em; font-weight:700; }`;
-
-const BowlerCell = styled(Cell)`min-width: clamp(130px, 12vw, 240px);`;
-const CellLabel = styled.div`font-size: clamp(9px, 1.4vh, 17px); font-weight: 900; letter-spacing: 1.5px; color: #64748b;`;
-const BowlFig = styled.div`font-size: clamp(14px, 2.3vh, 30px); font-weight: 900; color:#f8fafc; em{ font-style:normal; color:#94a3b8; font-size:.66em; font-weight:700; }`;
-
-const RateCell = styled(Cell)`min-width: clamp(110px, 10vw, 200px); align-items:flex-start;`;
-const RateBig = styled.div`font-size: clamp(20px, 3.6vh, 46px); font-weight:900; color:#22c55e;`;
-const NeedBig = styled.div`font-size: clamp(20px, 3.6vh, 48px); font-weight:900; color:#fca5a5; small{ font-size:.42em; color:#94a3b8; font-weight:800; margin-left:4px; }`;
-const RateSub = styled.div`font-size: clamp(10px, 1.6vh, 20px); font-weight:800; color:#94a3b8;`;
-
-const StatusCell = styled(Cell)`border-right:0; align-items:center; justify-content:center; min-width: clamp(80px, 7vw, 140px);`;
-const LivePill = styled.div`
-  display:flex; align-items:center; gap:.5vw; padding:.6vh 1vw; border-radius:999px;
-  background:#dc2626; font-weight:900; letter-spacing:1.5px; font-size:clamp(12px,2vh,26px);
-  ${p => p.$on && css`animation:${pulse} 1.6s ease-in-out infinite;`}
+/* Small green arrow marks the striker (no big highlight). */
+const StrikerArrow = styled.span`
+  width: 0; height: 0; flex-shrink: 0;
+  border-top: clamp(5px,1vh,9px) solid transparent;
+  border-bottom: clamp(5px,1vh,9px) solid transparent;
+  border-left: clamp(8px,1.4vh,13px) solid #22c55e;
 `;
-const LiveDot = styled.span`width:1vh;height:1vh;min-width:8px;min-height:8px;border-radius:50%;background:#fff;`;
-const ResultTag = styled.div`padding:.6vh 1vw;border-radius:999px;background:#6366f1;font-weight:900;letter-spacing:1.5px;font-size:clamp(12px,2vh,26px);`;
+const Nm = styled.span`font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12vw;`;
+const Rn = styled.span`margin-left: auto; font-weight: 900; padding-left: 1vw; em{ font-style:normal; color:#94a3b8; font-size:.62em; font-weight:700; }`;
 
-const SubStrip = styled.div`
-  width: min(1560px, 95vw); text-align:center; padding:.9vh 2vw; border-radius:12px; color:#fff;
-  background: linear-gradient(135deg,#16a34a,#15803d); font-weight:900; letter-spacing:.5px;
-  font-size: clamp(14px, 2.6vh, 34px); text-transform:uppercase;
+const BowlerCell = styled(Cell)`flex: .7; min-width: 0;`;
+const BowlFig = styled.div`font-size: clamp(14px,2.3vh,32px); font-weight: 900; color: #f8fafc; em{ font-style:normal; color:#94a3b8; font-size:.66em; font-weight:700; }`;
+
+const OverCell = styled(Cell)`flex: 1.5; min-width: 0; justify-content: center;`;
+const Balls = styled.div`display: flex; gap: .35vw; align-items: center; flex-wrap: nowrap; overflow: hidden;`;
+const Ball = styled.div`
+  width: clamp(22px,3.8vh,42px); height: clamp(22px,3.8vh,42px); border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-weight: 900; color: #fff; font-size: clamp(10px,1.7vh,20px);
+  ${p => { switch (p.$type) {
+    case "wicket": return css`background:#ef4444;`;
+    case "wide": case "noball": return css`background:#f59e0b;`;
+    case "four": return css`background:#22c55e;`;
+    case "six": return css`background:#8b5cf6;`;
+    case "dot": return css`background:#334155;color:#94a3b8;`;
+    default: return css`background:#2563eb;`;
+  } }}
 `;
+const NewOver = styled.div`color:#64748b; font-size: clamp(13px,2.2vh,28px); font-weight:700;`;
 
-/* Summary bar cells */
-const SumResult = styled(Cell)`min-width: clamp(180px, 20vw, 380px); justify-content:center;`;
-const SumResultText = styled.div`font-size: clamp(16px, 3vh, 42px); font-weight:900; color:#fff;`;
-const SumScores = styled(Cell)`min-width: clamp(180px, 20vw, 380px); gap:.6vh;`;
-const SumScore = styled.div`font-size: clamp(14px, 2.4vh, 32px); font-weight:800; color:#e2e8f0; b{ color:#60a5fa; } i{ font-style:normal; color:#94a3b8; font-size:.7em; }`;
-const SumPotm = styled(Cell)`border-right:0; min-width: clamp(160px, 16vw, 320px); justify-content:center;`;
-const PotmName = styled.div`font-size: clamp(15px, 2.6vh, 34px); font-weight:900; color:#93c5fd; em{ font-style:normal; color:#cbd5e1; font-weight:700; font-size:.72em; }`;
+const RateCell = styled(Cell)`border-right: 0; flex: 1.55; min-width: 0; align-items: flex-start; justify-content: center;`;
+const NeedLine = styled.div`font-size: clamp(14px,2.4vh,32px); font-weight: 900; color: #fca5a5; white-space: nowrap; letter-spacing: .2px;`;
+const RateSub = styled.div`font-size: clamp(11px,1.9vh,24px); font-weight: 800; color: #94a3b8; margin-top: 2px;`;
+const ResultInline = styled.div`font-size: clamp(15px,2.6vh,34px); font-weight: 900; color: #fff; max-width: 20vw;`;
 
 const IdleBadge = styled.div`
-  position: fixed; left: 3vw; bottom: 3.2vh; display:flex; align-items:center; gap:1vw;
-  padding: 1.2vh 1.6vw; border-radius: 14px; color:#fff;
+  position: fixed; left: 3vw; bottom: 3.4vh; display:flex; align-items:center; gap:1.2vw;
+  padding: 1.4vh 1.8vw; border-radius: 16px; color:#fff;
   background: linear-gradient(180deg, rgba(15,23,42,.92), rgba(11,17,32,.95));
-  border: 1px solid rgba(255,255,255,.12); box-shadow: 0 14px 40px rgba(0,0,0,.5);
-  font-family: 'Inter', sans-serif; animation: ${slideUp} .6s ease both;
-  span{ font-size: clamp(16px,2.8vh,36px); font-weight:900; }
+  border: 1px solid rgba(255,255,255,.12); box-shadow: 0 14px 40px rgba(0,0,0,.5); ${FONT}
+  animation: ${slideUp} .6s ease both;
+  img { height: clamp(40px,7vh,90px); width:auto; object-fit:contain; }
+  span { font-size: clamp(16px,2.8vh,36px); font-weight:900; }
 `;
 const Up = styled.div`font-size: clamp(11px,1.7vh,22px); color:#64748b; font-weight:800; letter-spacing:1px; margin-left:.6vw;`;
 

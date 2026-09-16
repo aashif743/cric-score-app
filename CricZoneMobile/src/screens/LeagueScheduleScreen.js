@@ -19,6 +19,7 @@ import tournamentService from '../utils/tournamentService';
 import GradientHeader from '../components/GradientHeader';
 import TournamentTopTabs from '../components/TournamentTopTabs';
 import PointsTableView from '../components/PointsTableView';
+import { TeamCrest } from '../components/LogoPicker';
 import TournamentStatsView from '../components/TournamentStatsView';
 import QualifierBracket from '../components/QualifierBracket';
 import BracketTeamPicker from '../components/BracketTeamPicker';
@@ -147,7 +148,7 @@ const AnimatedCard = ({ index, children, onPress }) => {
 
 // --- Group-stage match card ------------------------------------------------
 
-const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, isOwner }) => {
+const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, isOwner, logos = {} }) => {
   const isCompleted = match.status === 'completed';
   const isLive = match.status === 'in_progress' || match.status === 'innings_break';
   const winner = winnerOf(match);
@@ -158,9 +159,7 @@ const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, isOwner }) =>
 
   const TeamRow = ({ name, score, isWinner, color }) => (
     <View style={styles.teamRow}>
-      <View style={[styles.teamBadge, { backgroundColor: color }]}>
-        <Text style={styles.teamBadgeText}>{initial(name)}</Text>
-      </View>
+      <TeamCrest uri={logos[name]} name={name} size={32} />
       <Text
         style={[styles.teamName, isWinner && styles.teamNameWinner]}
         numberOfLines={1}
@@ -280,7 +279,7 @@ const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, isOwner }) =>
 
 // --- Knockout match card (bracket-style, polished) -------------------------
 
-const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner, koMatches, gameNoMap, onEditSlot }) => {
+const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner, koMatches, gameNoMap, onEditSlot, logos = {} }) => {
   const isCompleted = match.status === 'completed';
   const isLive = match.status === 'in_progress' || match.status === 'innings_break';
   const winner = winnerOf(match);
@@ -333,9 +332,13 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
               onPress={editA || undefined}
               disabled={!editA}
             >
-              <View style={[styles.teamBadge, { backgroundColor: teamAName === 'TBD' ? '#cbd5e1' : '#0d3b66' }]}>
-                <Text style={styles.teamBadgeText}>{teamAName === 'TBD' ? '?' : initial(teamAName)}</Text>
-              </View>
+              {teamAName === 'TBD' ? (
+                <View style={[styles.teamBadge, { backgroundColor: '#cbd5e1' }]}>
+                  <Text style={styles.teamBadgeText}>?</Text>
+                </View>
+              ) : (
+                <TeamCrest uri={logos[teamAName]} name={teamAName} size={32} />
+              )}
               <Text style={[styles.teamName, winner === teamAName && styles.teamNameWinner, teamAName === 'TBD' && styles.teamNameTBD]} numberOfLines={1}>
                 {labelA}
               </Text>
@@ -355,9 +358,13 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
               onPress={editB || undefined}
               disabled={!editB}
             >
-              <View style={[styles.teamBadge, { backgroundColor: teamBName === 'TBD' ? '#cbd5e1' : '#2d7dd2' }]}>
-                <Text style={styles.teamBadgeText}>{teamBName === 'TBD' ? '?' : initial(teamBName)}</Text>
-              </View>
+              {teamBName === 'TBD' ? (
+                <View style={[styles.teamBadge, { backgroundColor: '#cbd5e1' }]}>
+                  <Text style={styles.teamBadgeText}>?</Text>
+                </View>
+              ) : (
+                <TeamCrest uri={logos[teamBName]} name={teamBName} size={32} />
+              )}
               <Text style={[styles.teamName, winner === teamBName && styles.teamNameWinner, teamBName === 'TBD' && styles.teamNameTBD]} numberOfLines={1}>
                 {labelB}
               </Text>
@@ -800,6 +807,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
               match={m}
               onStart={handleStartMatch}
               isOwner={isOwner}
+              logos={tournament?.teamLogos || {}}
             />
           ))
         ) : activeTab.kind === 'secondround' ? (
@@ -855,6 +863,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
                 koMatches={knockoutMatches}
                 gameNoMap={koGameNos}
                 onEditSlot={openEditSlot}
+                logos={tournament?.teamLogos || {}}
               />
             ))}
           </>
@@ -878,6 +887,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
               koMatches={knockoutMatches}
               gameNoMap={koGameNos}
               onEditSlot={openEditSlot}
+              logos={tournament?.teamLogos || {}}
             />
           ))
         )}
@@ -1094,7 +1104,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginRight: 10,
   },
   teamBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800' },
-  teamName: { flex: 1, fontSize: 14, fontWeight: '600', color: '#0f172a' },
+  teamName: { flex: 1, fontSize: 14, fontWeight: '600', color: '#0f172a', marginLeft: 10 },
   teamNameWinner: { color: '#059669', fontWeight: '800' },
   teamNameTBD: { color: '#94a3b8', fontWeight: '500', fontStyle: 'italic' },
   slotEditIcon: { fontSize: 13, color: '#94a3b8', marginLeft: 6, marginRight: 2 },

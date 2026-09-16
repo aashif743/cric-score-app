@@ -17,6 +17,7 @@ import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import GradientHeader from '../components/GradientHeader';
+import LogoPicker from '../components/LogoPicker';
 import { colors, spacing, fontWeights, shadows } from '../utils/theme';
 
 // Dropdown Component (same pattern as MatchSetupScreen)
@@ -190,6 +191,25 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   // Default 'public' so the live feed has content unless the creator opts out.
   const [visibility, setVisibility] = useState(existingData?.visibility || 'public');
 
+  // Tournament crest URL, and per-team crests kept by INDEX while editing (so a
+  // rename in this screen keeps the logo attached to the right row). Converted to
+  // a name-keyed map at submit time (what the backend stores). On edit, seed the
+  // index map from the incoming name-keyed teamLogos.
+  const [logoUrl, setLogoUrl] = useState(existingData?.logoUrl || '');
+  const [teamLogosByIndex, setTeamLogosByIndex] = useState(() => {
+    const src = existingData?.teamLogos || {};
+    const names = existingData?.teamNames || [];
+    const out = {};
+    names.forEach((nm, i) => { if (src[nm]) out[i] = src[nm]; });
+    return out;
+  });
+  const setTeamLogoAt = (i, url) =>
+    setTeamLogosByIndex((prev) => {
+      const next = { ...prev };
+      if (url) next[i] = url; else delete next[i];
+      return next;
+    });
+
   // League-only configuration. Defaults match the user's example
   // (2 groups, top 2 from each → cross-paired knockout, single round-robin).
   const [numberOfGroups, setNumberOfGroups] = useState(
@@ -332,6 +352,14 @@ const TournamentCreateScreen = ({ navigation, route }) => {
             <View style={styles.teamNumberBadge}>
               <Text style={styles.teamNumberText}>{badgeLabel}</Text>
             </View>
+            <LogoPicker
+              value={teamLogosByIndex[flatIndex]}
+              onChange={(url) => setTeamLogoAt(flatIndex, url)}
+              token={user?.token}
+              folder="team"
+              name={displayName}
+              size={40}
+            />
             <Text
               style={[styles.teamNameText, isDefault && styles.teamNameTextDefault]}
               numberOfLines={1}
@@ -411,10 +439,16 @@ const TournamentCreateScreen = ({ navigation, route }) => {
       }
     }
 
+    // Build the name-keyed crest map the backend stores, from the index map.
+    const teamLogos = {};
+    finalTeamNames.forEach((nm, i) => { if (teamLogosByIndex[i]) teamLogos[nm] = teamLogosByIndex[i]; });
+
     const data = {
       name: name.trim(),
       numberOfTeams: numTeams,
       teamNames: finalTeamNames,
+      logoUrl,
+      teamLogos,
       playersPerTeam: parseInt(playersPerTeam),
       totalOvers: parseInt(totalOvers),
       ballsPerOver: parseInt(ballsPerOver),
@@ -589,9 +623,18 @@ const TournamentCreateScreen = ({ navigation, route }) => {
             {/* Tournament Name */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Tournament Name</Text>
-              <View style={styles.inputCard}>
+              <View style={[styles.inputCard, { flexDirection: 'row', alignItems: 'center' }]}>
+                <LogoPicker
+                  value={logoUrl}
+                  onChange={setLogoUrl}
+                  token={user?.token}
+                  folder="tournament"
+                  name={name}
+                  size={52}
+                  square
+                />
                 <TextInput
-                  style={styles.nameInput}
+                  style={[styles.nameInput, { flex: 1, marginLeft: 12 }]}
                   placeholder="e.g. Summer League 2025"
                   placeholderTextColor="#94a3b8"
                   value={name}
@@ -599,6 +642,7 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                   maxLength={40}
                 />
               </View>
+              <Text style={styles.logoHint}>Tap the box to add a tournament logo (optional)</Text>
             </View>
 
             {/* Match Options */}
@@ -1055,6 +1099,12 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     paddingVertical: spacing.sm,
   },
+  logoHint: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 8,
+    marginLeft: 4,
+  },
   optionsCard: {
     backgroundColor: '#fff',
     borderRadius: 20,
@@ -1178,6 +1228,7 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.semibold,
     color: '#1e293b',
     flex: 1,
+    marginLeft: 12,
   },
   teamNameTextDefault: {
     color: '#94a3b8',

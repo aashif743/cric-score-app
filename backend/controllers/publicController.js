@@ -2,6 +2,28 @@ const Tournament = require("../models/Tournament");
 const Match = require("../models/Match");
 const mongoose = require("mongoose");
 
+// Mongoose Map fields come back from .lean() as a native Map on some versions
+// and a plain object on others — normalize to a plain { name: url } object.
+const mapToObj = (m) => {
+  if (!m) return {};
+  if (m instanceof Map) return Object.fromEntries(m);
+  return m;
+};
+
+// Resolve the { teamName: logoUrl } map for a match. Tournament matches read the
+// crest from the tournament (single source of truth, never stale); standalone
+// matches fall back to any crest stored on the match itself.
+async function logosForMatch(match) {
+  if (match?.tournament) {
+    const t = await Tournament.findById(match.tournament).select("teamLogos").lean();
+    return mapToObj(t && t.teamLogos);
+  }
+  const m = {};
+  if (match?.teamA?.name && match.teamA.logoUrl) m[match.teamA.name] = match.teamA.logoUrl;
+  if (match?.teamB?.name && match.teamB.logoUrl) m[match.teamB.name] = match.teamB.logoUrl;
+  return m;
+}
+
 // Get public tournament by shareId
 exports.getPublicTournament = async (req, res) => {
   try {
@@ -317,7 +339,7 @@ exports.getPublicMatch = async (req, res) => {
 
 // Build the full overlay / TV payload from a (lean) match document. Shared by
 // the per-match overlay endpoint and the tournament TV endpoint.
-function buildOverlayData(match) {
+function buildOverlayData(match, logos = {}) {
     // Extract current innings data
     const currentInnings = match.innings === 1 ? match.innings1 : match.innings2;
     const batting = currentInnings?.batting || [];
@@ -415,11 +437,16 @@ function buildOverlayData(match) {
       teamA: {
         name: match.teamA?.name || "Team A",
         shortName: (match.teamA?.name || "TMA").substring(0, 3).toUpperCase(),
+        logoUrl: logos[match.teamA?.name] || "",
       },
       teamB: {
         name: match.teamB?.name || "Team B",
         shortName: (match.teamB?.name || "TMB").substring(0, 3).toUpperCase(),
+        logoUrl: logos[match.teamB?.name] || "",
       },
+
+      // Team-name → crest map so the board can show the batting/bowling crest.
+      logos,
 
       // Match settings
       totalOvers: match.totalOvers,
@@ -495,7 +522,7 @@ function buildOverlayData(match) {
 }
 
 // Build a Cricbuzz-style end-of-match summary from a completed match.
-function buildSummaryData(match) {
+function buildSummaryData(match, logos = {}) {
   const parseOvers = (o) => { if (!o) return 0; const p = String(o).split("."); return (parseInt(p[0] || 0)) + ((parseInt(p[1] || 0)) / 6); };
   const inningsSummary = (inn) => {
     if (!inn) return null;
@@ -536,8 +563,9 @@ function buildSummaryData(match) {
   }
 
   return {
-    teamA: { name: match.teamA?.name || "Team A", shortName: (match.teamA?.name || "TMA").substring(0, 3).toUpperCase() },
-    teamB: { name: match.teamB?.name || "Team B", shortName: (match.teamB?.name || "TMB").substring(0, 3).toUpperCase() },
+    teamA: { name: match.teamA?.name || "Team A", shortName: (match.teamA?.name || "TMA").substring(0, 3).toUpperCase(), logoUrl: logos[match.teamA?.name] || "" },
+    teamB: { name: match.teamB?.name || "Team B", shortName: (match.teamB?.name || "TMB").substring(0, 3).toUpperCase(), logoUrl: logos[match.teamB?.name] || "" },
+    logos,
     innings1: inningsSummary(match.innings1),
     innings2: inningsSummary(match.innings2),
     result: match.result || "",
@@ -559,7 +587,8 @@ exports.getOverlayData = async (req, res) => {
     if (!match) {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
-    res.json({ success: true, data: buildOverlayData(match) });
+    const logos = await logosForMatch(match);
+    res.json({ success: true, data: buildOverlayData(match, logos) });
   } catch (error) {
     console.error("Get overlay data error:", error);
     res.status(500).json({ success: false, error: "Failed to fetch overlay data." });
@@ -577,8 +606,9 @@ exports.getTournamentTV = async (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid tournament ID" });
     }
     const Tournament = require("../models/Tournament");
-    const tournament = await Tournament.findById(tournamentId).select("name").lean();
+    const tournament = await Tournament.findById(tournamentId).select("name teamLogos logoUrl").lean();
     if (!tournament) return res.status(404).json({ success: false, error: "Tournament not found" });
+    const logos = mapToObj(tournament.teamLogos);
     // No visibility gate — same trust model as the per-match overlay: the link is
     // unlisted (needs the tournament id), so the owner can broadcast their own
     // tournament to a TV whether it's public or private.
@@ -590,7 +620,7 @@ exports.getTournamentTV = async (req, res) => {
       status: { $in: ["in_progress", "innings_break"] },
     }).sort({ updatedAt: -1 }).lean();
     if (liveMatch) {
-      return res.json({ success: true, data: { tournamentName, mode: "live", matchId: String(liveMatch._id), overlay: buildOverlayData(liveMatch) } });
+      return res.json({ success: true, data: { tournamentName, tournamentLogo: tournament.logoUrl || "", mode: "live", matchId: String(liveMatch._id), overlay: buildOverlayData(liveMatch, logos) } });
     }
 
     // Otherwise show the most recently completed match's summary until the next
@@ -600,10 +630,10 @@ exports.getTournamentTV = async (req, res) => {
       status: "completed",
     }).sort({ updatedAt: -1 }).lean();
     if (lastCompleted) {
-      return res.json({ success: true, data: { tournamentName, mode: "summary", matchId: String(lastCompleted._id), summary: buildSummaryData(lastCompleted) } });
+      return res.json({ success: true, data: { tournamentName, tournamentLogo: tournament.logoUrl || "", mode: "summary", matchId: String(lastCompleted._id), summary: buildSummaryData(lastCompleted, logos) } });
     }
 
-    return res.json({ success: true, data: { tournamentName, mode: "idle" } });
+    return res.json({ success: true, data: { tournamentName, tournamentLogo: tournament.logoUrl || "", mode: "idle" } });
   } catch (error) {
     console.error("Get tournament TV error:", error);
     res.status(500).json({ success: false, error: "Failed to fetch tournament TV data." });
@@ -624,6 +654,9 @@ exports.getTVScoreboard = async (req, res) => {
     if (!match) {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
+
+    // Attach the team-name → crest map so the TV board can render logos.
+    match.logos = await logosForMatch(match);
 
     // Return full match data for TV display
     res.json({ success: true, data: match });

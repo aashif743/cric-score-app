@@ -49,6 +49,17 @@ const propagateTeamNameToTournament = async (tournamentId, oldName, newName) => 
         tournamentUpdated = true;
       }
     }
+    // Move the team's crest so the logo follows the team through a rename
+    // (teamLogos is keyed by name). Map on older docs may be undefined.
+    if (tournament.teamLogos && typeof tournament.teamLogos.get === "function") {
+      const logo = tournament.teamLogos.get(oldName);
+      if (logo !== undefined) {
+        tournament.teamLogos.set(newName, logo);
+        tournament.teamLogos.delete(oldName);
+        tournament.markModified("teamLogos");
+        tournamentUpdated = true;
+      }
+    }
     if (tournamentUpdated) await tournament.save();
   }
 
@@ -77,6 +88,16 @@ const propagateTeamNameToTournament = async (tournamentId, oldName, newName) => 
     if (sibling.innings2) {
       if (sibling.innings2.battingTeam === oldName) { sibling.innings2.battingTeam = newName; changed = true; }
       if (sibling.innings2.bowlingTeam === oldName) { sibling.innings2.bowlingTeam = newName; changed = true; }
+    }
+    // The result string ("Team A won by …") and the winner also carry the name.
+    if (sibling.result && sibling.result.includes(oldName)) {
+      sibling.result = sibling.result.split(oldName).join(newName);
+      changed = true;
+    }
+    if (sibling.matchSummary && sibling.matchSummary.winner === oldName) {
+      sibling.matchSummary.winner = newName;
+      sibling.markModified("matchSummary");
+      changed = true;
     }
     if (changed) {
       await sibling.save();

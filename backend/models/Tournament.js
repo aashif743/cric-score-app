@@ -21,6 +21,19 @@ const TournamentSchema = new mongoose.Schema({
     type: [String],
     default: []
   },
+  // Tournament crest (Cloudinary URL). Empty = no logo (UI falls back to initials).
+  logoUrl: {
+    type: String,
+    default: ""
+  },
+  // Per-team crests, keyed by team NAME (not index) so shuffling/reordering the
+  // teamNames array never scrambles which logo belongs to which team. Renames are
+  // migrated here by utils/teamRename.js so the key follows the team.
+  teamLogos: {
+    type: Map,
+    of: String,
+    default: {}
+  },
   playersPerTeam: {
     type: Number,
     default: 11,
