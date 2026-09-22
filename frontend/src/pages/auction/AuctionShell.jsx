@@ -74,8 +74,9 @@ export default function AuctionShell({ active, auctionId, auctionName, shareId, 
 
   return (
     <div className="flex min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/50 text-slate-900 transition-colors dark:from-slate-950 dark:to-slate-900/50 dark:text-white">
-      {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900 lg:block">
+      {/* Desktop sidebar — fixed to the viewport so it stays put while the page
+          scrolls (self-start stops flexbox from stretching it past 100vh). */}
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start overflow-y-auto border-r border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900 lg:block">
         <Sidebar />
       </aside>
 

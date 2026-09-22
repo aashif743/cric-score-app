@@ -41,8 +41,9 @@ export default function AuctionBigScreen() {
     const nextPlayer = pending.find((p) => String(p._id) !== String(a.currentPlayer)) || null;
     const soldCount = state.players.filter((p) => p.status === "sold").length;
     const board = [...state.teams].map((t) => {
-      const squad = state.players.filter((p) => String(p.soldTo) === String(t._id));
-      return { ...t, squad: squad.length, remaining: Math.max(0, (t.purse || 0) - (t.spent || 0)) };
+      const bought = state.players.filter((p) => String(p.soldTo) === String(t._id)).length;
+      // Retained players + a playing manager count toward the squad total.
+      return { ...t, squad: bought + (t.retainedCount || 0), remaining: Math.max(0, (t.purse || 0) - (t.spent || 0) - (t.retainedCost || 0)) };
     }).sort((x, y) => y.remaining - x.remaining);
     return { a, money, current, bidTeam, nextPlayer, soldCount, board, total: state.players.length };
   }, [state]);

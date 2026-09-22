@@ -21,20 +21,35 @@ function nextIncrement(currentBid, tiers) {
   return list[list.length - 1].step;
 }
 
+// Retained players + managers who play fill squad slots and (optionally) lock up
+// purse. Computed inline so it works on lean docs (no virtuals) too.
+function retainedCostOf(team) {
+  const players = (team.retainedPlayers || []).reduce((s, p) => s + (p.price || 0), 0);
+  const mgrs = (team.managers || []).reduce((s, m) => s + (m.price || 0), 0);
+  return players + mgrs;
+}
+function retainedCountOf(team) {
+  const players = (team.retainedPlayers || []).length;
+  const playingMgrs = (team.managers || []).filter((m) => m.plays).length;
+  return players + playingMgrs;
+}
+
 // The most a team may bid right now: its remaining purse, minus enough to still
 // fill its remaining minimum squad slots (so it can't strand itself).
 async function maxBidForTeam(auction, team) {
-  const remaining = Math.max(0, (team.purse || 0) - (team.spent || 0));
+  const remaining = Math.max(0, (team.purse || 0) - (team.spent || 0) - retainedCostOf(team));
   if (!auction.settings?.enforceMaxBid) return remaining;
 
   const minSquad = auction.settings?.minSquadSize || 0;
   if (minSquad <= 0) return remaining;
 
-  const squadCount = await AuctionPlayer.countDocuments({
+  const boughtCount = await AuctionPlayer.countDocuments({
     auction: auction._id,
     soldTo: team._id,
     status: "sold",
   });
+  // Retained players already fill slots, so they count toward the minimum too.
+  const squadCount = boughtCount + retainedCountOf(team);
   const slotsNeeded = Math.max(0, minSquad - squadCount);
   if (slotsNeeded <= 1) return remaining;
 
@@ -58,8 +73,27 @@ async function getState(auctionId) {
       ? Bid.find({ player: auction.currentPlayer }).sort({ seq: -1 }).limit(10).lean()
       : Promise.resolve([]),
   ]);
-  // Attach live remaining purse (virtuals aren't present on lean docs).
-  teams.forEach((t) => { t.remaining = Math.max(0, (t.purse || 0) - (t.spent || 0)); });
+  // Attach live remaining purse + retained figures (virtuals aren't present on
+  // lean docs). Remaining subtracts both auction spend and retained cost.
+  // Also attach `maxBid` — the most a team may bid right now under the
+  // minimum-squad protection — mirroring maxBidForTeam() but computed from the
+  // already-loaded players (no extra DB queries).
+  const enforce = auction.settings?.enforceMaxBid;
+  const minSquad = auction.settings?.minSquadSize || 0;
+  const pendingBasePrices = players.filter((p) => p.status === "pending").map((p) => p.basePrice || 0);
+  const floor = pendingBasePrices.length ? Math.min(...pendingBasePrices) : 0;
+  teams.forEach((t) => {
+    t.retainedCost = retainedCostOf(t);
+    t.retainedCount = retainedCountOf(t);
+    t.remaining = Math.max(0, (t.purse || 0) - (t.spent || 0) - t.retainedCost);
+    if (!enforce || minSquad <= 0) {
+      t.maxBid = t.remaining;
+    } else {
+      const bought = players.filter((p) => p.status === "sold" && String(p.soldTo) === String(t._id)).length;
+      const slotsNeeded = Math.max(0, minSquad - (bought + t.retainedCount));
+      t.maxBid = slotsNeeded <= 1 ? t.remaining : Math.max(0, t.remaining - (slotsNeeded - 1) * floor);
+    }
+  });
   return { auction, teams, players, recentBids: bids };
 }
 
@@ -96,12 +130,14 @@ async function openLot(auctionId, playerId) {
 
 // Admin marks that `teamId` bid on the current player. First bid takes the base
 // price; later bids raise by the increment tier. Rejects over-purse / max-bid.
-async function markBid(auctionId, teamId) {
-  const auction = await Auction.findById(auctionId);
+async function markBid(auctionOrId, teamId) {
+  // Accept an already-loaded auction doc (the controller has one from the
+  // ownership check) to skip a redundant fetch on this hot path.
+  const auction = auctionOrId && auctionOrId._id ? auctionOrId : await Auction.findById(auctionOrId);
   if (!auction) throw new Error("Auction not found");
   if (!auction.currentPlayer) throw new Error("No player on the block");
 
-  const team = await AuctionTeam.findOne({ _id: teamId, auction: auctionId });
+  const team = await AuctionTeam.findOne({ _id: teamId, auction: auction._id });
   if (!team) throw new Error("Team not found");
 
   // A team already holding the highest bid can't outbid itself.
@@ -281,6 +317,29 @@ async function movePlayer(auctionId, playerId, direction) {
   return getState(auctionId);
 }
 
+// Re-order the WHOLE pending queue at once. mode:
+//   "shuffle"   → random (Fisher–Yates)
+//   "priceDesc" → highest base price first
+//   "priceAsc"  → lowest base price first
+//   "name"      → A→Z
+// Only pending players are touched; the current lot and sold/unsold are untouched.
+async function reorderPending(auctionId, mode) {
+  const pending = await AuctionPlayer.find({ auction: auctionId, status: "pending" }).sort({ order: 1, createdAt: 1 });
+  const ordered = [...pending];
+  if (mode === "priceDesc") ordered.sort((a, b) => (b.basePrice || 0) - (a.basePrice || 0));
+  else if (mode === "priceAsc") ordered.sort((a, b) => (a.basePrice || 0) - (b.basePrice || 0));
+  else if (mode === "name") ordered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  else {
+    for (let i = ordered.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+    }
+  }
+  const ops = ordered.map((p, idx) => ({ updateOne: { filter: { _id: p._id }, update: { $set: { order: idx } } } }));
+  if (ops.length) await AuctionPlayer.bulkWrite(ops);
+  return getState(auctionId);
+}
+
 module.exports = {
   nextIncrement,
   maxBidForTeam,
@@ -292,4 +351,5 @@ module.exports = {
   markUnsold,
   adjustBid,
   movePlayer,
+  reorderPending,
 };

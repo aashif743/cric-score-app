@@ -5,7 +5,7 @@ import jsPDF from "jspdf";
 import { FiImage, FiFileText, FiDownloadCloud, FiCheckCircle, FiAward } from "react-icons/fi";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
-import { formatMoney } from "../../utils/auctionFormat";
+import { formatMoney, retainedEntries } from "../../utils/auctionFormat";
 import AuctionShell from "./AuctionShell.jsx";
 import { Button, Spinner, toast, confirmDialog } from "../../components/auction/ui.jsx";
 
@@ -34,9 +34,11 @@ export default function AuctionResults() {
     const a = state.auction;
     const money = (n) => formatMoney(n, { symbol: a.currencySymbol, format: a.currencyFormat });
     const teams = state.teams.map((t) => {
-      const squad = state.players.filter((p) => String(p.soldTo) === String(t._id)).sort((x, y) => (y.soldPrice || 0) - (x.soldPrice || 0));
-      const spent = squad.reduce((s, p) => s + (p.soldPrice || 0), 0);
-      return { ...t, squad, spent, remaining: Math.max(0, t.purse - spent) };
+      const bought = state.players.filter((p) => String(p.soldTo) === String(t._id)).sort((x, y) => (y.soldPrice || 0) - (x.soldPrice || 0));
+      const spent = bought.reduce((s, p) => s + (p.soldPrice || 0), 0);
+      // Retained players + manager first, then bought players.
+      const squad = [...retainedEntries(t), ...bought];
+      return { ...t, squad, spent, remaining: Math.max(0, t.purse - spent - (t.retainedCost || 0)) };
     });
     const sold = state.players.filter((p) => p.status === "sold");
     const unsold = state.players.filter((p) => p.status === "unsold");
@@ -148,8 +150,11 @@ export default function AuctionResults() {
                   {t.squad.map((p) => (
                     <div key={p._id} className="flex items-center gap-2 py-1.5 text-sm">
                       <span className="flex-1 truncate font-semibold">{p.name}</span>
-                      {p.role ? <span className="text-[10px] font-bold text-slate-400">{p.role}</span> : null}
-                      <span className="font-black text-emerald-600">{money(p.soldPrice)}</span>
+                      {p.captain ? <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white" title="Captain">C</span> : null}
+                      {p.isOwner ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-indigo-700">Owner</span> : null}
+                      {p.retained ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-700">{p.manager ? (p.plays ? "Mgr · Plays" : "Manager") : "Retained"}</span> : null}
+                      {p.role && !p.manager ? <span className="text-[10px] font-bold text-slate-400">{p.role}</span> : null}
+                      <span className="font-black text-emerald-600">{p.retained && !p.soldPrice ? <span className="text-slate-400">Free</span> : money(p.soldPrice)}</span>
                     </div>
                   ))}
                 </div>

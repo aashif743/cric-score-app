@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { FiUploadCloud, FiTrash2, FiRefreshCw, FiImage } from "react-icons/fi";
+import { FiUploadCloud, FiTrash2, FiRefreshCw, FiImage, FiX } from "react-icons/fi";
 import { Spinner, toast, cx } from "./ui.jsx";
 
 // Where the Hostinger uploader lives. In production it sits at the site root
@@ -11,7 +11,7 @@ const ACCEPT = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 // Professional image picker: drag-and-drop or click, client-side validation
 // (type + size), live preview with change/remove, and an upload spinner.
 // Uploads to Hostinger and returns the public URL via onChange.
-export default function ImageUpload({ value, onChange, round = true, wide = false, label = "Photo", hint }) {
+export default function ImageUpload({ value, onChange, round = true, wide = false, compact = false, label = "Photo", hint }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -57,6 +57,42 @@ export default function ImageUpload({ value, onChange, round = true, wide = fals
   };
 
   const shape = round ? "rounded-full" : "rounded-2xl";
+
+  // Compact variant: just the avatar picker (no label block), for inline rows.
+  if (compact) {
+    return (
+      <div className="relative shrink-0">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={onDrop}
+          title={value ? "Change photo" : "Upload photo"}
+          className={cx(
+            "group grid h-11 w-11 place-items-center overflow-hidden border-2 border-dashed transition",
+            shape,
+            drag ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : "border-slate-300 bg-slate-50 hover:border-indigo-400 dark:border-white/15 dark:bg-white/5"
+          )}
+        >
+          {busy ? <Spinner size={16} className="text-indigo-500" />
+            : value ? (
+              <>
+                <img src={value} alt="" className={cx("h-full w-full object-cover", shape)} />
+                <span className="absolute inset-0 grid place-items-center bg-black/50 text-white opacity-0 transition group-hover:opacity-100"><FiRefreshCw size={13} /></span>
+              </>
+            ) : <FiImage size={17} className="text-slate-400 transition group-hover:text-indigo-500" />}
+        </button>
+        {value && !busy && (
+          <button type="button" onClick={() => onChange("")} title="Remove photo"
+            className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-red-500 text-white dark:border-slate-900">
+            <FiX size={10} />
+          </button>
+        )}
+        <input ref={inputRef} type="file" accept="image/*" onChange={onPick} className="hidden" />
+      </div>
+    );
+  }
 
   // Wide banner variant (cover image): a full-width clickable dropzone.
   if (wide) {

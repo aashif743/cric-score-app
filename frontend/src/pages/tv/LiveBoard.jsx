@@ -38,7 +38,7 @@ const LiveBoard = ({ data, connected, title }) => {
           <Wkts>{data.wickets ?? 0}</Wkts>
         </ScoreLine>
         <SubLine>
-          <span>{data.overs || "0.0"}<small> OVERS</small></span>
+          <Overs>{data.overs || "0.0"}<small> OVERS</small></Overs>
           <SubDot>•</SubDot>
           <Crr>CRR <b>{data.runRate || "0.00"}</b></Crr>
         </SubLine>
@@ -193,10 +193,11 @@ const BatTeamRow = styled.div`display:flex;align-items:center;justify-content:ce
 const BatLogo = styled.img`height:clamp(30px,6vh,100px);width:clamp(30px,6vh,100px);border-radius:50%;object-fit:cover;background:#fff;flex-shrink:0;`;
 const BatTeam = styled.div`font-size:clamp(26px,5.4vh,96px);font-weight:900;letter-spacing:-1px;color:#60a5fa;max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.05;`;
 const ScoreLine = styled.div`display:flex;align-items:baseline;justify-content:center;line-height:.82;`;
-const Runs = styled.span`font-size:clamp(120px,33vh,480px);font-weight:900;letter-spacing:-6px;background:linear-gradient(180deg,#fff,#cbd5e1);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;`;
-const Slash = styled.span`font-size:clamp(64px,16vh,220px);color:#475569;font-weight:300;margin:0 .5vw;`;
-const Wkts = styled.span`font-size:clamp(70px,18vh,260px);font-weight:800;color:#f87171;`;
+const Runs = styled.span`font-size:clamp(150px,42vh,620px);font-weight:900;letter-spacing:-6px;background:linear-gradient(180deg,#fff,#cbd5e1);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;`;
+const Slash = styled.span`font-size:clamp(80px,20vh,280px);color:#475569;font-weight:300;margin:0 .5vw;`;
+const Wkts = styled.span`font-size:clamp(92px,23vh,340px);font-weight:800;color:#f87171;`;
 const SubLine = styled.div`margin-top:.6vh;display:flex;align-items:center;gap:1.6vw;font-size:clamp(22px,4.4vh,66px);font-weight:800;color:#cbd5e1;small{font-size:.5em;color:#94a3b8;margin-left:6px;letter-spacing:1px;}`;
+const Overs = styled.span`font-size:clamp(30px,6.4vh,100px);font-weight:900;color:#e2e8f0;small{font-size:.42em;color:#94a3b8;margin-left:6px;letter-spacing:1px;}`;
 const SubDot = styled.span`color:#475569;`;
 const Crr = styled.span`color:#94a3b8;b{color:#22c55e;}`;
 const ChaseStrip = styled.div`margin-top:1.4vh;display:flex;align-items:center;gap:1.4vw;flex-wrap:wrap;justify-content:center;padding:1.2vh 2vw;border-radius:2vh;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);`;

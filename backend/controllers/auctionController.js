@@ -258,30 +258,103 @@ exports.deleteAuction = async (req, res) => {
 
 // -------------------------------------------------------------------- Teams ---
 
+// Normalize incoming retained players / manager from a request body.
+const cleanRetainedPlayers = (arr) =>
+  (Array.isArray(arr) ? arr : [])
+    .map((p) => ({
+      name: String(p?.name || "").trim(),
+      role: String(p?.role || "").trim(),
+      price: Math.max(0, Math.round(Number(p?.price) || 0)),
+      photoUrl: String(p?.photoUrl || "").trim(),
+    }))
+    .filter((p) => p.name);
+const cleanManagers = (arr) => {
+  const list = (Array.isArray(arr) ? arr : [])
+    .map((m) => ({
+      name: String(m?.name || "").trim(),
+      plays: !!m?.plays,
+      price: Math.max(0, Math.round(Number(m?.price) || 0)),
+      photoUrl: String(m?.photoUrl || "").trim(),
+      email: String(m?.email || "").trim().toLowerCase(),
+      isOwner: !!m?.isOwner,
+    }))
+    .filter((m) => m.name);
+  // Exactly one owner — keep the first flagged, clear the rest.
+  let ownerTaken = false;
+  list.forEach((m) => { if (m.isOwner && !ownerTaken) ownerTaken = true; else m.isOwner = false; });
+  return list;
+};
+
+// Captain must be one of the pre-included members (a retained player or manager)
+// by name; anything else resolves to "no captain".
+const resolveCaptain = (captainName, retainedPlayers, managers) => {
+  const nm = String(captainName || "").trim();
+  if (!nm) return "";
+  const names = [...retainedPlayers.map((p) => p.name), ...managers.map((m) => m.name)];
+  return names.includes(nm) ? nm : "";
+};
+
+// The owner is a manager flagged isOwner (with a login email). Mirror that into
+// the team's owner login fields, re-linking + re-inviting when the email
+// changes. Only call this when the managers list is actually being set, so a
+// logo-only update never wipes an existing owner.
+async function syncOwnerFromManagers(team) {
+  const owner = (team.managers || []).find((m) => m.isOwner && m.email);
+  const email = owner ? owner.email.toLowerCase() : "";
+  team.ownerName = owner ? owner.name : "";
+  if (email !== (team.ownerEmail || "")) {
+    team.ownerUser = email ? await findUserByEmail(email) : null;
+    team.inviteStatus = email ? "pending" : "none";
+  }
+  team.ownerEmail = email;
+}
+// Retention cost/count for validation (mirrors the model virtuals).
+const retentionOf = (retainedPlayers, managers) => {
+  const cost = retainedPlayers.reduce((s, p) => s + p.price, 0) + managers.reduce((s, m) => s + m.price, 0);
+  const count = retainedPlayers.length + managers.filter((m) => m.plays).length;
+  return { cost, count };
+};
+// Validate retention fits within the team's purse and squad target. Returns an
+// error string or null.
+const retentionError = (auction, purse, retainedPlayers, managers) => {
+  const { cost, count } = retentionOf(retainedPlayers, managers);
+  if (cost > purse) return "Retained players / managers cost more than the team's purse.";
+  // Only cap by squad size when retained members are counted WITHIN that number
+  // (when they're "extra on top", they can exceed players-per-team freely).
+  const includes = auction.settings?.squadIncludesRetained !== false;
+  const squad = auction.settings?.playersPerTeam || 0;
+  if (includes && squad > 0 && count > squad) return `A team can't have more retained/playing members (${count}) than its squad size (${squad}).`;
+  return null;
+};
+
 exports.addTeam = async (req, res) => {
   try {
     const auction = await loadOwned(req, res);
     if (!auction) return;
-    const { name, shortName, logoUrl, ownerName, ownerEmail, purse } = req.body;
+    const { name, shortName, logoUrl, purse } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: "Team name is required" });
     }
     const count = await AuctionTeam.countDocuments({ auction: auction._id });
-    const cleanEmail = (ownerEmail || "").toLowerCase();
-    const team = await AuctionTeam.create({
+    const teamPurse = purse != null ? purse : auction.settings?.defaultPurse || 0;
+    const retainedPlayers = cleanRetainedPlayers(req.body.retainedPlayers);
+    const managers = cleanManagers(req.body.managers);
+    const rErr = retentionError(auction, teamPurse, retainedPlayers, managers);
+    if (rErr) return res.status(400).json({ success: false, error: rErr });
+    const team = new AuctionTeam({
       auction: auction._id,
       name: name.trim(),
       shortName: (shortName || name).trim().substring(0, 4).toUpperCase(),
       logoUrl: logoUrl || "",
-      ownerName: ownerName || "",
-      ownerEmail: cleanEmail,
-      // Link an existing account immediately so the invite reaches them, but the
-      // owner must still accept before the auction shows on their dashboard.
-      ownerUser: cleanEmail ? await findUserByEmail(cleanEmail) : null,
-      inviteStatus: cleanEmail ? "pending" : "none",
-      purse: purse != null ? purse : auction.settings?.defaultPurse || 0,
+      purse: teamPurse,
+      retainedPlayers,
+      managers,
+      captainName: resolveCaptain(req.body.captainName, retainedPlayers, managers),
       order: count,
     });
+    // Owner login comes from the owner manager (isOwner + email).
+    await syncOwnerFromManagers(team);
+    await team.save();
     const state = await engine.getState(auction._id);
     broadcast(req, auction._id, state);
     res.status(201).json({ success: true, data: team });
@@ -297,17 +370,21 @@ exports.updateTeam = async (req, res) => {
     if (!auction) return;
     const team = await AuctionTeam.findOne({ _id: req.params.teamId, auction: auction._id });
     if (!team) return res.status(404).json({ success: false, error: "Team not found" });
-    const fields = ["name", "shortName", "logoUrl", "ownerName", "purse", "order"];
+    const fields = ["name", "shortName", "logoUrl", "purse", "order"];
     fields.forEach((f) => { if (req.body[f] !== undefined) team[f] = req.body[f]; });
-    if (req.body.ownerEmail !== undefined) {
-      const cleanEmail = (req.body.ownerEmail || "").toLowerCase();
-      // Re-link + re-invite whenever the email actually changes.
-      if (cleanEmail !== team.ownerEmail) {
-        team.ownerUser = cleanEmail ? await findUserByEmail(cleanEmail) : null;
-        team.inviteStatus = cleanEmail ? "pending" : "none";
-      }
-      team.ownerEmail = cleanEmail;
+    if (req.body.retainedPlayers !== undefined) team.retainedPlayers = cleanRetainedPlayers(req.body.retainedPlayers);
+    if (req.body.managers !== undefined) {
+      team.managers = cleanManagers(req.body.managers);
+      // Owner login is derived from the owner manager — only when managers are
+      // submitted, so a logo-only update never clears an existing owner.
+      await syncOwnerFromManagers(team);
     }
+    if (req.body.captainName !== undefined) {
+      team.captainName = resolveCaptain(req.body.captainName, team.retainedPlayers || [], team.managers || []);
+    }
+    // Re-validate retention against the (possibly updated) purse & squad target.
+    const rErr = retentionError(auction, team.purse, team.retainedPlayers || [], team.managers || []);
+    if (rErr) return res.status(400).json({ success: false, error: rErr });
     await team.save();
     const state = await engine.getState(auction._id);
     broadcast(req, auction._id, state);
@@ -456,19 +533,27 @@ function liveAction(engineFn) {
 }
 
 exports.openLot = liveAction((req, a) => engine.openLot(a._id, req.body.playerId));
-exports.markBid = liveAction((req, a) => engine.markBid(a._id, req.body.teamId));
+exports.markBid = liveAction((req, a) => engine.markBid(a, req.body.teamId));
 exports.adjustBid = liveAction((req, a) => engine.adjustBid(a._id, req.body.direction));
 exports.movePlayer = liveAction((req, a) => engine.movePlayer(a._id, req.body.playerId, req.body.direction));
+exports.reorderPending = liveAction((req, a) => engine.reorderPending(a._id, req.body.mode));
 exports.undoBid = liveAction((req, a) => engine.undoBid(a._id));
 exports.sellCurrent = liveAction((req, a) => engine.sellCurrent(a._id));
 exports.markUnsold = liveAction((req, a) => engine.markUnsold(a._id));
 
 // Put every unsold player back into the pool (a common end-of-round move).
+// Re-auctioned players join the BACK of the current pending queue (fresh order
+// values) so they don't jump ahead of players still waiting — from there they
+// can be shuffled / reordered like any other pending player.
 exports.reauctionUnsold = liveAction(async (req, a) => {
-  await AuctionPlayer.updateMany(
-    { auction: a._id, status: "unsold" },
-    { $set: { status: "pending", soldTo: null, soldPrice: null } }
-  );
+  const lastPending = await AuctionPlayer.findOne({ auction: a._id, status: "pending" })
+    .sort({ order: -1 }).select("order").lean();
+  let nextOrder = (lastPending?.order ?? -1) + 1;
+  const unsold = await AuctionPlayer.find({ auction: a._id, status: "unsold" }).sort({ order: 1, createdAt: 1 });
+  const ops = unsold.map((p) => ({
+    updateOne: { filter: { _id: p._id }, update: { $set: { status: "pending", soldTo: null, soldPrice: null, order: nextOrder++ } } },
+  }));
+  if (ops.length) await AuctionPlayer.bulkWrite(ops);
   return engine.getState(a._id);
 });
 

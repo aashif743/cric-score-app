@@ -42,6 +42,44 @@ export function shortMoney(amount, format = "inr") {
   return formatMoney(amount, { symbol: "", format }).trim();
 }
 
+// Group a raw amount into thousands-separated digits for INPUT fields, e.g.
+// 100000 → "100,000". Strips anything non-numeric first, so it's safe to feed a
+// partially-typed or already-formatted value. Empty → "".
+export function groupDigits(value) {
+  const digits = String(value ?? "").replace(/[^\d]/g, "");
+  return digits ? Number(digits).toLocaleString("en-US") : "";
+}
+
+// A team's retained players + manager as squad-shaped rows, so squad lists can
+// show them alongside bought players. Shaped like a sold player (soldPrice = the
+// retention price) with `retained: true` for tagging. The manager only occupies
+// a playing slot when `plays` is on, but is still shown for context.
+export function retainedEntries(team) {
+  const cap = (team?.captainName || "").trim();
+  const isCap = (name) => !!cap && name === cap;
+  const rows = (team?.retainedPlayers || []).map((p, i) => ({
+    _id: `ret-${p._id || i}-${p.name}`,
+    name: p.name, role: p.role || "", category: "", photoUrl: p.photoUrl || "",
+    soldPrice: p.price || 0, retained: true, captain: isCap(p.name),
+  }));
+  (team?.managers || []).forEach((m, i) => {
+    rows.push({
+      _id: `mgr-${m._id || i}-${m.name}`,
+      name: m.name, role: "Manager", category: "", photoUrl: m.photoUrl || "",
+      soldPrice: m.price || 0, retained: true, manager: true, plays: !!m.plays,
+      isOwner: !!m.isOwner, captain: isCap(m.name),
+    });
+  });
+  return rows;
+}
+
+// Money a team has left to bid: purse minus auction spend minus retained cost.
+export function teamRemaining(team) {
+  if (!team) return 0;
+  if (typeof team.remaining === "number") return team.remaining; // server-computed
+  return Math.max(0, (team.purse || 0) - (team.spent || 0) - (team.retainedCost || 0));
+}
+
 // What the next bid will cost, mirroring the server engine: the first bid on a
 // lot takes the base price, later bids add the increment for the current tier.
 // (Display only — the server re-validates authoritatively.)

@@ -47,8 +47,13 @@ const auctionSchema = mongoose.Schema(
       defaultPurse: { type: Number, default: 10000000 }, // ₹1 Cr
       // Starting/minimum bid used as the default base price for new players.
       minBid: { type: Number, default: 0 },
-      // Target number of players each team fills.
+      // Number of players entered per team. Retention is available on every
+      // auction; this flag says how that number relates to retained members:
+      //   true  → it's the FULL squad — retained players / playing managers
+      //           count toward it, so those teams buy fewer at auction.
+      //   false → it's how many to BUY at auction; retained/managers are extra.
       playersPerTeam: { type: Number, default: 11 },
+      squadIncludesRetained: { type: Boolean, default: true },
       // Bid increment tiers: while currentBid < upTo, raise by step. The last
       // tier should have upTo:null (applies above everything else).
       incrementTiers: {
@@ -64,8 +69,8 @@ const auctionSchema = mongoose.Schema(
           { upTo: null, step: 1000000 }, //     above ₹1 Cr → +₹10 L
         ],
       },
-      minSquadSize: { type: Number, default: 0 },
-      maxSquadSize: { type: Number, default: 25 },
+      minSquadSize: { type: Number, default: 11 },
+      maxSquadSize: { type: Number, default: 15 },
       // Stop a team bidding so high it can't still fill its minimum squad.
       enforceMaxBid: { type: Boolean, default: true },
       // 'manual' → the auctioneer marks each bid (real-event). 'online' → team

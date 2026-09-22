@@ -10,7 +10,7 @@ import auctionService from "../../utils/auctionService";
 import { CURRENCIES, parseMoney, formatMoney, currencyMeta } from "../../utils/auctionFormat";
 import AuctionShell from "./AuctionShell.jsx";
 import ImageUpload from "../../components/auction/ImageUpload";
-import { Button, Field, Input, Select, Toggle, toast, cx } from "../../components/auction/ui.jsx";
+import { Button, Field, Input, MoneyInput, Select, Toggle, toast, cx } from "../../components/auction/ui.jsx";
 
 const SPORTS = ["Cricket", "Football", "Basketball", "Volleyball", "Badminton", "Other"];
 
@@ -24,6 +24,7 @@ export default function AuctionCreate() {
     name: "", sport: "Cricket", venue: "", date: "", time: "",
     currencyCode: "LKR",
     purse: "", minBid: "", increment: "", playersPerTeam: "11",
+    squadIncludesRetained: true,
     remoteBidding: false, visibility: "public",
   });
   const set = (k, v) => { setF((p) => ({ ...p, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); };
@@ -55,7 +56,8 @@ export default function AuctionCreate() {
           minBid: f.minBid.trim() ? parseMoney(f.minBid) : 0,
           playersPerTeam: players,
           incrementTiers: [{ upTo: null, step: parseMoney(f.increment) }],
-          minSquadSize: 0, maxSquadSize: players,
+          minSquadSize: 11, maxSquadSize: 15,
+          squadIncludesRetained: f.squadIncludesRetained,
           biddingMode: f.remoteBidding ? "online" : "manual",
           enforceMaxBid: true,
         },
@@ -116,17 +118,39 @@ export default function AuctionCreate() {
                 </Select>
               </Field>
               <Field label="Purse per team" required error={errors.purse} hint={`Total each team can spend`}>
-                <Input value={f.purse} onChange={(e) => set("purse", e.target.value)} placeholder={cur.format === "points" ? "100000" : "1,000,000"} error={!!errors.purse} />
+                <MoneyInput value={f.purse} onChange={(v) => set("purse", v)} placeholder={cur.format === "points" ? "100,000" : "1,000,000"} error={!!errors.purse} />
               </Field>
               <Field label="Minimum / base bid" error={errors.minBid} hint="Starting price for a player">
-                <Input value={f.minBid} onChange={(e) => set("minBid", e.target.value)} placeholder={cur.format === "points" ? "500" : "10,000"} error={!!errors.minBid} />
+                <MoneyInput value={f.minBid} onChange={(v) => set("minBid", v)} placeholder={cur.format === "points" ? "500" : "10,000"} error={!!errors.minBid} />
               </Field>
-              <Field label="Bid increment" required error={errors.increment} hint="Each raise goes up by this">
-                <Input value={f.increment} onChange={(e) => set("increment", e.target.value)} placeholder={cur.format === "points" ? "100" : "5,000"} error={!!errors.increment} />
+              <Field label="Bid increment" required error={errors.increment} hint="Base raise — set tiers later in Settings">
+                <MoneyInput value={f.increment} onChange={(v) => set("increment", v)} placeholder={cur.format === "points" ? "100" : "5,000"} error={!!errors.increment} />
               </Field>
               <Field label="Players per team" required error={errors.playersPerTeam}>
                 <Input icon={FiUsers} type="number" min="1" value={f.playersPerTeam} onChange={(e) => set("playersPerTeam", e.target.value)} error={!!errors.playersPerTeam} />
               </Field>
+
+              {/* How players-per-team relates to retained players / managers.
+                  Retention is available on every auction (add them per team in Setup). */}
+              <div className="sm:col-span-2">
+                <div className="mb-1.5 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Retained players &amp; managers</div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    { k: true, t: "Included in this number", d: `They fill some of the ${f.playersPerTeam || "N"} slots — the team buys the rest.` },
+                    { k: false, t: "Extra, on top", d: `The team buys ${f.playersPerTeam || "N"} at auction; retained/managers add to the squad.` },
+                  ].map((o) => {
+                    const active = f.squadIncludesRetained === o.k;
+                    return (
+                      <button key={String(o.k)} type="button" onClick={() => set("squadIncludesRetained", o.k)}
+                        className={cx("relative rounded-2xl border-2 p-3.5 text-left transition", active ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : "border-slate-200 hover:border-slate-300 dark:border-white/10 dark:hover:border-white/20")}>
+                        {active && <span className="absolute right-2.5 top-2.5 grid h-5 w-5 place-items-center rounded-full bg-indigo-600 text-white"><FiCheck size={11} /></span>}
+                        <div className={cx("text-sm font-black", active ? "text-indigo-700 dark:text-indigo-300" : "text-slate-800 dark:text-slate-100")}>{o.t}</div>
+                        <div className="mt-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">{o.d}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
             <div className="mt-4 rounded-2xl bg-slate-50 p-4 dark:bg-white/5">
               <Toggle checked={f.remoteBidding} onChange={(v) => set("remoteBidding", v)}

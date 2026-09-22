@@ -7,12 +7,13 @@ import {
 } from "react-icons/fi";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
-import { formatMoney, parseMoney, CURRENCIES, auctionCurrencyCode } from "../../utils/auctionFormat";
+import { formatMoney, parseMoney, groupDigits, CURRENCIES, auctionCurrencyCode } from "../../utils/auctionFormat";
 import ImageUpload from "../../components/auction/ImageUpload";
 import AuctionShell from "./AuctionShell.jsx";
 import {
-  Button, Field, Input, Textarea, Select, Toggle, EmptyState, Spinner, toast, confirmDialog, isEmail, cx,
+  Button, Field, Input, MoneyInput, Textarea, Select, Toggle, EmptyState, Spinner, toast, confirmDialog, isEmail, cx,
 } from "../../components/auction/ui.jsx";
+import { FiTrendingUp, FiX, FiStar, FiAward } from "react-icons/fi";
 
 const ROLES = ["Batsman", "Bowler", "All-rounder", "Wicket-keeper"];
 
@@ -84,7 +85,7 @@ export default function AuctionSetup() {
           ))}
         </div>
 
-        {tab === "Teams" && <TeamsTab id={id} token={user.token} teams={teams} defaultPurse={auction.settings.defaultPurse} money={money} onChange={setState} />}
+        {tab === "Teams" && <TeamsTab id={id} token={user.token} teams={teams} auction={auction} defaultPurse={auction.settings.defaultPurse} money={money} onChange={setState} />}
         {tab === "Players" && <PlayersTab id={id} token={user.token} players={players} money={money} onChange={setState} />}
         {tab === "Settings" && <SettingsTab id={id} token={user.token} auction={auction} money={money} onChange={setState} />}
       </div>
@@ -119,18 +120,20 @@ const SectionTitle = ({ children }) => (
 );
 
 // ------------------------------------------------------------------ Teams ---
-function TeamsTab({ id, token, teams, defaultPurse, money, onChange }) {
-  const blank = { name: "", ownerName: "", ownerEmail: "", purse: "", logoUrl: "" };
+function TeamsTab({ id, token, teams, auction, defaultPurse, money, onChange }) {
+  const squadSize = auction?.settings?.playersPerTeam || 0;
+  const includesRetained = auction?.settings?.squadIncludesRetained !== false;
+  const blank = { name: "", purse: "", logoUrl: "" };
   const [form, setForm] = useState(blank);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(null); // team id whose retention editor is open
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); };
 
   const validate = () => {
     const e = {};
     if (!form.name.trim()) e.name = "Team name is required.";
     else if (teams.some((t) => t.name.toLowerCase() === form.name.trim().toLowerCase())) e.name = "A team with this name already exists.";
-    if (form.ownerEmail.trim() && !isEmail(form.ownerEmail)) e.ownerEmail = "Enter a valid email address.";
     if (form.purse.trim() && parseMoney(form.purse) <= 0) e.purse = "Enter a valid purse amount.";
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -141,7 +144,7 @@ function TeamsTab({ id, token, teams, defaultPurse, money, onChange }) {
     try {
       setBusy(true);
       await auctionService.addTeam(id, {
-        name: form.name.trim(), ownerName: form.ownerName.trim(), ownerEmail: form.ownerEmail.trim().toLowerCase(),
+        name: form.name.trim(),
         logoUrl: form.logoUrl, purse: form.purse ? parseMoney(form.purse) : defaultPurse,
       }, token);
       setForm(blank); setErrors({});
@@ -167,42 +170,253 @@ function TeamsTab({ id, token, teams, defaultPurse, money, onChange }) {
           <Field label="Team name" required error={errors.name}>
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Colombo Kings" error={!!errors.name} onKeyDown={(e) => e.key === "Enter" && add()} />
           </Field>
-          <Field label="Owner name" hint="Optional">
-            <Input value={form.ownerName} onChange={(e) => set("ownerName", e.target.value)} placeholder="e.g. Kamal Perera" />
-          </Field>
-          <Field label="Owner email (login)" error={errors.ownerEmail} hint="Owners log in with this to follow their team">
-            <Input type="email" value={form.ownerEmail} onChange={(e) => set("ownerEmail", e.target.value)} placeholder="owner@email.com" error={!!errors.ownerEmail} />
-          </Field>
           <Field label="Purse" error={errors.purse} hint={`Leave blank to use the default (${money(defaultPurse)})`}>
-            <Input value={form.purse} onChange={(e) => set("purse", e.target.value)} placeholder={money(defaultPurse)} error={!!errors.purse} onKeyDown={(e) => e.key === "Enter" && add()} />
+            <MoneyInput value={form.purse} onChange={(v) => set("purse", v)} placeholder={groupDigits(defaultPurse)} error={!!errors.purse} onKeyDown={(e) => e.key === "Enter" && add()} />
           </Field>
         </div>
+        <p className="mt-3 text-xs font-medium text-slate-400">Add the team's owner &amp; managers, retained players and captain from <span className="font-bold text-slate-500 dark:text-slate-300">Manage squad</span> after the team is created.</p>
         <div className="mt-4"><Button icon={FiPlus} loading={busy} onClick={add}>Add team</Button></div>
       </Card>
 
       {teams.length === 0 ? (
         <EmptyState icon={FiUsers} title="No teams yet" desc="Add the bidding teams above. You need at least 2 to run an auction." />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {teams.map((t, i) => (
+        <div className="grid gap-3">
+          {teams.map((t, i) => {
+            const rc = t.retainedCount || 0;
+            // "Included" mode: retained fill some of the N slots → buy the rest.
+            // "Extra" mode: buy all N; retained add to the squad on top.
+            const buys = includesRetained ? Math.max(0, squadSize - rc) : squadSize;
+            const total = includesRetained ? squadSize : squadSize + rc;
+            return (
             <motion.div key={t._id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-              className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/5">
-              <div className="flex min-w-0 items-center gap-3">
-                {t.logoUrl ? <img src={t.logoUrl} alt="" className="h-11 w-11 rounded-full object-cover" /> : <div className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-black text-white">{t.name[0]}</div>}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate font-black text-slate-900 dark:text-white">{t.name}</span>
-                    {t.ownerEmail && <InviteChip status={t.inviteStatus} />}
+              className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+              <div className="flex items-center justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <ImageUpload compact round value={t.logoUrl}
+                    onChange={async (url) => { await auctionService.updateTeam(id, t._id, { logoUrl: url }, token); onChange(await auctionService.get(id, token)); }} />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate font-black text-slate-900 dark:text-white">{t.name}</span>
+                      {t.ownerEmail && <InviteChip status={t.inviteStatus} />}
+                    </div>
+                    <div className="truncate text-xs text-slate-500 dark:text-slate-400">{t.ownerName || "No owner"} {t.ownerEmail ? `· ${t.ownerEmail}` : ""}</div>
+                    <div className="mt-0.5 text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                      Purse {money(t.remaining ?? t.purse)}{t.retainedCost ? <span className="font-medium text-slate-400"> · {money(t.retainedCost)} retained</span> : null}
+                    </div>
                   </div>
-                  <div className="truncate text-xs text-slate-500 dark:text-slate-400">{t.ownerName || "No owner"} {t.ownerEmail ? `· ${t.ownerEmail}` : ""}</div>
-                  <div className="mt-0.5 text-sm font-bold text-emerald-600 dark:text-emerald-400">Purse {money(t.purse)}</div>
                 </div>
+                <button onClick={() => del(t)} title="Remove team" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><FiTrash2 size={15} /></button>
               </div>
-              <button onClick={() => del(t)} title="Remove team" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><FiTrash2 size={15} /></button>
+
+              <div className="mt-3 border-t border-slate-100 pt-3 dark:border-white/10">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    {rc > 0 ? (
+                      <>Squad: <span className="font-black text-slate-700 dark:text-slate-200">{rc}</span> retained · buys <span className="font-black text-slate-700 dark:text-slate-200">{buys}</span>{squadSize ? <> · total <span className="font-black text-slate-700 dark:text-slate-200">{total}</span></> : null}</>
+                    ) : (
+                      <>No retained players / managers yet</>
+                    )}
+                  </div>
+                  <button onClick={() => setExpanded(expanded === t._id ? null : t._id)}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400">
+                    {expanded === t._id ? "Close" : "Manage squad"} <FiChevronRight size={12} className={cx("transition", expanded === t._id ? "rotate-90" : "")} />
+                  </button>
+                </div>
+                {expanded === t._id && (
+                  <RetentionEditor id={id} token={token} team={t} money={money}
+                    onSaved={async () => { onChange(await auctionService.get(id, token)); }} />
+                )}
+              </div>
             </motion.div>
-          ))}
+          );})}
         </div>
       )}
+    </div>
+  );
+}
+
+// Per-team editor for retained players + owner/managers + captain. Retained and
+// playing managers fill squad slots; optional prices deduct from the purse. One
+// manager can be the OWNER (logs in with an email); one member is the captain.
+function RetentionEditor({ id, token, team, money, onSaved }) {
+  const [managers, setManagers] = useState(
+    (team.managers || []).map((m) => ({ name: m.name || "", plays: !!m.plays, price: groupDigits(m.price || ""), showPrice: !!m.price, photoUrl: m.photoUrl || "", email: m.email || "", isOwner: !!m.isOwner }))
+  );
+  const [retained, setRetained] = useState(
+    (team.retainedPlayers || []).map((p) => ({ name: p.name || "", role: p.role || "", price: groupDigits(p.price || ""), showPrice: !!p.price, photoUrl: p.photoUrl || "" }))
+  );
+  const [captain, setCaptain] = useState(team.captainName || "");
+  const [busy, setBusy] = useState(false);
+  const addMgr = () => setManagers((m) => [...m, { name: "", plays: false, price: "", showPrice: false, photoUrl: "", email: "", isOwner: m.length === 0 }]);
+  const setMgr = (i, patch) => setManagers((m) => m.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  // Exactly one owner — set this one, clear the others.
+  const setOwner = (i) => setManagers((m) => m.map((row, idx) => ({ ...row, isOwner: idx === i })));
+  const delMgr = (i) => setManagers((m) => m.filter((_, idx) => idx !== i));
+  const addRow = () => setRetained((r) => [...r, { name: "", role: "", price: "", showPrice: false, photoUrl: "" }]);
+  const setRow = (i, patch) => setRetained((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const delRow = (i) => setRetained((r) => r.filter((_, idx) => idx !== i));
+
+  // Everyone who can be captain (named retained players + named managers).
+  const captainOptions = [
+    ...retained.filter((p) => p.name.trim()).map((p) => p.name.trim()),
+    ...managers.filter((m) => m.name.trim()).map((m) => m.name.trim()),
+  ];
+
+  const save = async () => {
+    try {
+      setBusy(true);
+      await auctionService.updateTeam(id, team._id, {
+        managers: managers
+          .filter((m) => m.name.trim())
+          .map((m) => ({ name: m.name.trim(), plays: m.plays, price: parseMoney(m.price), photoUrl: m.photoUrl || "", email: (m.email || "").trim().toLowerCase(), isOwner: !!m.isOwner })),
+        retainedPlayers: retained
+          .filter((p) => p.name.trim())
+          .map((p) => ({ name: p.name.trim(), role: p.role.trim(), price: parseMoney(p.price), photoUrl: p.photoUrl || "" })),
+        captainName: captain,
+      }, token);
+      toast.success("Squad updated.");
+      onSaved && (await onSaved());
+    } catch (e) { toast.error(e?.error || "Could not save the squad."); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mt-3 space-y-4 rounded-xl bg-slate-50 p-3.5 dark:bg-white/5">
+      {/* Retained players */}
+      <div>
+        <div className="mb-0.5 flex items-center gap-2">
+          <FiUser className="text-indigo-500" size={13} />
+          <span className="text-xs font-black uppercase tracking-wide text-slate-600 dark:text-slate-300">Retained players</span>
+        </div>
+        <p className="mb-2.5 text-[11px] font-medium text-slate-400">Already in the squad — not put up for bidding.</p>
+        <div className="space-y-2.5">
+          {retained.map((p, i) => (
+            <div key={i} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="flex items-center gap-2">
+                <ImageUpload compact round value={p.photoUrl} onChange={(url) => setRow(i, { photoUrl: url })} />
+                <Input className="min-w-0 flex-1" value={p.name} onChange={(e) => setRow(i, { name: e.target.value })} placeholder="Player name" />
+                <Select className="min-w-0 flex-1" value={p.role} onChange={(e) => setRow(i, { role: e.target.value })}>
+                  <option value="">Role…</option>
+                  {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                </Select>
+                <button type="button" onClick={() => delRow(i)} title="Remove player"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><FiTrash2 size={15} /></button>
+              </div>
+              <div className="mt-2.5">
+                <PriceControl value={p.price} shown={p.showPrice}
+                  onAdd={() => setRow(i, { showPrice: true })}
+                  onClear={() => setRow(i, { showPrice: false, price: "" })}
+                  onChange={(v) => setRow(i, { price: v })} />
+              </div>
+            </div>
+          ))}
+          {retained.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs font-medium text-slate-400 dark:border-white/10">No retained players yet.</div>}
+        </div>
+        <button type="button" onClick={addRow} className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-bold text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 dark:border-white/15 dark:text-indigo-400 dark:hover:bg-white/5">
+          <FiPlus size={14} /> Add retained player
+        </button>
+      </div>
+
+      {/* Owner & managers — one is the owner (logs in); each may play or not. */}
+      <div>
+        <div className="mb-0.5 flex items-center gap-2">
+          <FiUsers className="text-indigo-500" size={13} />
+          <span className="text-xs font-black uppercase tracking-wide text-slate-600 dark:text-slate-300">Owner &amp; managers</span>
+        </div>
+        <p className="mb-2.5 text-[11px] font-medium text-slate-400">The owner logs in with their email. A “playing” manager takes a squad slot; “staff only” doesn’t.</p>
+        <div className="space-y-2.5">
+          {managers.map((m, i) => (
+            <div key={i} className={cx("rounded-xl border bg-white p-3 dark:bg-white/[0.03]", m.isOwner ? "border-indigo-300 dark:border-indigo-500/40" : "border-slate-200 dark:border-white/10")}>
+              <div className="flex items-center gap-2">
+                <ImageUpload compact round value={m.photoUrl} onChange={(url) => setMgr(i, { photoUrl: url })} />
+                <Input className="min-w-0 flex-1" value={m.name} onChange={(e) => setMgr(i, { name: e.target.value })} placeholder="Owner / manager name" />
+                <button type="button" onClick={() => delMgr(i)} title="Remove"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><FiTrash2 size={15} /></button>
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3">
+                <PlaySegment plays={m.plays} onChange={(v) => setMgr(i, { plays: v })} />
+                <PriceControl value={m.price} shown={m.showPrice}
+                  onAdd={() => setMgr(i, { showPrice: true })}
+                  onClear={() => setMgr(i, { showPrice: false, price: "" })}
+                  onChange={(v) => setMgr(i, { price: v })} />
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => (m.isOwner ? setMgr(i, { isOwner: false }) : setOwner(i))}
+                  className={cx("inline-flex items-center gap-1.5 rounded-lg border-2 px-3 py-2 text-xs font-black transition",
+                    m.isOwner ? "border-indigo-500 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300"
+                              : "border-slate-200 text-slate-500 hover:border-indigo-300 dark:border-white/10 dark:text-slate-400")}>
+                  <FiStar size={13} className={m.isOwner ? "fill-current" : ""} /> {m.isOwner ? "Owner (logs in)" : "Make owner"}
+                </button>
+                {m.isOwner && (
+                  <Input className="min-w-0 flex-1" type="email" value={m.email} onChange={(e) => setMgr(i, { email: e.target.value })} placeholder="owner@email.com — login email" />
+                )}
+              </div>
+            </div>
+          ))}
+          {managers.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs font-medium text-slate-400 dark:border-white/10">No owner/managers yet.</div>}
+        </div>
+        <button type="button" onClick={addMgr} className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-bold text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 dark:border-white/15 dark:text-indigo-400 dark:hover:bg-white/5">
+          <FiPlus size={14} /> Add owner / manager
+        </button>
+      </div>
+
+      {/* Captain — one per team, chosen from retained players + managers. */}
+      <div>
+        <div className="mb-0.5 flex items-center gap-2">
+          <FiAward className="text-indigo-500" size={13} />
+          <span className="text-xs font-black uppercase tracking-wide text-slate-600 dark:text-slate-300">Team captain</span>
+        </div>
+        <p className="mb-2.5 text-[11px] font-medium text-slate-400">One captain per team — pick from the retained players &amp; managers above.</p>
+        <Select className="sm:max-w-xs" value={captainOptions.includes(captain) ? captain : ""} onChange={(e) => setCaptain(e.target.value)}>
+          <option value="">No captain</option>
+          {captainOptions.map((n, idx) => <option key={`${n}-${idx}`} value={n}>{n}</option>)}
+        </Select>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3 dark:border-white/10">
+        <Button icon={FiCheck} loading={busy} onClick={save}>Save squad</Button>
+        <span className="text-xs font-medium text-slate-400">Price is optional — add it only for paid retentions/managers (deducted from purse).</span>
+      </div>
+    </div>
+  );
+}
+
+// Clear two-option control for whether a manager plays. Much more readable than
+// a single ✓/✗ toggle — the active choice is filled and labelled in full.
+function PlaySegment({ plays, onChange }) {
+  const base = "rounded-md px-3 py-1.5 text-xs font-bold transition";
+  return (
+    <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-white/10 dark:bg-white/5">
+      <button type="button" onClick={() => onChange(true)}
+        className={cx(base, plays ? "bg-emerald-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white")}>
+        Plays for the team
+      </button>
+      <button type="button" onClick={() => onChange(false)}
+        className={cx(base, !plays ? "bg-slate-700 text-white shadow-sm dark:bg-white/20" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white")}>
+        Staff only
+      </button>
+    </div>
+  );
+}
+
+// Optional price: shows a compact "Add price" button until clicked, then the
+// money field (with an × to drop the price again). Keeps rows clean when most
+// retentions are free.
+function PriceControl({ value, shown, onAdd, onClear, onChange }) {
+  if (!shown) {
+    return (
+      <button type="button" onClick={onAdd}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-bold text-slate-500 transition hover:border-indigo-400 hover:text-indigo-600 dark:border-white/15 dark:text-slate-400 dark:hover:text-indigo-300">
+        <FiPlus size={12} /> Add price
+      </button>
+    );
+  }
+  return (
+    <div className="inline-flex items-center gap-1">
+      <MoneyInput className="w-40" value={value} onChange={onChange} placeholder="Price" autoFocus />
+      <button type="button" onClick={onClear} title="Remove price"
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><FiX size={14} /></button>
     </div>
   );
 }
@@ -291,7 +505,7 @@ function PlayersTab({ id, token, players, money, onChange }) {
             <Input value={form.category} onChange={(e) => set("category", e.target.value)} placeholder="e.g. A / Marquee" />
           </Field>
           <Field label="Base price" error={errors.basePrice} hint="e.g. 500,000">
-            <Input value={form.basePrice} onChange={(e) => set("basePrice", e.target.value)} placeholder="500,000" error={!!errors.basePrice} onKeyDown={(e) => e.key === "Enter" && add()} />
+            <MoneyInput value={form.basePrice} onChange={(v) => set("basePrice", v)} placeholder="500,000" error={!!errors.basePrice} onKeyDown={(e) => e.key === "Enter" && add()} />
           </Field>
           <div className="flex items-end pb-1 sm:col-span-2 lg:col-span-1">
             <Toggle checked={form.isOverseas} onChange={(v) => set("isOverseas", v)} label="Overseas player" />
@@ -323,7 +537,8 @@ function PlayersTab({ id, token, players, money, onChange }) {
             {players.map((p, i) => (
               <div key={p._id} className="flex items-center gap-3 px-5 py-3">
                 <span className="w-6 text-xs font-bold text-slate-400">{i + 1}</span>
-                {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-10 w-10 rounded-full object-cover" /> : <div className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-xs font-black text-slate-500 dark:bg-white/10 dark:text-slate-300">{p.name[0]}</div>}
+                <ImageUpload compact round value={p.photoUrl}
+                  onChange={async (url) => { await auctionService.updatePlayer(id, p._id, { photoUrl: url }, token); onChange(await auctionService.get(id, token)); }} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 font-bold text-slate-900 dark:text-white">
                     <span className="truncate">{p.name}</span>
@@ -344,49 +559,80 @@ function PlayersTab({ id, token, players, money, onChange }) {
 }
 
 // --------------------------------------------------------------- Settings ---
+// Split the stored incrementTiers into the bounded rows (each with an "up to")
+// and the single final "and above" step (the tier whose upTo is null).
+function splitTiers(incrementTiers) {
+  const list = Array.isArray(incrementTiers) && incrementTiers.length
+    ? incrementTiers
+    : [{ upTo: null, step: 500000 }];
+  const bounded = list.filter((t) => t.upTo != null).map((t) => ({ step: groupDigits(t.step), upTo: groupDigits(t.upTo) }));
+  const above = list.find((t) => t.upTo == null) || list[list.length - 1];
+  return { bounded, aboveStep: groupDigits(above?.step || 500000) };
+}
+
 function SettingsTab({ id, token, auction, money, onChange }) {
   const s = auction.settings;
+  const initTiers = splitTiers(s.incrementTiers);
   const [f, setF] = useState({
     currencyCode: auctionCurrencyCode(auction),
-    defaultPurse: money(s.defaultPurse),
-    tier1Step: money(s.incrementTiers?.[0]?.step || 500000),
-    tier1UpTo: s.incrementTiers?.[0]?.upTo ? money(s.incrementTiers[0].upTo) : "",
-    tier2Step: money(s.incrementTiers?.[1]?.step || 1000000),
+    defaultPurse: groupDigits(s.defaultPurse),
     minSquadSize: s.minSquadSize || 0,
     maxSquadSize: s.maxSquadSize || 25,
     enforceMaxBid: s.enforceMaxBid,
+    squadIncludesRetained: s.squadIncludesRetained !== false,
     biddingMode: s.biddingMode || "manual",
   });
+  // Tiered bid increments: `tiers` are bounded rows ("+step up to limit"),
+  // `aboveStep` is the raise once the bid passes the last limit.
+  const [tiers, setTiers] = useState(initTiers.bounded);
+  const [aboveStep, setAboveStep] = useState(initTiers.aboveStep);
   const [errors, setErrors] = useState({});
+  const [tierError, setTierError] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k, v) => { setF((p) => ({ ...p, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); };
+  const setTier = (i, k, v) => { setTiers((rows) => rows.map((r, idx) => (idx === i ? { ...r, [k]: v } : r))); setTierError(""); };
+  const addTier = () => setTiers((rows) => [...rows, { step: "", upTo: "" }]);
+  const removeTier = (i) => setTiers((rows) => rows.filter((_, idx) => idx !== i));
 
   const validate = () => {
     const e = {};
     if (parseMoney(f.defaultPurse) <= 0) e.defaultPurse = "Enter a valid purse (e.g. 10,000,000).";
-    if (parseMoney(f.tier1Step) <= 0) e.tier1Step = "Enter a valid increment.";
-    if (parseMoney(f.tier2Step) <= 0) e.tier2Step = "Enter a valid increment.";
     const min = Number(f.minSquadSize) || 0, max = Number(f.maxSquadSize) || 0;
     if (max <= 0) e.maxSquadSize = "Max squad size must be at least 1.";
     else if (min > max) e.maxSquadSize = "Max must be greater than or equal to min.";
+    // Tiers: every bounded row needs a positive step + limit, limits must
+    // increase, and the final "and above" step must be positive.
+    let te = "";
+    let prev = 0;
+    for (let i = 0; i < tiers.length; i++) {
+      const step = parseMoney(tiers[i].step), upTo = parseMoney(tiers[i].upTo);
+      if (step <= 0) { te = `Tier ${i + 1}: enter an increment.`; break; }
+      if (upTo <= 0) { te = `Tier ${i + 1}: enter the "up to" limit.`; break; }
+      if (upTo <= prev) { te = `Tier ${i + 1}: each "up to" limit must be higher than the one above.`; break; }
+      prev = upTo;
+    }
+    if (!te && parseMoney(aboveStep) <= 0) te = "Enter the increment for amounts above the last limit.";
+    setTierError(te);
     setErrors(e);
-    return Object.keys(e).length === 0;
+    return Object.keys(e).length === 0 && !te;
   };
 
   const save = async () => {
     if (!validate()) { toast.error("Please fix the highlighted fields."); return; }
     try {
       setBusy(true);
-      const tiers = [
-        { upTo: f.tier1UpTo ? parseMoney(f.tier1UpTo) : null, step: parseMoney(f.tier1Step) },
-        { upTo: null, step: parseMoney(f.tier2Step) },
+      const incrementTiers = [
+        ...tiers
+          .map((t) => ({ upTo: parseMoney(t.upTo), step: parseMoney(t.step) }))
+          .sort((a, b) => a.upTo - b.upTo),
+        { upTo: null, step: parseMoney(aboveStep) },
       ];
       await auctionService.update(id, {
         currencyCode: f.currencyCode,
         settings: {
-          defaultPurse: parseMoney(f.defaultPurse), incrementTiers: tiers,
+          defaultPurse: parseMoney(f.defaultPurse), incrementTiers,
           minSquadSize: Number(f.minSquadSize) || 0, maxSquadSize: Number(f.maxSquadSize) || 25,
-          enforceMaxBid: !!f.enforceMaxBid, biddingMode: f.biddingMode,
+          enforceMaxBid: !!f.enforceMaxBid, squadIncludesRetained: !!f.squadIncludesRetained, biddingMode: f.biddingMode,
         },
       }, token);
       toast.success("Settings saved.");
@@ -401,7 +647,7 @@ function SettingsTab({ id, token, auction, money, onChange }) {
   ];
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="max-w-4xl space-y-5">
       <Card>
         <SectionTitle>Bidding mode</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -420,33 +666,57 @@ function SettingsTab({ id, token, auction, money, onChange }) {
       </Card>
 
       <Card>
-        <SectionTitle>Currency</SectionTitle>
+        <SectionTitle>Currency & purse</SectionTitle>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Auction currency" hint="Amounts across the auction use this currency">
             <Select value={f.currencyCode} onChange={(e) => set("currencyCode", e.target.value)}>
               {Object.values(CURRENCIES).map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
             </Select>
           </Field>
+          <Field label="Default purse per team" required error={errors.defaultPurse} hint="Used when a team's purse is left blank">
+            <MoneyInput value={f.defaultPurse} onChange={(v) => set("defaultPurse", v)} placeholder="10,000,000" error={!!errors.defaultPurse} />
+          </Field>
         </div>
       </Card>
 
+      {/* Tiered bid increments — raise the step as the bid climbs. */}
       <Card>
-        <SectionTitle>Purse & bidding</SectionTitle>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Default purse per team" required error={errors.defaultPurse} hint="Used when a team's purse is left blank">
-            <Input value={f.defaultPurse} onChange={(e) => set("defaultPurse", e.target.value)} placeholder="10,000,000" error={!!errors.defaultPurse} />
-          </Field>
-          <div />
-          <Field label="Increment (below…)" required error={errors.tier1Step}>
-            <Input value={f.tier1Step} onChange={(e) => set("tier1Step", e.target.value)} placeholder="250,000" error={!!errors.tier1Step} />
-          </Field>
-          <Field label="…up to" hint="Bids below this use the first increment">
-            <Input value={f.tier1UpTo} onChange={(e) => set("tier1UpTo", e.target.value)} placeholder="5,000,000" />
-          </Field>
-          <Field label="Increment (above that)" required error={errors.tier2Step}>
-            <Input value={f.tier2Step} onChange={(e) => set("tier2Step", e.target.value)} placeholder="500,000" error={!!errors.tier2Step} />
-          </Field>
+        <div className="mb-1 flex items-center gap-2">
+          <FiTrendingUp className="text-indigo-500" size={16} />
+          <SectionTitle>Bid increments</SectionTitle>
         </div>
+        <p className="mb-4 text-xs font-medium text-slate-500 dark:text-slate-400">
+          Set how much each raise adds. Add tiers so the step grows as the price climbs — e.g. +10,000 up to 100,000, then +20,000 up to 500,000, then +30,000 above.
+        </p>
+        <div className="space-y-2.5">
+          {tiers.map((t, i) => (
+            <div key={i} className="flex items-end gap-2">
+              <Field label={i === 0 ? "Increment" : ""} className="flex-1">
+                <MoneyInput value={t.step} onChange={(v) => setTier(i, "step", v)} placeholder="10,000" />
+              </Field>
+              <span className="pb-3 text-xs font-bold text-slate-400">up to</span>
+              <Field label={i === 0 ? "Bid reaches" : ""} className="flex-1">
+                <MoneyInput value={t.upTo} onChange={(v) => setTier(i, "upTo", v)} placeholder="100,000" />
+              </Field>
+              <button type="button" onClick={() => removeTier(i)} title="Remove tier"
+                className="mb-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10">
+                <FiTrash2 size={15} />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-end gap-2">
+            <Field label={tiers.length === 0 ? "Increment" : ""} className="flex-1">
+              <MoneyInput value={aboveStep} onChange={(v) => { setAboveStep(v); setTierError(""); }} placeholder="30,000" />
+            </Field>
+            <span className="pb-3 text-xs font-bold text-slate-400">and above</span>
+            <div className="flex-1" />
+            <div className="mb-1 h-9 w-9 shrink-0" />
+          </div>
+        </div>
+        {tierError && <p className="mt-2 text-xs font-semibold text-red-500">{tierError}</p>}
+        <button type="button" onClick={addTier} className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400">
+          <FiPlus size={14} /> Add tier
+        </button>
       </Card>
 
       <Card>
@@ -459,9 +729,15 @@ function SettingsTab({ id, token, auction, money, onChange }) {
             <Input type="number" min="1" value={f.maxSquadSize} onChange={(e) => set("maxSquadSize", e.target.value)} placeholder="25" error={!!errors.maxSquadSize} />
           </Field>
         </div>
-        <div className="mt-4 rounded-2xl bg-slate-50 p-4 dark:bg-white/5">
-          <Toggle checked={f.enforceMaxBid} onChange={(v) => set("enforceMaxBid", v)}
-            label="Protect minimum squad" desc="Stop a team bidding beyond what it needs to still fill its minimum squad." />
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl bg-slate-50 p-4 dark:bg-white/5">
+            <Toggle checked={f.enforceMaxBid} onChange={(v) => set("enforceMaxBid", v)}
+              label="Protect minimum squad" desc="Stop a team bidding beyond what it needs to still fill its minimum squad." />
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4 dark:bg-white/5">
+            <Toggle checked={f.squadIncludesRetained} onChange={(v) => set("squadIncludesRetained", v)}
+              label="Players-per-team includes retained / managers" desc="On: retained members count within the number, so the team buys fewer. Off: they're extra on top of the number bought." />
+          </div>
         </div>
       </Card>
 

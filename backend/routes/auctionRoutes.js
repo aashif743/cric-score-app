@@ -33,6 +33,7 @@ router.post("/:id/open", protect, c.openLot);
 router.post("/:id/bid", protect, c.markBid);
 router.post("/:id/adjust-bid", protect, c.adjustBid);
 router.post("/:id/move-player", protect, c.movePlayer);
+router.post("/:id/reorder-pending", protect, c.reorderPending);
 router.post("/:id/undo", protect, c.undoBid);
 router.post("/:id/sell", protect, c.sellCurrent);
 router.post("/:id/unsold", protect, c.markUnsold);

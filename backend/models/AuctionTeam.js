@@ -1,8 +1,39 @@
 const mongoose = require("mongoose");
 
+// A player pre-assigned to a team (retained). These fill squad slots WITHOUT
+// going through the auction. `price` is an optional retention cost deducted from
+// the team's purse (0 = free slot).
+const retainedSchema = mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    role: { type: String, trim: true, default: "" },
+    price: { type: Number, default: 0 },
+    photoUrl: { type: String, default: "" },
+  },
+  { _id: true }
+);
+
+// A team manager. A team may have several, and one of them is the OWNER (the
+// person who logs in — their email drives the team's owner login). The admin
+// decides per-manager whether they also play (`plays`) — a playing manager fills
+// a squad slot. `price` is an optional cost deducted from purse.
+const managerSchema = mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    plays: { type: Boolean, default: false },
+    price: { type: Number, default: 0 },
+    photoUrl: { type: String, default: "" },
+    // The owner manager logs in with this email to follow/bid for the team.
+    email: { type: String, trim: true, lowercase: true, default: "" },
+    isOwner: { type: Boolean, default: false },
+  },
+  { _id: true }
+);
+
 // A bidding team in an auction. `spent` is the sum of its sold prices;
-// remaining purse is derived (purse - spent). An owner account can be linked by
-// email so the owner sees their team live and (Phase 2) bids from their phone.
+// remaining purse is derived (purse - spent - retained cost). An owner account
+// can be linked by email so the owner sees their team live and bids from their
+// phone.
 const auctionTeamSchema = mongoose.Schema(
   {
     auction: {
@@ -33,14 +64,39 @@ const auctionTeamSchema = mongoose.Schema(
     purse: { type: Number, required: true, default: 10000000 },
     spent: { type: Number, default: 0 },
 
+    // Pre-included players (not auctioned) and managers who may also play. Both
+    // fill squad slots and their `price` (if any) is charged to purse.
+    retainedPlayers: { type: [retainedSchema], default: [] },
+    managers: { type: [managerSchema], default: [] },
+    // The team captain (exactly one), chosen by NAME from the retained players +
+    // managers. Empty = no captain set.
+    captainName: { type: String, trim: true, default: "" },
+
     order: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
 
+// Total pre-included players that occupy a playing slot (retained players + any
+// managers marked as playing). These count toward the squad target, so the team
+// buys fewer at auction.
+auctionTeamSchema.virtual("retainedCount").get(function () {
+  const retained = (this.retainedPlayers || []).length;
+  const playingMgrs = (this.managers || []).filter((m) => m.plays).length;
+  return retained + playingMgrs;
+});
+
+// Money locked up by retentions (retained player prices + every manager's price,
+// whether or not they play).
+auctionTeamSchema.virtual("retainedCost").get(function () {
+  const players = (this.retainedPlayers || []).reduce((sum, p) => sum + (p.price || 0), 0);
+  const mgrs = (this.managers || []).reduce((sum, m) => sum + (m.price || 0), 0);
+  return players + mgrs;
+});
+
 // Convenience virtuals (included when toJSON/toObject use virtuals).
 auctionTeamSchema.virtual("remaining").get(function () {
-  return Math.max(0, (this.purse || 0) - (this.spent || 0));
+  return Math.max(0, (this.purse || 0) - (this.spent || 0) - this.retainedCost);
 });
 
 auctionTeamSchema.set("toJSON", { virtuals: true });

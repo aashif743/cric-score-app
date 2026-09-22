@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { FiCheckCircle, FiAlertTriangle, FiInfo, FiX, FiAlertCircle } from "react-icons/fi";
+import { groupDigits } from "../../utils/auctionFormat";
 
 /* ==========================================================================
    CricZone Auction — shared UI kit
@@ -67,6 +68,21 @@ export const Input = React.forwardRef(function Input({ error, icon: Icon, classN
 export function Textarea({ error, className, ...rest }) {
   return <textarea {...rest} className={cx(controlBase, "leading-relaxed", error ? controlError : controlIdle, className)} />;
 }
+
+// Money field that shows live thousands separators as you type (100000 →
+// "100,000"). Holds/returns the grouped STRING; parseMoney() strips the commas
+// on submit. Pass a plain onChange(nextString) — not an event handler.
+export const MoneyInput = React.forwardRef(function MoneyInput({ value, onChange, ...rest }, ref) {
+  return (
+    <Input
+      ref={ref}
+      inputMode="numeric"
+      value={groupDigits(value)}
+      onChange={(e) => onChange(groupDigits(e.target.value))}
+      {...rest}
+    />
+  );
+});
 
 export function Select({ error, className, children, ...rest }) {
   return (

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
-import { formatMoney, nextBidAmount } from "../../utils/auctionFormat";
+import { formatMoney, nextBidAmount, retainedEntries, teamRemaining } from "../../utils/auctionFormat";
 import ThemeToggle from "../../components/ThemeToggle.jsx";
 import { Spinner, toast } from "../../components/auction/ui.jsx";
 import brand from "../../assets/criczone_icon.png";
@@ -28,15 +28,18 @@ export default function AuctionOwner() {
     const a = state.auction;
     const money = (n) => formatMoney(n, { symbol: a.currencySymbol, format: a.currencyFormat });
     const myTeam = state.teams.find((t) => String(t._id) === String(state.myTeamId)) || null;
-    const squad = myTeam ? state.players.filter((p) => String(p.soldTo) === String(myTeam._id)) : [];
+    const bought = myTeam ? state.players.filter((p) => String(p.soldTo) === String(myTeam._id)) : [];
+    const squad = myTeam ? [...retainedEntries(myTeam), ...bought] : [];
     const current = state.players.find((p) => String(p._id) === String(a.currentPlayer)) || null;
     const bidTeam = state.teams.find((t) => String(t._id) === String(a.currentBidTeam)) || null;
-    const remaining = myTeam ? Math.max(0, myTeam.purse - myTeam.spent) : 0;
+    const remaining = teamRemaining(myTeam);
+    // Most this team may bid now under the minimum-squad protection.
+    const maxBid = typeof myTeam?.maxBid === "number" ? myTeam.maxBid : remaining;
     const online = a.settings?.biddingMode === "online";
     const next = nextBidAmount(a);
     const iAmTop = myTeam && String(a.currentBidTeam) === String(myTeam._id);
-    const canBid = online && !!current && !iAmTop && next <= remaining;
-    return { a, money, myTeam, squad, current, bidTeam, remaining, online, next, iAmTop, canBid };
+    const canBid = online && !!current && !iAmTop && next <= maxBid;
+    return { a, money, myTeam, squad, current, bidTeam, remaining, maxBid, online, next, iAmTop, canBid };
   }, [state]);
 
   const bid = async () => {
@@ -50,7 +53,7 @@ export default function AuctionOwner() {
   if (loading) return <Center text={<Spinner size={28} className="text-indigo-500" />} />;
   if (!d) return <Center text="Auction not found." />;
   if (!d.myTeam) return <Center text="You're not assigned to a team in this auction. Ask the organiser to add your email." />;
-  const { a, money, myTeam, squad, current, bidTeam, remaining, online, next, iAmTop, canBid } = d;
+  const { a, money, myTeam, squad, current, bidTeam, remaining, maxBid, online, next, iAmTop, canBid } = d;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">
@@ -92,6 +95,13 @@ export default function AuctionOwner() {
             <Stat label="Spent" value={money(myTeam.spent)} />
             <Stat label="Remaining" value={money(remaining)} highlight />
           </div>
+          <div className="mt-3 flex items-center justify-between rounded-xl bg-black/15 px-3 py-2">
+            <span className="text-xs font-bold uppercase tracking-wide text-white/70">Max bid now</span>
+            <span className="text-lg font-black tabular-nums text-amber-300">{money(maxBid)}</span>
+          </div>
+          {maxBid < remaining && (
+            <div className="mt-1 text-right text-[10px] font-medium text-white/50">Purse reserved to fill your minimum squad</div>
+          )}
         </div>
 
         {/* Current lot + bid */}
@@ -115,7 +125,7 @@ export default function AuctionOwner() {
                 <button onClick={bid} disabled={!canBid || busy}
                   className={`mt-4 w-full rounded-2xl py-4 text-lg font-black transition ${
                     canBid ? "bg-emerald-500 text-black hover:bg-emerald-400" : "cursor-not-allowed bg-slate-200 text-slate-400 dark:bg-white/10 dark:text-slate-500"}`}>
-                  {iAmTop ? "You're the top bidder" : next > remaining ? "Not enough purse" : busy ? "Bidding…" : `Bid ${money(next)}`}
+                  {iAmTop ? "You're the top bidder" : next > remaining ? "Not enough purse" : next > maxBid ? "Keep purse for min squad" : busy ? "Bidding…" : `Bid ${money(next)}`}
                 </button>
               ) : (
                 <div className="mt-4 rounded-xl bg-slate-100 py-3 text-center text-sm font-bold text-slate-500 dark:bg-white/5">Bidding is handled by the auctioneer</div>
@@ -134,9 +144,17 @@ export default function AuctionOwner() {
             <div className="divide-y divide-slate-100 dark:divide-white/10">
               {squad.map((p) => (
                 <div key={p._id} className="flex items-center gap-3 py-2.5">
-                  {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-9 w-9 rounded-full object-cover" /> : <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-500">{p.name[0]}</div>}
-                  <div className="flex-1"><div className="font-bold">{p.name}</div><div className="text-xs text-slate-500">{p.role || "—"}</div></div>
-                  <div className="font-black text-emerald-600">{money(p.soldPrice)}</div>
+                  {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-9 w-9 rounded-full object-cover" /> : <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-500 dark:bg-white/10 dark:text-slate-300">{p.name[0]}</div>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="truncate font-bold">{p.name}</span>
+                      {p.captain ? <span className="shrink-0 rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white" title="Captain">C</span> : null}
+                      {p.isOwner ? <span className="shrink-0 rounded bg-indigo-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">Owner</span> : null}
+                      {p.retained ? <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{p.manager ? (p.plays ? "Mgr · Plays" : "Manager") : "Retained"}</span> : null}
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">{p.role || "—"}</div>
+                  </div>
+                  <div className="font-black text-emerald-600 dark:text-emerald-400">{p.retained && !p.soldPrice ? <span className="text-slate-400">Free</span> : money(p.soldPrice)}</div>
                 </div>
               ))}
             </div>
