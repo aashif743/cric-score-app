@@ -3,8 +3,12 @@ const router = express.Router();
 const c = require("../controllers/auctionController");
 const { protect } = require("../middleware/authMiddleware");
 
-// Public read-only snapshot for the big screen / spectator link (no auth).
+// Public read-only feeds (no auth) — a list of currently-live auctions for the
+// app dashboard, and a full snapshot for the big screen / spectator viewer.
+router.get("/public-live", c.listPublicLiveAuctions);
 router.get("/public/:shareId", c.getPublicAuction);
+// Tournament-ready payload (teams, logos, squads) resolved from a share code.
+router.get("/import/:shareId", c.getAuctionForImport);
 
 router.route("/")
   .post(protect, c.createAuction)
@@ -34,6 +38,8 @@ router.post("/:id/bid", protect, c.markBid);
 router.post("/:id/adjust-bid", protect, c.adjustBid);
 router.post("/:id/move-player", protect, c.movePlayer);
 router.post("/:id/reorder-pending", protect, c.reorderPending);
+router.post("/:id/big-screen", protect, c.setBigScreen);
+router.post("/:id/finish", protect, c.finishAuction);
 router.post("/:id/undo", protect, c.undoBid);
 router.post("/:id/sell", protect, c.sellCurrent);
 router.post("/:id/unsold", protect, c.markUnsold);

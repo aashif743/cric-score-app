@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
 import { formatMoney } from "../../utils/auctionFormat";
+import AuctionSummaryBoard from "./AuctionSummaryBoard.jsx";
 
 // Transparent broadcast overlay for OBS / streaming software (Facebook Live,
 // YouTube, etc.). Add as a Browser Source at 1920×1080 over your live video.
@@ -49,6 +50,17 @@ export default function AuctionOverlay() {
 
   if (!d) return <div className="min-h-screen" />;
   const { a, money, current, bidTeam, board } = d;
+
+  // Auction finished → show the results summary over the stream.
+  if (a.status === "completed") {
+    return (
+      <div className="fixed inset-0 grid place-items-center p-[3vh]">
+        <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="h-full w-full overflow-hidden rounded-3xl shadow-2xl ring-1 ring-white/10">
+          <AuctionSummaryBoard state={state} variant="overlay" className="h-full" />
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className={`pointer-events-none fixed inset-x-0 ${position === "top" ? "top-0" : "bottom-0"} p-5`}>

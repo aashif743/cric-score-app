@@ -83,6 +83,9 @@ const auctionSchema = mongoose.Schema(
     currentBid: { type: Number, default: 0 },
     currentBidTeam: { type: mongoose.Schema.Types.ObjectId, ref: "AuctionTeam", default: null },
     bidCount: { type: Number, default: 0 },
+    // Big-screen focuses on the current player by default; the admin can flip this
+    // on to reveal the teams' purses on the big screen on demand.
+    showPurses: { type: Boolean, default: false },
 
     // Public read-only token for the big-screen / spectator link.
     shareId: { type: String, index: true },

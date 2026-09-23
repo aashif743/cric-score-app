@@ -34,6 +34,19 @@ const TournamentSchema = new mongoose.Schema({
     of: String,
     default: {}
   },
+  // The auction this tournament was imported from (by share code), if any.
+  auctionId: {
+    type: String,
+    default: ""
+  },
+  // Pre-filled squads imported from an auction, keyed by team NAME →
+  // [{ name, role }]. Match generation uses these to fill line-ups instead of
+  // placeholder "Team A Player 1" names. Empty = no imported squads.
+  teamSquads: {
+    type: Map,
+    of: [{ _id: false, name: String, role: String }],
+    default: {}
+  },
   playersPerTeam: {
     type: Number,
     default: 11,

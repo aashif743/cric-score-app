@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
 import { formatMoney } from "../../utils/auctionFormat";
+import AuctionSummaryBoard from "./AuctionSummaryBoard.jsx";
 
 // Cinematic projector/big-screen view of a live auction. Read-only, driven by
 // the public snapshot + socket updates. Designed for 16:9 screens.
@@ -12,7 +13,9 @@ export default function AuctionBigScreen() {
   const [state, setState] = useState(null);
   const [auctionId, setAuctionId] = useState(null);
   const [flash, setFlash] = useState(null); // { type: 'sold'|'unsold', player, team, price }
+  const [shuffle, setShuffle] = useState(null); // { mode, count } — reorder animation
   const timer = useRef(null);
+  const shuffleTimer = useRef(null);
 
   useEffect(() => {
     auctionService.getPublic(shareId).then((d) => { setState(d); setAuctionId(d.auctionId); }).catch(() => setState(null));
@@ -29,6 +32,11 @@ export default function AuctionBigScreen() {
     };
     if (payload.justSold) showFlash("sold", payload.justSold);
     else if (payload.justUnsold) showFlash("unsold", payload.justUnsold);
+    else if (payload.justReordered) {
+      setShuffle(payload.justReordered);
+      clearTimeout(shuffleTimer.current);
+      shuffleTimer.current = setTimeout(() => setShuffle(null), 3400);
+    }
   });
 
   const d = useMemo(() => {
@@ -50,6 +58,15 @@ export default function AuctionBigScreen() {
 
   if (!d) return <div className="grid min-h-screen place-items-center bg-[#05060f] text-slate-500">Connecting to the auction…</div>;
   const { a, money, current, bidTeam, nextPlayer, soldCount, board, total } = d;
+
+  // Auction finished → show the results summary instead of the live view.
+  if (a.status === "completed") {
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen">
+        <AuctionSummaryBoard state={state} variant="screen" className="min-h-screen" />
+      </motion.div>
+    );
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#05060f] text-white" style={{ backgroundColor: "#05060f" }}>
@@ -92,9 +109,9 @@ export default function AuctionBigScreen() {
         </div>
       </header>
 
-      <div className="relative grid gap-6 px-6 pb-6 lg:grid-cols-5 lg:px-10 lg:pb-10">
-        {/* Main stage */}
-        <div className="lg:col-span-3">
+      <div className={`relative grid gap-6 px-6 pb-6 lg:px-10 lg:pb-10 ${a.showPurses ? "lg:grid-cols-5" : "grid-cols-1"}`}>
+        {/* Main stage — full width by default; shares space when purses are shown */}
+        <div className={a.showPurses ? "lg:col-span-3" : ""}>
           <AnimatePresence mode="wait">
             {current ? (
               <motion.div key={current._id} initial={{ opacity: 0, y: 30, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20 }}
@@ -103,12 +120,12 @@ export default function AuctionBigScreen() {
                 <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
                   <div className="relative shrink-0">
                     {current.photoUrl
-                      ? <img src={current.photoUrl} alt="" className="h-48 w-48 rounded-3xl object-cover ring-4 ring-white/10 lg:h-56 lg:w-56" />
-                      : <div className="grid h-48 w-48 place-items-center rounded-3xl bg-gradient-to-br from-indigo-600/40 to-violet-700/40 text-7xl font-black lg:h-56 lg:w-56">{current.name[0]}</div>}
+                      ? <img src={current.photoUrl} alt="" className={`rounded-3xl object-cover ring-4 ring-white/10 ${a.showPurses ? "h-52 w-52 lg:h-64 lg:w-64" : "h-64 w-64 lg:h-80 lg:w-80"}`} />
+                      : <div className={`grid place-items-center rounded-3xl bg-gradient-to-br from-indigo-600/40 to-violet-700/40 font-black ${a.showPurses ? "h-52 w-52 text-7xl lg:h-64 lg:w-64" : "h-64 w-64 text-8xl lg:h-80 lg:w-80"}`}>{current.name[0]}</div>}
                     {current.isOverseas && <span className="absolute -right-2 -top-2 rounded-full bg-sky-500 px-3 py-1 text-xs font-black shadow-lg">✈ OVERSEAS</span>}
                   </div>
                   <div className="flex-1 text-center sm:text-left">
-                    <div className="text-4xl font-black leading-tight lg:text-6xl">{current.name}</div>
+                    <div className={`font-black leading-tight ${a.showPurses ? "text-4xl lg:text-6xl" : "text-5xl lg:text-8xl"}`}>{current.name}</div>
                     <div className="mt-2 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                       {current.role && <Tag>{current.role}</Tag>}
                       {current.category && <Tag tone="amber">{current.category}</Tag>}
@@ -166,8 +183,10 @@ export default function AuctionBigScreen() {
           )}
         </div>
 
-        {/* Teams leaderboard */}
-        <div className="lg:col-span-2">
+        {/* Teams leaderboard — only when the admin toggles "Show purses". */}
+        <AnimatePresence>
+        {a.showPurses && (
+        <motion.div key="purses" initial={{ opacity: 0, x: 48 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 48 }} transition={{ type: "spring", stiffness: 200, damping: 26 }} className="lg:col-span-2">
           <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-sm lg:p-6">
             <div className="mb-4 flex items-center justify-between">
               <div className="text-sm font-black uppercase tracking-[0.25em] text-white/40">Teams</div>
@@ -202,7 +221,9 @@ export default function AuctionBigScreen() {
               })}
             </div>
           </div>
-        </div>
+        </motion.div>
+        )}
+        </AnimatePresence>
       </div>
 
       {/* SOLD / UNSOLD flash */}
@@ -224,9 +245,50 @@ export default function AuctionBigScreen() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* PLAYERS RESHUFFLED — transparency animation when the admin reorders the
+          queue, so owners visibly see it happen. */}
+      <AnimatePresence>
+        {shuffle && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 z-40 grid place-items-center bg-black/80 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.7, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.85, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 200, damping: 16 }}
+              className="w-[min(92vw,660px)] rounded-[2.25rem] border border-white/15 bg-gradient-to-br from-indigo-600/90 to-violet-700/90 p-10 text-center shadow-2xl">
+              {/* animated deck of cards flying into order */}
+              <div className="mx-auto mb-8 flex h-24 items-center justify-center gap-2.5">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <motion.div key={i}
+                    initial={{ x: (i - 2) * 84, y: -70, rotate: (i - 2) * 20, opacity: 0 }}
+                    animate={{ x: [(i - 2) * 84, 0, 0], y: [-70, 0, 0], rotate: [(i - 2) * 20, 0, 0], opacity: 1 }}
+                    transition={{ duration: 0.9, delay: 0.08 + i * 0.11, ease: "easeOut" }}
+                    className="h-20 w-14 rounded-xl bg-white shadow-xl ring-1 ring-black/10"
+                    style={{ zIndex: 10 - i }}>
+                    <div className="mt-1.5 ml-1.5 h-2 w-6 rounded-full bg-indigo-300" />
+                  </motion.div>
+                ))}
+              </div>
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+                className="text-5xl font-black tracking-tight text-white lg:text-6xl">PLAYERS RESHUFFLED</motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.65 }}
+                className="mt-3 text-2xl font-bold text-white/85">{shuffleLabel(shuffle.mode)}</motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.78 }}
+                className="mt-1 text-base font-semibold text-white/50">{shuffle.count} players re-ordered · fair & random</motion.div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+const SHUFFLE_LABELS = {
+  shuffle: "Randomised order",
+  priceDesc: "Ordered: highest base price first",
+  priceAsc: "Ordered: lowest base price first",
+  name: "Ordered: A → Z",
+};
+const shuffleLabel = (m) => SHUFFLE_LABELS[m] || "New order";
 
 function PlayerStats({ stats }) {
   const entries = useMemo(() => {

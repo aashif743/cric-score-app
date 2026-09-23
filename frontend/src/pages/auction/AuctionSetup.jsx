@@ -13,7 +13,9 @@ import AuctionShell from "./AuctionShell.jsx";
 import {
   Button, Field, Input, MoneyInput, Textarea, Select, Toggle, EmptyState, Spinner, toast, confirmDialog, isEmail, cx,
 } from "../../components/auction/ui.jsx";
-import { FiTrendingUp, FiX, FiStar, FiAward } from "react-icons/fi";
+import { FiTrendingUp, FiX, FiStar, FiAward, FiDownload, FiFile } from "react-icons/fi";
+import * as XLSX from "xlsx";
+import { QRCodeSVG } from "qrcode.react";
 
 const ROLES = ["Batsman", "Bowler", "All-rounder", "Wicket-keeper"];
 
@@ -472,6 +474,49 @@ function PlayersTab({ id, token, players, money, onChange }) {
     finally { setBulkBusy(false); }
   };
 
+  // Download a ready-to-fill Excel template (headers + a couple of example rows).
+  const downloadTemplate = () => {
+    const example = [
+      { Name: "Kusal Mendis", "Base Price": 500000, Role: "Batsman", Category: "A", Overseas: "No" },
+      { Name: "Wanindu Hasaranga", "Base Price": 1000000, Role: "All-rounder", Category: "Marquee", Overseas: "No" },
+    ];
+    const ws = XLSX.utils.json_to_sheet(example, { header: ["Name", "Base Price", "Role", "Category", "Overseas"] });
+    ws["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Players");
+    XLSX.writeFile(wb, "criczone-players-template.xlsx");
+  };
+
+  // Read an uploaded .xlsx/.csv, map its rows to players and bulk-import them.
+  const importExcel = async (file) => {
+    if (!file) return;
+    try {
+      setBulkBusy(true);
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      const players = json.map((row) => {
+        const r = {};
+        Object.keys(row).forEach((k) => { r[String(k).trim().toLowerCase()] = row[k]; });
+        return {
+          name: String(r.name || r["player name"] || r.player || "").trim(),
+          basePrice: parseMoney(r["base price"] ?? r.baseprice ?? r.base ?? r.price ?? 0),
+          role: String(r.role || "").trim(),
+          category: String(r.category || r.grade || "").trim(),
+          isOverseas: /^(y|yes|true|1|overseas)$/i.test(String(r.overseas ?? r.isoverseas ?? "").trim()),
+        };
+      }).filter((p) => p.name);
+      if (!players.length) { toast.error("No valid rows found. Use the template's columns (Name, Base Price, Role, Category, Overseas)."); return; }
+      await auctionService.addPlayersBulk(id, players, token);
+      toast.success(`${players.length} player${players.length > 1 ? "s" : ""} imported from Excel.`);
+      setShowBulk(false);
+      onChange(await auctionService.get(id, token));
+    } catch (e) {
+      toast.error(e?.error || "Could not read that file. Use the downloaded template format.");
+    } finally { setBulkBusy(false); }
+  };
+
   const del = async (p) => {
     const ok = await confirmDialog({ title: "Remove player?", message: `Remove "${p.name}" from the pool?`, confirmText: "Remove", tone: "danger" });
     if (!ok) return;
@@ -515,12 +560,29 @@ function PlayersTab({ id, token, players, money, onChange }) {
 
         {showBulk && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="mt-5 border-t border-slate-100 pt-5 dark:border-white/10">
-            <Field label="Bulk import" hint="One player per line — Name, BasePrice, Role, Grade">
-              <Textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} placeholder={"Kusal Mendis, 1500000, Batsman, A\nWanindu Hasaranga, 1500000, Bowler, A"} />
-            </Field>
-            <div className="mt-3 flex items-center gap-3">
-              <Button variant="dark" icon={FiUploadCloud} loading={bulkBusy} onClick={importBulk}>Import {parsedBulk.length || ""} players</Button>
-              {bulk.trim() && <span className="text-xs font-bold text-slate-400">{parsedBulk.length} valid line{parsedBulk.length === 1 ? "" : "s"} detected</span>}
+            {/* Excel import */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
+              <div className="text-sm font-black text-slate-700 dark:text-slate-200">Import from Excel</div>
+              <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">Download the template, fill in your players, then upload the file. Columns: <span className="font-bold">Name, Base Price, Role, Category, Overseas</span>.</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                <Button variant="soft" icon={FiDownload} onClick={downloadTemplate}>Download template</Button>
+                <label className={cx("inline-flex cursor-pointer items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-700", bulkBusy && "cursor-not-allowed opacity-60")}>
+                  {bulkBusy ? <Spinner size={16} /> : <FiFile size={16} />} Upload Excel
+                  <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={bulkBusy}
+                    onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; importExcel(f); }} />
+                </label>
+              </div>
+            </div>
+
+            {/* Paste alternative */}
+            <div className="mt-4">
+              <Field label="Or paste a list" hint="One player per line — Name, BasePrice, Role, Grade">
+                <Textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} placeholder={"Kusal Mendis, 1500000, Batsman, A\nWanindu Hasaranga, 1500000, Bowler, A"} />
+              </Field>
+              <div className="mt-3 flex items-center gap-3">
+                <Button variant="dark" icon={FiUploadCloud} loading={bulkBusy} onClick={importBulk}>Import {parsedBulk.length || ""} players</Button>
+                {bulk.trim() && <span className="text-xs font-bold text-slate-400">{parsedBulk.length} valid line{parsedBulk.length === 1 ? "" : "s"} detected</span>}
+              </div>
             </div>
           </motion.div>
         )}
@@ -648,6 +710,26 @@ function SettingsTab({ id, token, auction, money, onChange }) {
 
   return (
     <div className="max-w-4xl space-y-5">
+      {/* Import to app — scan/share this to pull the auction's teams & players
+          into a tournament in the CricZone mobile app (usually after the auction). */}
+      <Card>
+        <SectionTitle>Import to app</SectionTitle>
+        <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
+          <div className="shrink-0 rounded-xl bg-white p-2.5 ring-1 ring-slate-200">
+            <QRCodeSVG value={typeof window !== "undefined" ? `${window.location.origin}/auction/screen/${auction.shareId}` : auction.shareId} size={116} level="M" />
+          </div>
+          <div className="min-w-0 flex-1 text-center sm:text-left">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+              In the CricZone app, create a tournament → <span className="font-bold">Import from Auction</span> → scan this QR (or paste the code) to auto-fill teams, logos &amp; squads. Best used after the auction finishes.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+              <span className="rounded-lg bg-slate-100 px-3 py-1.5 font-mono text-sm font-bold text-slate-700 dark:bg-white/10 dark:text-slate-200">{auction.shareId}</span>
+              <Button variant="soft" onClick={() => { navigator.clipboard?.writeText(auction.shareId); toast.success("Share code copied"); }}>Copy code</Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       <Card>
         <SectionTitle>Bidding mode</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2">

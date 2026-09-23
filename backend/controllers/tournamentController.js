@@ -8,21 +8,33 @@ const { propagateTeamNameToTournament } = require("../utils/teamRename");
 
 const TBD = 'TBD';
 const teamObj = (name) => ({ name, shortName: (name || TBD).substring(0, 3).toUpperCase() });
-const defaultPlayers = (teamName, count) =>
-  Array.from({ length: count || 11 }, (_, i) => ({
-    name: `${teamName} Player ${i + 1}`,
+// `squad` (optional) is an imported line-up [{ name, role }] for this team — used
+// to pre-fill real player names (from a linked auction), padded with placeholders.
+const defaultPlayers = (teamName, count, squad) => {
+  const named = Array.isArray(squad) ? squad : [];
+  return Array.from({ length: count || 11 }, (_, i) => ({
+    name: (named[i] && named[i].name) ? named[i].name : `${teamName} Player ${i + 1}`,
     runs: 0, balls: 0, fours: 0, sixes: 0,
     isOut: false, outType: 'Not Out',
   }));
-const buildInnings = (battingTeam, bowlingTeam, playersPerTeam) => ({
+};
+const buildInnings = (battingTeam, bowlingTeam, playersPerTeam, squads = {}) => ({
   battingTeam, bowlingTeam,
   runs: 0, wickets: 0, overs: '0.0', runRate: 0,
   extras: { total: 0, wides: 0, noBalls: 0, byes: 0, legByes: 0 },
   fallOfWickets: [],
-  batting: defaultPlayers(battingTeam, playersPerTeam),
-  bowling: defaultPlayers(bowlingTeam, playersPerTeam),
+  batting: defaultPlayers(battingTeam, playersPerTeam, squads[battingTeam]),
+  bowling: defaultPlayers(bowlingTeam, playersPerTeam, squads[bowlingTeam]),
   declared: false,
 });
+// Normalize a tournament's teamSquads (Map or plain object) into a name→squad
+// lookup for match generation.
+const squadsOf = (tournament) => {
+  const s = tournament && tournament.teamSquads;
+  if (!s) return {};
+  if (s instanceof Map) return Object.fromEntries(s);
+  return s;
+};
 
 // Wipe and rebuild every match for a league tournament from its current
 // settings (groups, advancing, matches-per-pair, playoff format). Used when the
@@ -52,7 +64,7 @@ const regenerateLeagueMatches = async (tournament, userId, groupsOverride) => {
       totalOvers: tournament.totalOvers, ballsPerOver: tournament.ballsPerOver,
       playersPerTeam: tournament.playersPerTeam,
       status: "scheduled", stage: "group", group: gm.group, round: gm.roundInGroup,
-      innings1: buildInnings(gm.teamA, gm.teamB, tournament.playersPerTeam),
+      innings1: buildInnings(gm.teamA, gm.teamB, tournament.playersPerTeam, squadsOf(tournament)),
     });
   }
 
@@ -138,6 +150,7 @@ exports.createTournament = async (req, res) => {
     const {
       name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
       venue, description, format, visibility, logoUrl, teamLogos,
+      auctionId, teamSquads,
       // League-only:
       numberOfGroups, teamsAdvancePerGroup, matchesPerPair, playoffFormat,
     } = req.body;
@@ -159,7 +172,11 @@ exports.createTournament = async (req, res) => {
       teamNames: teamNames || [],
       logoUrl: logoUrl || "",
       teamLogos: teamLogos || {},
-      playersPerTeam: playersPerTeam || 11,
+      auctionId: auctionId || "",
+      teamSquads: teamSquads || {},
+      // Clamp to the tournament's allowed range — an imported auction may use a
+      // larger squad size than a match line-up supports.
+      playersPerTeam: Math.min(11, Math.max(2, playersPerTeam || 11)),
       totalOvers: totalOvers || 20,
       ballsPerOver: ballsPerOver || 6,
       venue: venue || "",
@@ -204,7 +221,7 @@ exports.createTournament = async (req, res) => {
           bracketSlot: def.bracketSlot,
           nextMatchId: def.parentRound ? idMap[`${def.parentRound}_${def.parentSlot}`] : null,
           nextMatchSlot: def.parentRound ? def.parentSide : null,
-          innings1: buildInnings(aName, bName, tournament.playersPerTeam),
+          innings1: buildInnings(aName, bName, tournament.playersPerTeam, squadsOf(tournament)),
         });
         idMap[`${def.round}_${def.bracketSlot}`] = created._id;
       }
@@ -245,7 +262,7 @@ exports.createTournament = async (req, res) => {
           stage: "group",
           group: gm.group,
           round: gm.roundInGroup,
-          innings1: buildInnings(gm.teamA, gm.teamB, tournament.playersPerTeam),
+          innings1: buildInnings(gm.teamA, gm.teamB, tournament.playersPerTeam, squadsOf(tournament)),
         });
       }
 
@@ -386,6 +403,7 @@ exports.updateTournament = async (req, res) => {
     const {
       name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
       venue, description, status, visibility, logoUrl, teamLogos,
+      auctionId, teamSquads,
       numberOfGroups, teamsAdvancePerGroup, matchesPerPair, playoffFormat,
     } = req.body;
 
@@ -416,6 +434,11 @@ exports.updateTournament = async (req, res) => {
     if (teamLogos !== undefined) {
       tournament.teamLogos = teamLogos || {};
       tournament.markModified("teamLogos");
+    }
+    if (auctionId !== undefined) tournament.auctionId = auctionId || "";
+    if (teamSquads !== undefined) {
+      tournament.teamSquads = teamSquads || {};
+      tournament.markModified("teamSquads");
     }
 
     // --- League structure -----------------------------------------------------

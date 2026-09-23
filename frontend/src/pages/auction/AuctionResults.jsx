@@ -7,6 +7,7 @@ import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
 import { formatMoney, retainedEntries } from "../../utils/auctionFormat";
 import AuctionShell from "./AuctionShell.jsx";
+import AuctionSummaryBoard from "./AuctionSummaryBoard.jsx";
 import { Button, Spinner, toast, confirmDialog } from "../../components/auction/ui.jsx";
 
 export default function AuctionResults() {
@@ -123,59 +124,20 @@ export default function AuctionResults() {
         <div className="mb-5 inline-flex items-center gap-2 rounded-xl bg-emerald-100 px-4 py-2.5 text-sm font-black text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><FiCheckCircle /> Auction completed</div>
       )}
 
-      {/* Exportable results card (kept light for clean exports) */}
-      <div ref={cardRef} className="overflow-hidden rounded-3xl bg-white text-slate-900 shadow-sm ring-1 ring-slate-200">
-        <div className="flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-700 px-6 py-5 text-white">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-widest text-white/70">Auction Results</div>
-            <div className="text-2xl font-black">{a.name}</div>
-          </div>
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/15 text-xl font-black">C</div>
-        </div>
-
-        <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
-          {teams.map((t) => (
-            <div key={t._id} className="rounded-2xl border border-slate-200 p-4">
-              <div className="mb-2 flex items-center gap-2">
-                {t.logoUrl ? <img src={t.logoUrl} alt="" className="h-8 w-8 rounded-lg object-cover" /> : <div className="grid h-8 w-8 place-items-center rounded-lg bg-slate-900 text-xs font-black text-white">{t.name[0]}</div>}
-                <div className="flex-1">
-                  <div className="font-black">{t.name}</div>
-                  <div className="text-[11px] font-semibold text-slate-500">{t.squad.length} players · Spent {money(t.spent)} · Left {money(t.remaining)}</div>
-                </div>
-              </div>
-              {t.squad.length === 0 ? (
-                <div className="py-3 text-center text-xs text-slate-400">No players bought</div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {t.squad.map((p) => (
-                    <div key={p._id} className="flex items-center gap-2 py-1.5 text-sm">
-                      <span className="flex-1 truncate font-semibold">{p.name}</span>
-                      {p.captain ? <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white" title="Captain">C</span> : null}
-                      {p.isOwner ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-indigo-700">Owner</span> : null}
-                      {p.retained ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-700">{p.manager ? (p.plays ? "Mgr · Plays" : "Manager") : "Retained"}</span> : null}
-                      {p.role && !p.manager ? <span className="text-[10px] font-bold text-slate-400">{p.role}</span> : null}
-                      <span className="font-black text-emerald-600">{p.retained && !p.soldPrice ? <span className="text-slate-400">Free</span> : money(p.soldPrice)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {unsold.length > 0 && (
-          <div className="border-t border-slate-100 px-6 py-4">
-            <div className="mb-1 text-xs font-black uppercase tracking-wide text-slate-400">Unsold ({unsold.length})</div>
-            <div className="flex flex-wrap gap-1.5">
-              {unsold.map((p) => <span key={p._id} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{p.name}</span>)}
-            </div>
-          </div>
-        )}
-
-        <div className="flex items-center justify-center gap-2 bg-slate-900 py-3 text-xs font-semibold text-white/70">
-          <FiAward size={13} /> Generated with <span className="font-black text-white">CricZone</span>
-        </div>
+      {/* Exportable results card — professional summary with logo + watermark
+          (the same board used on the big screen / OBS when the auction finishes). */}
+      <div ref={cardRef}>
+        <AuctionSummaryBoard state={state} variant="export" className="rounded-3xl shadow-sm ring-1 ring-slate-200" />
       </div>
+
+      {unsold.length > 0 && (
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="mb-2 text-xs font-black uppercase tracking-wide text-slate-400">Unsold players ({unsold.length})</div>
+          <div className="flex flex-wrap gap-1.5">
+            {unsold.map((p) => <span key={p._id} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">{p.name}</span>)}
+          </div>
+        </div>
+      )}
     </AuctionShell>
   );
 }

@@ -22,6 +22,7 @@ import LeaguePointsTableScreen from '../screens/LeaguePointsTableScreen';
 import TournamentStatsScreen from '../screens/TournamentStatsScreen';
 import FullBracketScreen from '../screens/FullBracketScreen';
 import PublicLiveMatchScreen from '../screens/PublicLiveMatchScreen';
+import LiveAuctionScreen from '../screens/LiveAuctionScreen';
 
 // Tab Navigator
 import BottomTabNavigator from '../components/BottomTabNavigator';
@@ -66,6 +67,7 @@ const AppNavigator = () => {
             <Stack.Screen name="TournamentStats" component={TournamentStatsScreen} />
             <Stack.Screen name="FullBracket" component={FullBracketScreen} />
             <Stack.Screen name="PublicLiveMatch" component={PublicLiveMatchScreen} />
+            <Stack.Screen name="LiveAuction" component={LiveAuctionScreen} />
           </>
         ) : (
           // Non-authenticated user screens

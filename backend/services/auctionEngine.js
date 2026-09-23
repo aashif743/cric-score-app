@@ -174,7 +174,7 @@ async function markBid(auctionOrId, teamId) {
   auction.bidCount = seq;
   await auction.save();
 
-  return getState(auctionId);
+  return getState(auction._id);
 }
 
 // Revert the last bid on the current lot (mis-click safety).
@@ -317,6 +317,33 @@ async function movePlayer(auctionId, playerId, direction) {
   return getState(auctionId);
 }
 
+// Finish the auction: mark it completed and clear the block. The big screen /
+// OBS switch to the results summary automatically (they read auction.status).
+async function finishAuction(auctionOrId) {
+  const auction = auctionOrId && auctionOrId._id ? auctionOrId : await Auction.findById(auctionOrId);
+  if (!auction) throw new Error("Auction not found");
+  if (auction.currentPlayer) {
+    await AuctionPlayer.updateMany({ auction: auction._id, status: "current" }, { $set: { status: "pending" } });
+  }
+  auction.status = "completed";
+  auction.currentPlayer = null;
+  auction.currentBid = 0;
+  auction.currentBidTeam = null;
+  auction.bidCount = 0;
+  auction.showPurses = false;
+  await auction.save();
+  return getState(auction._id);
+}
+
+// Toggle whether the big screen shows the teams' purses (admin control).
+async function setBigScreen(auctionOrId, patch) {
+  const auction = auctionOrId && auctionOrId._id ? auctionOrId : await Auction.findById(auctionOrId);
+  if (!auction) throw new Error("Auction not found");
+  if (patch && typeof patch.showPurses === "boolean") auction.showPurses = patch.showPurses;
+  await auction.save();
+  return getState(auction._id);
+}
+
 // Re-order the WHOLE pending queue at once. mode:
 //   "shuffle"   → random (Fisher–Yates)
 //   "priceDesc" → highest base price first
@@ -337,7 +364,9 @@ async function reorderPending(auctionId, mode) {
   }
   const ops = ordered.map((p, idx) => ({ updateOne: { filter: { _id: p._id }, update: { $set: { order: idx } } } }));
   if (ops.length) await AuctionPlayer.bulkWrite(ops);
-  return getState(auctionId);
+  // Flag the reorder so viewers (big screen) can play a transparency animation —
+  // owners see the shuffle happened live.
+  return { state: await getState(auctionId), reordered: { mode: mode || "shuffle", count: ordered.length } };
 }
 
 module.exports = {
@@ -352,4 +381,6 @@ module.exports = {
   adjustBid,
   movePlayer,
   reorderPending,
+  setBigScreen,
+  finishAuction,
 };

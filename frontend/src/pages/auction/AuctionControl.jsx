@@ -3,13 +3,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   FiChevronLeft, FiAward, FiMonitor, FiRotateCcw, FiX, FiCheck, FiRefreshCw, FiInbox,
-  FiVideo, FiPlus, FiMinus, FiArrowUp, FiArrowDown, FiChevronsUp, FiZap, FiPlay, FiShuffle,
+  FiVideo, FiPlus, FiMinus, FiArrowUp, FiArrowDown, FiChevronsUp, FiZap, FiPlay, FiShuffle, FiDollarSign, FiCheckCircle,
 } from "react-icons/fi";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
 import { formatMoney, teamRemaining, retainedEntries, nextBidAmount } from "../../utils/auctionFormat";
-import { Spinner, toast, cx } from "../../components/auction/ui.jsx";
+import { Spinner, toast, cx, confirmDialog } from "../../components/auction/ui.jsx";
 
 export default function AuctionControl() {
   const { id } = useParams();
@@ -123,6 +123,23 @@ export default function AuctionControl() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => act(() => auctionService.setBigScreen(id, !a.showPurses, user.token))}
+              className={cx("inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition",
+                a.showPurses ? "bg-emerald-500 text-black hover:bg-emerald-400" : "bg-white/10 hover:bg-white/20")}
+              title="Show or hide the teams' purses on the big screen">
+              <FiDollarSign size={14} /> {a.showPurses ? "Purses: ON" : "Show purses"}
+            </button>
+            {a.status !== "completed" && (
+              <button
+                onClick={async () => {
+                  const ok = await confirmDialog({ title: "Finish this auction?", message: "This ends the auction and marks it completed. The big screen and OBS overlay will switch to the results summary. You can still view/export results afterwards.", confirmText: "Finish auction", tone: "danger" });
+                  if (ok) act(() => auctionService.finish(id, user.token));
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-red-500 px-3 py-2 text-xs font-black text-white transition hover:bg-red-600"
+                title="End the auction and show the results">
+                <FiCheckCircle size={14} /> Finish
+              </button>
+            )}
             <TopBtn onClick={() => navigate(`/auctions/${id}/results`)} icon={FiAward}>Results</TopBtn>
             <TopBtn onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/auction/overlay/${a.shareId}`); toast.success("Stream overlay link copied — add it as an OBS Browser Source (1920×1080)."); }} icon={FiVideo}>Overlay link</TopBtn>
             <a href={`/auction/screen/${a.shareId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold transition hover:bg-white/20"><FiMonitor size={14} /> Big Screen ↗</a>

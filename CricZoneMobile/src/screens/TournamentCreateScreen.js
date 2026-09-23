@@ -15,6 +15,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
+import auctionService from '../utils/auctionService';
+import QRScanModal from '../components/QRScanModal';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import GradientHeader from '../components/GradientHeader';
 import LogoPicker from '../components/LogoPicker';
@@ -209,6 +211,46 @@ const TournamentCreateScreen = ({ navigation, route }) => {
       if (url) next[i] = url; else delete next[i];
       return next;
     });
+
+  // Auction import (by public share code). Squads are name-keyed and sent to the
+  // backend so the tournament's matches pre-fill real players.
+  const [auctionId, setAuctionId] = useState(existingData?.auctionId || '');
+  const [teamSquads, setTeamSquads] = useState(existingData?.teamSquads || {});
+  const [auctionName, setAuctionName] = useState('');
+  const [importCode, setImportCode] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+
+  const handleImportAuction = async (codeOverride) => {
+    const code = String(codeOverride != null ? codeOverride : importCode).trim();
+    if (!code) { Alert.alert('Enter a code', "Paste or scan the auction's share code to import."); return; }
+    setImporting(true);
+    try {
+      const d = await auctionService.getImportData(code, user?.token);
+      if (!d || !Array.isArray(d.teamNames) || d.teamNames.length === 0) {
+        Alert.alert('Not found', 'No auction/teams found for that code.');
+        return;
+      }
+      const names = d.teamNames;
+      setNumberOfTeams(String(names.length));
+      setTeamNames(names);
+      // name-keyed logos → index map for this screen
+      const idxLogos = {};
+      names.forEach((nm, i) => { if (d.teamLogos && d.teamLogos[nm]) idxLogos[i] = d.teamLogos[nm]; });
+      setTeamLogosByIndex(idxLogos);
+      if (d.playersPerTeam) setPlayersPerTeam(String(Math.min(11, Math.max(2, d.playersPerTeam))));
+      setTeamSquads(d.teamSquads || {});
+      setAuctionId(d.auctionId || '');
+      setAuctionName(d.auctionName || 'Auction');
+      setImportCode('');
+      const squadTeams = Object.values(d.teamSquads || {}).filter((s) => s && s.length).length;
+      Alert.alert('Imported ✓', `${names.length} teams from "${d.auctionName || 'auction'}"${squadTeams ? `, ${squadTeams} with squads` : ''}. Players will pre-fill in the matches.`);
+    } catch (e) {
+      Alert.alert('Import failed', e?.error || e?.response?.data?.error || 'Could not import that auction.');
+    } finally { setImporting(false); }
+  };
+
+  const clearImport = () => { setAuctionId(''); setAuctionName(''); setTeamSquads({}); };
 
   // League-only configuration. Defaults match the user's example
   // (2 groups, top 2 from each → cross-paired knockout, single round-robin).
@@ -443,12 +485,19 @@ const TournamentCreateScreen = ({ navigation, route }) => {
     const teamLogos = {};
     finalTeamNames.forEach((nm, i) => { if (teamLogosByIndex[i]) teamLogos[nm] = teamLogosByIndex[i]; });
 
+    // Imported squads — keep only those whose team name still matches (a rename
+    // after import drops the stale squad and falls back to placeholders).
+    const squadsPayload = {};
+    finalTeamNames.forEach((nm) => { if (teamSquads && teamSquads[nm] && teamSquads[nm].length) squadsPayload[nm] = teamSquads[nm]; });
+
     const data = {
       name: name.trim(),
       numberOfTeams: numTeams,
       teamNames: finalTeamNames,
       logoUrl,
       teamLogos,
+      auctionId,
+      teamSquads: squadsPayload,
       playersPerTeam: parseInt(playersPerTeam),
       totalOvers: parseInt(totalOvers),
       ballsPerOver: parseInt(ballsPerOver),
@@ -643,6 +692,48 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                 />
               </View>
               <Text style={styles.logoHint}>Tap the box to add a tournament logo (optional)</Text>
+            </View>
+
+            {/* Import from auction */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Import from Auction</Text>
+              {auctionId ? (
+                <View style={styles.importedCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.importedLabel}>LINKED AUCTION</Text>
+                    <Text style={styles.importedName} numberOfLines={1}>🔗 {auctionName || 'Auction'}</Text>
+                    <Text style={styles.importedMeta}>{teamNames.filter(Boolean).length} teams · players will pre-fill in matches</Text>
+                  </View>
+                  <TouchableOpacity onPress={clearImport} style={styles.importClearBtn}>
+                    <Text style={styles.importClearText}>Unlink</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.importCard}>
+                  <Text style={styles.importHint}>Scan or paste an auction's share code to auto-fill its teams, logos & squads.</Text>
+                  <TouchableOpacity style={styles.scanBtn} onPress={() => setShowScanner(true)} disabled={importing}>
+                    <Text style={styles.scanIcon}>▣</Text>
+                    <Text style={styles.scanBtnText}>Scan QR code</Text>
+                  </TouchableOpacity>
+                  <View style={styles.importOrRow}>
+                    <View style={styles.importOrLine} /><Text style={styles.importOrText}>or paste code</Text><View style={styles.importOrLine} />
+                  </View>
+                  <View style={styles.importRow}>
+                    <TextInput
+                      style={styles.importInput}
+                      placeholder="Auction share code"
+                      placeholderTextColor="#94a3b8"
+                      value={importCode}
+                      onChangeText={setImportCode}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity style={[styles.importBtn, importing && { opacity: 0.6 }]} onPress={() => handleImportAuction()} disabled={importing}>
+                      {importing ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.importBtnText}>Import</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
 
             {/* Match Options */}
@@ -947,6 +1038,12 @@ const TournamentCreateScreen = ({ navigation, route }) => {
         onSave={handleTeamNameModalSave}
         onClose={closeTeamNameModal}
       />
+
+      <QRScanModal
+        visible={showScanner}
+        onClose={() => setShowScanner(false)}
+        onScanned={(code) => { setShowScanner(false); setImportCode(code); handleImportAuction(code); }}
+      />
     </SafeAreaView>
   );
 };
@@ -1105,6 +1202,37 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginLeft: 4,
   },
+  importCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: spacing.lg,
+    borderWidth: 1.5,
+    borderColor: '#e0e7ff',
+    ...shadows.sm,
+  },
+  importHint: { fontSize: 12.5, color: '#64748b', fontWeight: '500', marginBottom: 12 },
+  scanBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 13 },
+  scanIcon: { color: '#fff', fontSize: 18, fontWeight: '900' },
+  scanBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  importOrRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 12 },
+  importOrLine: { flex: 1, height: 1, backgroundColor: '#e2e8f0' },
+  importOrText: { fontSize: 11, color: '#94a3b8', fontWeight: '700' },
+  importRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  importInput: {
+    flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, fontWeight: '600', color: '#0f172a',
+  },
+  importBtn: { backgroundColor: '#4f46e5', borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, minWidth: 84, alignItems: 'center', justifyContent: 'center' },
+  importBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  importedCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#eef2ff', borderRadius: 16, padding: spacing.lg, borderWidth: 1.5, borderColor: '#c7d2fe',
+  },
+  importedLabel: { fontSize: 9, fontWeight: '900', letterSpacing: 1, color: '#818cf8' },
+  importedName: { fontSize: 16, fontWeight: '800', color: '#3730a3', marginTop: 2 },
+  importedMeta: { fontSize: 11.5, color: '#6366f1', fontWeight: '600', marginTop: 3 },
+  importClearBtn: { backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#c7d2fe' },
+  importClearText: { color: '#4f46e5', fontWeight: '800', fontSize: 12.5 },
   optionsCard: {
     backgroundColor: '#fff',
     borderRadius: 20,

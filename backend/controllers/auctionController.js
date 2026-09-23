@@ -200,6 +200,102 @@ exports.getPublicAuction = async (req, res) => {
   }
 };
 
+// Tournament-ready snapshot of an auction, resolved by its public share code
+// (no auth — the code is the permission). Returns team names, logos, squad size,
+// and each team's playing squad (retained + managers who play + bought players)
+// so the app can pre-fill a tournament without re-entering teams/players.
+exports.getAuctionForImport = async (req, res) => {
+  try {
+    const auction = await Auction.findOne({ shareId: req.params.shareId })
+      .select("_id name settings.playersPerTeam").lean();
+    if (!auction) return res.status(404).json({ success: false, error: "No auction found for that code." });
+
+    const [teams, soldPlayers] = await Promise.all([
+      AuctionTeam.find({ auction: auction._id }).sort({ order: 1, createdAt: 1 }).lean(),
+      AuctionPlayer.find({ auction: auction._id, status: "sold" }).select("name role soldTo").lean(),
+    ]);
+
+    const boughtByTeam = {};
+    soldPlayers.forEach((p) => {
+      const k = String(p.soldTo);
+      (boughtByTeam[k] = boughtByTeam[k] || []).push({ name: p.name, role: p.role || "" });
+    });
+
+    const teamNames = [];
+    const teamLogos = {};
+    const teamSquads = {};
+    teams.forEach((t) => {
+      teamNames.push(t.name);
+      if (t.logoUrl) teamLogos[t.name] = t.logoUrl;
+      // Playing squad: retained players + managers who play + bought players.
+      // Non-playing (staff) managers are left out of the line-up.
+      const squad = [
+        ...(t.retainedPlayers || []).map((p) => ({ name: p.name, role: p.role || "" })),
+        ...(t.managers || []).filter((m) => m.plays).map((m) => ({ name: m.name, role: "" })),
+        ...(boughtByTeam[String(t._id)] || []),
+      ].filter((p) => p.name && p.name.trim());
+      teamSquads[t.name] = squad;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        auctionId: String(auction._id),
+        auctionName: auction.name,
+        numberOfTeams: teamNames.length,
+        playersPerTeam: auction.settings?.playersPerTeam || 11,
+        teamNames, teamLogos, teamSquads,
+      },
+    });
+  } catch (error) {
+    console.error("Auction import error:", error);
+    res.status(500).json({ success: false, error: "Could not load that auction." });
+  }
+};
+
+// Public feed of currently-active auctions for the app dashboard (no auth).
+// Lightweight summaries only — the detail screen fetches the full snapshot.
+exports.listPublicLiveAuctions = async (req, res) => {
+  try {
+    const auctions = await Auction.find({ visibility: "public", status: { $in: ["live", "paused"] } })
+      .select("name logoUrl coverUrl venue status shareId currentBid currentPlayer currentBidTeam bidCount currencyCode currencyFormat currencySymbol updatedAt")
+      .sort({ updatedAt: -1 })
+      .limit(30)
+      .lean();
+
+    const data = await Promise.all(auctions.map(async (a) => {
+      const [teamsCount, playersTotal, playersSold, currentPlayer, topTeam] = await Promise.all([
+        AuctionTeam.countDocuments({ auction: a._id }),
+        AuctionPlayer.countDocuments({ auction: a._id }),
+        AuctionPlayer.countDocuments({ auction: a._id, status: "sold" }),
+        a.currentPlayer ? AuctionPlayer.findById(a.currentPlayer).select("name photoUrl basePrice role").lean() : null,
+        a.currentBidTeam ? AuctionTeam.findById(a.currentBidTeam).select("name logoUrl").lean() : null,
+      ]);
+      return {
+        _id: String(a._id),
+        name: a.name,
+        logoUrl: a.logoUrl || "",
+        coverUrl: a.coverUrl || "",
+        venue: a.venue || "",
+        status: a.status,
+        shareId: a.shareId,
+        currencyCode: a.currencyCode, currencyFormat: a.currencyFormat, currencySymbol: a.currencySymbol,
+        currentBid: a.currentBid || 0,
+        bidCount: a.bidCount || 0,
+        currentPlayer: currentPlayer ? { name: currentPlayer.name, photoUrl: currentPlayer.photoUrl || "", basePrice: currentPlayer.basePrice || 0, role: currentPlayer.role || "" } : null,
+        topTeam: topTeam ? { name: topTeam.name, logoUrl: topTeam.logoUrl || "" } : null,
+        teamsCount, playersTotal, playersSold,
+        updatedAt: a.updatedAt,
+      };
+    }));
+
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error("List public live auctions error:", error);
+    res.status(500).json({ success: false, error: "Failed to load live auctions" });
+  }
+};
+
 exports.updateAuction = async (req, res) => {
   try {
     const auction = await loadOwned(req, res);
@@ -524,7 +620,11 @@ function liveAction(engineFn) {
       if (!auction) return;
       const result = await engineFn(req, auction);
       const state = result.state || result;
-      broadcast(req, auction._id, state, result.sold ? { justSold: result.sold } : result.unsold ? { justUnsold: result.unsold } : {});
+      const extra = result.sold ? { justSold: result.sold }
+        : result.unsold ? { justUnsold: result.unsold }
+        : result.reordered ? { justReordered: result.reordered }
+        : {};
+      broadcast(req, auction._id, state, extra);
       res.json({ success: true, data: state });
     } catch (error) {
       res.status(400).json({ success: false, error: error.message || "Action failed" });
@@ -537,6 +637,8 @@ exports.markBid = liveAction((req, a) => engine.markBid(a, req.body.teamId));
 exports.adjustBid = liveAction((req, a) => engine.adjustBid(a._id, req.body.direction));
 exports.movePlayer = liveAction((req, a) => engine.movePlayer(a._id, req.body.playerId, req.body.direction));
 exports.reorderPending = liveAction((req, a) => engine.reorderPending(a._id, req.body.mode));
+exports.setBigScreen = liveAction((req, a) => engine.setBigScreen(a, { showPurses: req.body.showPurses }));
+exports.finishAuction = liveAction((req, a) => engine.finishAuction(a));
 exports.undoBid = liveAction((req, a) => engine.undoBid(a._id));
 exports.sellCurrent = liveAction((req, a) => engine.sellCurrent(a._id));
 exports.markUnsold = liveAction((req, a) => engine.markUnsold(a._id));

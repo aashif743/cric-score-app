@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AuthContext } from '../context/AuthContext';
 import LiveMatchesStrip from '../components/LiveMatchesStrip';
+import LiveAuctionsStrip from '../components/LiveAuctionsStrip';
 import Icon from '../components/Icon';
 import UpdatePromptModal from '../components/UpdatePromptModal';
 import { checkForUpdate } from '../utils/versionService';
@@ -254,6 +255,9 @@ const DashboardScreen = ({ navigation }) => {
             public live match. Self-contained: fetches + subscribes to its
             own socket so the dashboard stays a thin shell. */}
         <LiveMatchesStrip navigation={navigation} />
+
+        {/* Live auctions strip — only renders when a public auction is live. */}
+        <LiveAuctionsStrip navigation={navigation} />
 
         {/* Welcome line */}
         <Animated.View style={{ opacity: welcomeOpacity }}>
