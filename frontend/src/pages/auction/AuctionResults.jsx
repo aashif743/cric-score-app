@@ -17,6 +17,7 @@ export default function AuctionResults() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
+  const [sortBy, setSortBy] = useState("high"); // high | low — price sort within each team
   const cardRef = useRef(null);
 
   const load = async () => {
@@ -124,10 +125,23 @@ export default function AuctionResults() {
         <div className="mb-5 inline-flex items-center gap-2 rounded-xl bg-emerald-100 px-4 py-2.5 text-sm font-black text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><FiCheckCircle /> Auction completed</div>
       )}
 
+      {/* Filter / sort — reflected in the on-screen card and the download. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-black uppercase tracking-wide text-slate-400">Sort players by price</span>
+        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-white/10 dark:bg-white/5">
+          {[{ k: "high", t: "Highest first" }, { k: "low", t: "Lowest first" }].map((o) => (
+            <button key={o.k} onClick={() => setSortBy(o.k)}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${sortBy === o.k ? "bg-indigo-600 text-white shadow" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
+              {o.t}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Exportable results card — professional summary with logo + watermark
           (the same board used on the big screen / OBS when the auction finishes). */}
       <div ref={cardRef}>
-        <AuctionSummaryBoard state={state} variant="export" className="rounded-3xl shadow-sm ring-1 ring-slate-200" />
+        <AuctionSummaryBoard state={state} variant="export" sort={sortBy} className="rounded-3xl shadow-sm ring-1 ring-slate-200" />
       </div>
 
       {unsold.length > 0 && (

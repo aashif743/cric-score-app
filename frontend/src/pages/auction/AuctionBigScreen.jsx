@@ -1,10 +1,31 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { FiMaximize2, FiMinimize2 } from "react-icons/fi";
 import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
 import { formatMoney } from "../../utils/auctionFormat";
 import AuctionSummaryBoard from "./AuctionSummaryBoard.jsx";
+
+// Floating full-screen toggle — for projecting the big screen edge-to-edge.
+function FullscreenButton() {
+  const [fs, setFs] = useState(false);
+  useEffect(() => {
+    const onChange = () => setFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggle = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  };
+  return (
+    <button onClick={toggle} title={fs ? "Exit full screen" : "Full screen (for projector)"}
+      className="fixed right-4 top-4 z-[60] grid h-11 w-11 place-items-center rounded-xl bg-white/10 text-white/70 backdrop-blur transition hover:bg-white/20 hover:text-white">
+      {fs ? <FiMinimize2 size={18} /> : <FiMaximize2 size={18} />}
+    </button>
+  );
+}
 
 // Cinematic projector/big-screen view of a live auction. Read-only, driven by
 // the public snapshot + socket updates. Designed for 16:9 screens.
@@ -23,12 +44,14 @@ export default function AuctionBigScreen() {
 
   useAuctionSocket(auctionId, (payload) => {
     setState((prev) => ({ ...prev, ...payload }));
+    // Sold/unsold result stays on screen until the auctioneer brings up the next
+    // player (a long safety timeout clears it if they never do).
     const showFlash = (type, info) => {
       const player = payload.players?.find((p) => String(p._id) === String(info.playerId));
       const team = payload.teams?.find((t) => String(t._id) === String(info.teamId));
       setFlash({ type, player, team, price: info.price });
       clearTimeout(timer.current);
-      timer.current = setTimeout(() => setFlash(null), 5000);
+      timer.current = setTimeout(() => setFlash(null), 120000);
     };
     if (payload.justSold) showFlash("sold", payload.justSold);
     else if (payload.justUnsold) showFlash("unsold", payload.justUnsold);
@@ -38,6 +61,11 @@ export default function AuctionBigScreen() {
       shuffleTimer.current = setTimeout(() => setShuffle(null), 3400);
     }
   });
+
+  // Close the sold/unsold result the moment a new player is brought up.
+  useEffect(() => {
+    if (state?.auction?.currentPlayer) { setFlash(null); clearTimeout(timer.current); }
+  }, [state?.auction?.currentPlayer]);
 
   const d = useMemo(() => {
     if (!state?.auction) return null;
@@ -63,6 +91,7 @@ export default function AuctionBigScreen() {
   if (a.status === "completed") {
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen">
+        <FullscreenButton />
         <AuctionSummaryBoard state={state} variant="screen" className="min-h-screen" />
       </motion.div>
     );
@@ -70,6 +99,7 @@ export default function AuctionBigScreen() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#05060f] text-white" style={{ backgroundColor: "#05060f" }}>
+      <FullscreenButton />
       {/* cover image background (dimmed for readability) */}
       {a.coverUrl && (
         <div className="pointer-events-none absolute inset-0">
@@ -114,52 +144,57 @@ export default function AuctionBigScreen() {
         <div className={a.showPurses ? "lg:col-span-3" : ""}>
           <AnimatePresence mode="wait">
             {current ? (
-              <motion.div key={current._id} initial={{ opacity: 0, y: 30, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20 }}
+              <motion.div key={current._id} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                className="overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 backdrop-blur-sm lg:p-8">
-                <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
-                  <div className="relative shrink-0">
-                    {current.photoUrl
-                      ? <img src={current.photoUrl} alt="" className={`rounded-3xl object-cover ring-4 ring-white/10 ${a.showPurses ? "h-52 w-52 lg:h-64 lg:w-64" : "h-64 w-64 lg:h-80 lg:w-80"}`} />
-                      : <div className={`grid place-items-center rounded-3xl bg-gradient-to-br from-indigo-600/40 to-violet-700/40 font-black ${a.showPurses ? "h-52 w-52 text-7xl lg:h-64 lg:w-64" : "h-64 w-64 text-8xl lg:h-80 lg:w-80"}`}>{current.name[0]}</div>}
-                    {current.isOverseas && <span className="absolute -right-2 -top-2 rounded-full bg-sky-500 px-3 py-1 text-xs font-black shadow-lg">✈ OVERSEAS</span>}
-                  </div>
-                  <div className="flex-1 text-center sm:text-left">
-                    <div className={`font-black leading-tight ${a.showPurses ? "text-4xl lg:text-6xl" : "text-5xl lg:text-8xl"}`}>{current.name}</div>
-                    <div className="mt-2 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                className="flex h-[76vh] overflow-hidden rounded-[2.5rem] border border-white/10 bg-white/[0.04] backdrop-blur-sm">
+                {/* Left: full-height player image */}
+                <div className="relative h-full w-[40%] shrink-0 bg-gradient-to-br from-indigo-900/40 to-violet-900/40 sm:w-[44%]">
+                  {current.photoUrl
+                    ? <img src={current.photoUrl} alt="" className="h-full w-full object-cover object-top" />
+                    : <div className="grid h-full w-full place-items-center text-[16rem] font-black text-white/15">{current.name[0]}</div>}
+                  <div className="absolute inset-y-0 right-0 w-28 bg-gradient-to-r from-transparent to-[#05060f]/70" />
+                  {current.isOverseas && <span className="absolute left-5 top-5 rounded-full bg-sky-500 px-4 py-2 text-base font-black shadow-lg">✈ OVERSEAS</span>}
+                </div>
+
+                {/* Right: player details + current bid */}
+                <div className="flex flex-1 flex-col justify-between p-8 lg:p-12">
+                  <div>
+                    <div className="text-sm font-black uppercase tracking-[0.35em] text-white/40 lg:text-base">On the block</div>
+                    <div className={`mt-2 font-black leading-[0.92] ${a.showPurses ? "text-5xl lg:text-7xl" : "text-6xl lg:text-9xl"}`}>{current.name}</div>
+                    <div className="mt-5 flex flex-wrap items-center gap-3">
                       {current.role && <Tag>{current.role}</Tag>}
                       {current.category && <Tag tone="amber">{current.category}</Tag>}
                     </div>
-                    <div className="mt-3 text-sm font-bold uppercase tracking-[0.2em] text-white/40">Base price · {money(current.basePrice)}</div>
+                    <div className="mt-4 text-base font-bold uppercase tracking-[0.2em] text-white/40 lg:text-xl">Base price · {money(current.basePrice)}</div>
                     <PlayerStats stats={current.stats} />
                   </div>
-                </div>
 
-                {/* Current bid */}
-                <div className="mt-6 overflow-hidden rounded-3xl bg-black/40 p-6 lg:mt-8">
-                  <div className="text-center text-xs font-black uppercase tracking-[0.35em] text-white/40 lg:text-sm">Current Bid</div>
-                  <AnimatePresence mode="popLayout">
-                    <motion.div key={a.currentBid} initial={{ scale: 0.6, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                      transition={{ type: "spring", stiffness: 260, damping: 18 }}
-                      className="my-1 text-center text-6xl font-black tabular-nums text-amber-300 drop-shadow-[0_0_25px_rgba(252,211,77,0.35)] lg:text-8xl">
-                      {money(a.currentBid)}
-                    </motion.div>
-                  </AnimatePresence>
-                  <div className="mt-1 flex items-center justify-center gap-3">
-                    {bidTeam ? (
-                      <>
-                        {bidTeam.logoUrl ? <img src={bidTeam.logoUrl} alt="" className="h-9 w-9 rounded-lg object-cover" /> : <div className="grid h-9 w-9 place-items-center rounded-lg bg-white/10 text-sm font-black">{bidTeam.name[0]}</div>}
-                        <span className="text-2xl font-black lg:text-3xl">{bidTeam.name}</span>
-                      </>
-                    ) : (
-                      <span className="text-xl font-bold text-white/40">Awaiting first bid…</span>
-                    )}
+                  {/* Current bid — the biggest thing on screen */}
+                  <div className="rounded-3xl bg-black/40 p-6 lg:p-8">
+                    <div className="text-sm font-black uppercase tracking-[0.35em] text-white/40 lg:text-lg">Current Bid</div>
+                    <AnimatePresence mode="popLayout">
+                      <motion.div key={a.currentBid} initial={{ scale: 0.6, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                        transition={{ type: "spring", stiffness: 260, damping: 18 }}
+                        className={`font-black tabular-nums leading-none text-amber-300 drop-shadow-[0_0_30px_rgba(252,211,77,0.4)] ${a.showPurses ? "text-7xl lg:text-8xl" : "text-8xl lg:text-[10rem]"}`}>
+                        {money(a.currentBid)}
+                      </motion.div>
+                    </AnimatePresence>
+                    <div className="mt-3 flex items-center gap-3">
+                      {bidTeam ? (
+                        <>
+                          {bidTeam.logoUrl ? <img src={bidTeam.logoUrl} alt="" className="h-12 w-12 rounded-xl object-cover" /> : <div className="grid h-12 w-12 place-items-center rounded-xl bg-white/10 text-lg font-black">{bidTeam.name[0]}</div>}
+                          <span className="text-3xl font-black lg:text-4xl">{bidTeam.name}</span>
+                        </>
+                      ) : (
+                        <span className="text-2xl font-bold text-white/40">Awaiting first bid…</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </motion.div>
             ) : (
               <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="grid min-h-[26rem] place-items-center rounded-[2rem] border border-white/10 bg-white/[0.04]">
+                className="grid h-[76vh] place-items-center rounded-[2.5rem] border border-white/10 bg-white/[0.04]">
                 <div className="text-center">
                   <div className="mx-auto mb-4 h-16 w-16 animate-spin-slow rounded-full border-4 border-white/10 border-t-indigo-400" />
                   <div className="text-3xl font-black text-white/70">Next player coming up…</div>
@@ -226,24 +261,52 @@ export default function AuctionBigScreen() {
         </AnimatePresence>
       </div>
 
-      {/* SOLD / UNSOLD flash */}
+      {/* SOLD / UNSOLD result — stays until the next player is brought up */}
       <AnimatePresence>
-        {flash && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-30 grid place-items-center bg-black/75 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.4, rotate: flash.type === "sold" ? -10 : 4 }} animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: "spring", stiffness: 200, damping: 14 }}
-              className={`rounded-[2.5rem] px-16 py-12 text-center shadow-2xl ${flash.type === "sold" ? "bg-gradient-to-br from-emerald-400 to-green-600" : "bg-gradient-to-br from-slate-600 to-slate-800"}`}>
-              <div className={`text-7xl font-black tracking-tight lg:text-8xl ${flash.type === "sold" ? "text-black" : "text-white"}`}>
-                {flash.type === "sold" ? "SOLD!" : "UNSOLD"}
-              </div>
-              {flash.player && <div className={`mt-3 text-4xl font-black ${flash.type === "sold" ? "text-black/90" : "text-white/90"}`}>{flash.player.name}</div>}
-              {flash.type === "sold" && (
-                <div className="mt-2 text-2xl font-black text-black/80">{money(flash.price)} → {flash.team ? flash.team.name : ""}</div>
-              )}
+        {flash && (() => {
+          const sold = flash.type === "sold";
+          const p = flash.player;
+          return (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 z-40 grid place-items-center bg-black/85 p-6 backdrop-blur-md lg:p-10">
+              <motion.div initial={{ scale: 0.7, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 180, damping: 16 }}
+                className="w-full max-w-5xl overflow-hidden rounded-[2.5rem] shadow-2xl ring-1 ring-white/10">
+                <div className={`py-5 text-center lg:py-6 ${sold ? "bg-gradient-to-r from-emerald-400 to-green-600" : "bg-gradient-to-r from-slate-600 to-slate-800"}`}>
+                  <div className={`text-6xl font-black tracking-tight lg:text-8xl ${sold ? "text-black" : "text-white"}`}>{sold ? "SOLD" : "UNSOLD"}</div>
+                </div>
+                <div className="flex items-center gap-8 bg-[#0b1120] p-8 lg:p-10">
+                  {p && (p.photoUrl
+                    ? <img src={p.photoUrl} alt="" className="h-44 w-44 shrink-0 rounded-3xl object-cover object-top ring-4 ring-white/10 lg:h-56 lg:w-56" />
+                    : <div className="grid h-44 w-44 shrink-0 place-items-center rounded-3xl bg-gradient-to-br from-indigo-600/40 to-violet-700/40 text-7xl font-black text-white/80 lg:h-56 lg:w-56">{(p.name || "?")[0]}</div>)}
+                  <div className="min-w-0 flex-1 text-white">
+                    <div className="truncate text-5xl font-black leading-tight lg:text-7xl">{p ? p.name : "Player"}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2.5">
+                      {p?.role && <Tag>{p.role}</Tag>}
+                      {p?.category && <Tag tone="amber">{p.category}</Tag>}
+                    </div>
+                    {sold ? (
+                      <>
+                        <div className="mt-6 text-xs font-black uppercase tracking-[0.35em] text-white/40 lg:text-sm">Sold for</div>
+                        <div className="text-7xl font-black tabular-nums leading-none text-amber-300 drop-shadow-[0_0_30px_rgba(252,211,77,0.4)] lg:text-8xl">{money(flash.price)}</div>
+                        <div className="mt-4 flex items-center gap-3">
+                          <span className="text-lg font-bold uppercase tracking-widest text-white/40">Bought by</span>
+                          {flash.team && (flash.team.logoUrl
+                            ? <img src={flash.team.logoUrl} alt="" className="h-11 w-11 rounded-xl object-cover" />
+                            : <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/10 text-base font-black">{flash.team.name[0]}</div>)}
+                          <span className="text-3xl font-black lg:text-4xl">{flash.team ? flash.team.name : ""}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-6 text-2xl font-bold text-white/50 lg:text-3xl">No bids — returned to the pool</div>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-black/50 py-3 text-center text-xs font-black uppercase tracking-[0.3em] text-white/40 lg:text-sm">Bring up the next player to continue →</div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       {/* PLAYERS RESHUFFLED — transparency animation when the admin reorders the

@@ -80,17 +80,21 @@ async function getState(auctionId) {
   // already-loaded players (no extra DB queries).
   const enforce = auction.settings?.enforceMaxBid;
   const minSquad = auction.settings?.minSquadSize || 0;
+  const maxSquad = auction.settings?.maxSquadSize || 0;
   const pendingBasePrices = players.filter((p) => p.status === "pending").map((p) => p.basePrice || 0);
   const floor = pendingBasePrices.length ? Math.min(...pendingBasePrices) : 0;
   teams.forEach((t) => {
     t.retainedCost = retainedCostOf(t);
     t.retainedCount = retainedCountOf(t);
     t.remaining = Math.max(0, (t.purse || 0) - (t.spent || 0) - t.retainedCost);
+    const bought = players.filter((p) => p.status === "sold" && String(p.soldTo) === String(t._id)).length;
+    // Total squad (bought + retained/playing) and whether it's at the max.
+    t.squadCount = bought + t.retainedCount;
+    t.full = maxSquad > 0 && t.squadCount >= maxSquad;
     if (!enforce || minSquad <= 0) {
       t.maxBid = t.remaining;
     } else {
-      const bought = players.filter((p) => p.status === "sold" && String(p.soldTo) === String(t._id)).length;
-      const slotsNeeded = Math.max(0, minSquad - (bought + t.retainedCount));
+      const slotsNeeded = Math.max(0, minSquad - t.squadCount);
       t.maxBid = slotsNeeded <= 1 ? t.remaining : Math.max(0, t.remaining - (slotsNeeded - 1) * floor);
     }
   });
@@ -143,6 +147,16 @@ async function markBid(auctionOrId, teamId) {
   // A team already holding the highest bid can't outbid itself.
   if (auction.currentBidTeam && String(auction.currentBidTeam) === String(team._id)) {
     throw new Error("This team already holds the top bid");
+  }
+
+  // A full squad can't bid — once a team has its maximum players (bought +
+  // retained/playing-manager) it's locked out.
+  const maxSquad = auction.settings?.maxSquadSize || 0;
+  if (maxSquad > 0) {
+    const boughtCount = await AuctionPlayer.countDocuments({ auction: auction._id, soldTo: team._id, status: "sold" });
+    if (boughtCount + retainedCountOf(team) >= maxSquad) {
+      throw new Error(`${team.name} already has the maximum ${maxSquad} players`);
+    }
   }
 
   const amount = auction.bidCount === 0

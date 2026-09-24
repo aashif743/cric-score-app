@@ -13,7 +13,7 @@ import AuctionShell from "./AuctionShell.jsx";
 import {
   Button, Field, Input, MoneyInput, Textarea, Select, Toggle, EmptyState, Spinner, toast, confirmDialog, isEmail, cx,
 } from "../../components/auction/ui.jsx";
-import { FiTrendingUp, FiX, FiStar, FiAward, FiDownload, FiFile } from "react-icons/fi";
+import { FiTrendingUp, FiX, FiStar, FiAward, FiDownload, FiFile, FiEdit2 } from "react-icons/fi";
 import * as XLSX from "xlsx";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -130,6 +130,20 @@ function TeamsTab({ id, token, teams, auction, defaultPurse, money, onChange }) 
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(null); // team id whose retention editor is open
+  const [renaming, setRenaming] = useState(null); // team id being renamed
+  const [renameVal, setRenameVal] = useState("");
+  const startRename = (t) => { setRenaming(t._id); setRenameVal(t.name); };
+  const saveRename = async (t) => {
+    const nm = renameVal.trim();
+    if (!nm || nm === t.name) { setRenaming(null); return; }
+    if (teams.some((x) => String(x._id) !== String(t._id) && x.name.toLowerCase() === nm.toLowerCase())) { toast.error("Another team already uses that name."); return; }
+    try {
+      await auctionService.updateTeam(id, t._id, { name: nm }, token);
+      setRenaming(null);
+      onChange(await auctionService.get(id, token));
+      toast.success("Team renamed.");
+    } catch (e) { toast.error(e?.error || "Could not rename the team."); }
+  };
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); };
 
   const validate = () => {
@@ -197,15 +211,27 @@ function TeamsTab({ id, token, teams, auction, defaultPurse, money, onChange }) 
                 <div className="flex min-w-0 items-center gap-3">
                   <ImageUpload compact round value={t.logoUrl}
                     onChange={async (url) => { await auctionService.updateTeam(id, t._id, { logoUrl: url }, token); onChange(await auctionService.get(id, token)); }} />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate font-black text-slate-900 dark:text-white">{t.name}</span>
-                      {t.ownerEmail && <InviteChip status={t.inviteStatus} />}
-                    </div>
-                    <div className="truncate text-xs text-slate-500 dark:text-slate-400">{t.ownerName || "No owner"} {t.ownerEmail ? `· ${t.ownerEmail}` : ""}</div>
-                    <div className="mt-0.5 text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                      Purse {money(t.remaining ?? t.purse)}{t.retainedCost ? <span className="font-medium text-slate-400"> · {money(t.retainedCost)} retained</span> : null}
-                    </div>
+                  <div className="min-w-0 flex-1">
+                    {renaming === t._id ? (
+                      <div className="flex items-center gap-1.5">
+                        <Input value={renameVal} autoFocus onChange={(e) => setRenameVal(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveRename(t); if (e.key === "Escape") setRenaming(null); }} className="h-8 py-1" />
+                        <button onClick={() => saveRename(t)} title="Save" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10"><FiCheck size={16} /></button>
+                        <button onClick={() => setRenaming(null)} title="Cancel" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"><FiX size={16} /></button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate font-black text-slate-900 dark:text-white">{t.name}</span>
+                          <button onClick={() => startRename(t)} title="Rename team" className="shrink-0 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"><FiEdit2 size={13} /></button>
+                          {t.ownerEmail && <InviteChip status={t.inviteStatus} />}
+                        </div>
+                        <div className="truncate text-xs text-slate-500 dark:text-slate-400">{t.ownerName || "No owner"} {t.ownerEmail ? `· ${t.ownerEmail}` : ""}</div>
+                        <div className="mt-0.5 text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                          Purse {money(t.remaining ?? t.purse)}{t.retainedCost ? <span className="font-medium text-slate-400"> · {money(t.retainedCost)} retained</span> : null}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
                 <button onClick={() => del(t)} title="Remove team" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><FiTrash2 size={15} /></button>

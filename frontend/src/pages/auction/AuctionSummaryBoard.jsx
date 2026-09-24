@@ -9,15 +9,16 @@ import brand from "../../assets/criczone_icon.png";
 //  • the big screen when the auction finishes (variant="screen" — dark)
 //  • the OBS overlay when finished (variant="overlay" — dark, translucent)
 // Includes the CricZone logo + a faint watermark.
-export default function AuctionSummaryBoard({ state, variant = "screen", className }) {
+export default function AuctionSummaryBoard({ state, variant = "screen", sort = "high", className }) {
   const a = state?.auction;
   if (!a) return null;
   const money = (n) => formatMoney(n, { symbol: a.currencySymbol, format: a.currencyFormat });
+  const cmp = (x, y) => (sort === "low" ? (x.soldPrice || 0) - (y.soldPrice || 0) : (y.soldPrice || 0) - (x.soldPrice || 0));
 
   const teams = (state.teams || []).map((t) => {
     const bought = (state.players || [])
       .filter((p) => p.status === "sold" && String(p.soldTo) === String(t._id))
-      .sort((x, y) => (y.soldPrice || 0) - (x.soldPrice || 0));
+      .sort(cmp);
     const spent = bought.reduce((s, p) => s + (p.soldPrice || 0), 0);
     const squad = [...retainedEntries(t), ...bought];
     return { ...t, squad, spent, remaining: Math.max(0, (t.purse || 0) - spent - (t.retainedCost || 0)) };
@@ -72,8 +73,8 @@ export default function AuctionSummaryBoard({ state, variant = "screen", classNa
           ))}
         </div>
 
-        {/* Teams grid */}
-        <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {/* Teams grid — 2 side by side (3 on very wide big screens) */}
+        <div className={cx("grid flex-1 gap-3 sm:grid-cols-2", variant === "screen" && "2xl:grid-cols-3")}>
           {teams.map((t) => (
             <div key={t._id} className={cx("flex flex-col overflow-hidden rounded-2xl border", T.card)}>
               <div className="flex items-center gap-2.5 border-b p-3" style={{ borderColor: variant === "export" ? "#e2e8f0" : "rgba(255,255,255,0.08)" }}>
@@ -94,7 +95,10 @@ export default function AuctionSummaryBoard({ state, variant = "screen", classNa
                   ? <div className={cx("py-4 text-center text-xs", T.sub)}>No players</div>
                   : t.squad.map((p) => (
                     <div key={p._id} className="flex items-center gap-2 py-1.5 text-sm">
-                      <span className="flex-1 truncate font-semibold">{p.name}</span>
+                      {p.photoUrl
+                        ? <img src={p.photoUrl} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />
+                        : <div className={cx("grid h-7 w-7 shrink-0 place-items-center rounded-full text-[9px] font-black", variant === "export" ? "bg-slate-200 text-slate-600" : "bg-white/10 text-white/70")}>{initials(p.name)}</div>}
+                      <span className="min-w-0 flex-1 truncate font-semibold">{p.name}</span>
                       {p.captain ? <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-black uppercase text-white">C</span> : null}
                       {p.isOwner ? <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-black uppercase text-indigo-400">Owner</span> : null}
                       {p.retained ? <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-500">{p.manager ? (p.plays ? "Mgr·Plays" : "Mgr") : "Ret"}</span> : null}

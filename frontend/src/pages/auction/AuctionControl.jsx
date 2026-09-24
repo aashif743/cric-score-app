@@ -197,12 +197,17 @@ export default function AuctionControl() {
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {state.teams.map((t) => {
                       const isTop = bidTeam && String(bidTeam._id) === String(t._id);
+                      const full = !!t.full;
                       return (
-                        <button key={t._id} disabled={isTop} onClick={() => markBidFast(t)}
+                        <button key={t._id} disabled={isTop || full} onClick={() => markBidFast(t)}
+                          title={full ? "Squad is full — can't bid" : undefined}
                           className={cx("rounded-xl px-3 py-2.5 text-left transition active:scale-[0.98] disabled:cursor-not-allowed",
-                            isTop ? "bg-amber-400 text-black" : "bg-white/10 hover:bg-white/20")}>
-                          <div className="truncate text-sm font-black">{t.name}</div>
-                          <div className={cx("text-[11px] font-bold", isTop ? "text-black/70" : "text-white/60")}>{money(remaining(t))} left</div>
+                            isTop ? "bg-amber-400 text-black" : full ? "bg-white/5 opacity-50" : "bg-white/10 hover:bg-white/20")}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate text-sm font-black">{t.name}</span>
+                            {full && <span className="shrink-0 rounded bg-red-500/80 px-1.5 py-0.5 text-[8px] font-black uppercase text-white">Full</span>}
+                          </div>
+                          <div className={cx("text-[11px] font-bold", isTop ? "text-black/70" : "text-white/60")}>{full ? "Max squad reached" : `${money(remaining(t))} left`}</div>
                         </button>
                       );
                     })}
