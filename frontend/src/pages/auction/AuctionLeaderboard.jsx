@@ -17,7 +17,9 @@ export default function AuctionLeaderboard({ state, limit = 10, className }) {
     .filter((p) => p.status === "sold")
     .sort((x, y) => (y.soldPrice || 0) - (x.soldPrice || 0));
   const rows = limit && limit > 0 ? sold.slice(0, limit) : sold;
-  const title = limit && limit > 0 && sold.length > limit ? `TOP ${limit} SOLD PLAYERS` : "SOLD PLAYERS";
+  // Title follows the selected filter: Top 5 / 10 / 20 → "TOP N SOLD PLAYERS";
+  // All → "SOLD PLAYERS".
+  const title = limit && limit > 0 ? `TOP ${limit} SOLD PLAYERS` : "SOLD PLAYERS";
 
   const initials = (name) => {
     const p = String(name || "").trim().split(/\s+/).filter(Boolean);
@@ -36,15 +38,16 @@ export default function AuctionLeaderboard({ state, limit = 10, className }) {
       </div>
 
       <div className="relative">
-        {/* Header band */}
-        <div className="flex items-center justify-between gap-4 bg-gradient-to-r from-white to-slate-200 px-6 py-4 lg:px-8 lg:py-5">
-          <div className="min-w-0">
+        {/* Header band — CricZone full logo (left) + title + auction logo (right) */}
+        <div className="flex items-center gap-4 bg-gradient-to-r from-white to-slate-200 px-6 py-4 lg:px-8 lg:py-5">
+          <img src={fullLogo} alt="CricZone" className="h-12 w-auto shrink-0 object-contain lg:h-16" />
+          <div className="min-w-0 flex-1">
             <div className="truncate text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 lg:text-sm">{a.name}</div>
             <div className="truncate text-2xl font-black uppercase leading-tight tracking-tight text-slate-900 lg:text-4xl">{title}</div>
           </div>
           {a.logoUrl
             ? <img src={a.logoUrl} alt="" className="h-14 w-14 shrink-0 rounded-xl bg-white object-contain p-1 shadow lg:h-20 lg:w-20" />
-            : <img src={brand} alt="" className="h-12 w-12 shrink-0 object-contain lg:h-16 lg:w-16" />}
+            : null}
         </div>
 
         {/* Column header */}
