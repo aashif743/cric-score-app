@@ -8,6 +8,7 @@ import auctionService from "../../utils/auctionService";
 import { formatMoney, retainedEntries } from "../../utils/auctionFormat";
 import AuctionShell from "./AuctionShell.jsx";
 import AuctionSummaryBoard from "./AuctionSummaryBoard.jsx";
+import AuctionLeaderboard from "./AuctionLeaderboard.jsx";
 import { Button, Spinner, toast, confirmDialog } from "../../components/auction/ui.jsx";
 
 export default function AuctionResults() {
@@ -18,6 +19,8 @@ export default function AuctionResults() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [sortBy, setSortBy] = useState("high"); // high | low — price sort within each team
+  const [view, setView] = useState("teams"); // teams | players (top-sold leaderboard)
+  const [topN, setTopN] = useState(10); // 0 = all, else 5 / 10 / 20
   const cardRef = useRef(null);
 
   const load = async () => {
@@ -59,13 +62,14 @@ export default function AuctionResults() {
   const snapshot = async () => {
     const node = cardRef.current;
     if (!node) return null;
-    return toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true });
+    return toPng(node, { pixelRatio: 2, backgroundColor: view === "players" ? "#0b1220" : "#ffffff", cacheBust: true });
   };
+  const fileTag = () => (view === "players" ? (topN ? `top-${topN}-sold` : "sold-players") : "results");
   const downloadImage = async () => {
     try {
       setBusy("img");
       const url = await snapshot();
-      if (url) { const link = document.createElement("a"); link.download = `${d.a.name}-results.png`; link.href = url; link.click(); toast.success("Image downloaded."); }
+      if (url) { const link = document.createElement("a"); link.download = `${d.a.name}-${fileTag()}.png`; link.href = url; link.click(); toast.success("Image downloaded."); }
     } catch (e) { toast.error("Could not create the image."); } finally { setBusy(""); }
   };
   const downloadPdf = async () => {
@@ -77,7 +81,7 @@ export default function AuctionResults() {
       img.onload = () => {
         const pdf = new jsPDF({ orientation: img.width > img.height ? "l" : "p", unit: "px", format: [img.width, img.height] });
         pdf.addImage(url, "PNG", 0, 0, img.width, img.height);
-        pdf.save(`${d.a.name}-results.pdf`);
+        pdf.save(`${d.a.name}-${fileTag()}.pdf`);
         toast.success("PDF downloaded.");
         setBusy("");
       };
@@ -125,23 +129,49 @@ export default function AuctionResults() {
         <div className="mb-5 inline-flex items-center gap-2 rounded-xl bg-emerald-100 px-4 py-2.5 text-sm font-black text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><FiCheckCircle /> Auction completed</div>
       )}
 
-      {/* Filter / sort — reflected in the on-screen card and the download. */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-black uppercase tracking-wide text-slate-400">Sort players by price</span>
+      {/* View switch: team squads vs the top-sold-players leaderboard. */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-white/10 dark:bg-white/5">
-          {[{ k: "high", t: "Highest first" }, { k: "low", t: "Lowest first" }].map((o) => (
-            <button key={o.k} onClick={() => setSortBy(o.k)}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${sortBy === o.k ? "bg-indigo-600 text-white shadow" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
+          {[{ k: "teams", t: "By team" }, { k: "players", t: "Top players" }].map((o) => (
+            <button key={o.k} onClick={() => setView(o.k)}
+              className={`rounded-md px-3.5 py-1.5 text-xs font-bold transition ${view === o.k ? "bg-indigo-600 text-white shadow" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
               {o.t}
             </button>
           ))}
         </div>
+
+        {view === "teams" ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-black uppercase tracking-wide text-slate-400">Sort by price</span>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-white/10 dark:bg-white/5">
+              {[{ k: "high", t: "Highest first" }, { k: "low", t: "Lowest first" }].map((o) => (
+                <button key={o.k} onClick={() => setSortBy(o.k)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${sortBy === o.k ? "bg-indigo-600 text-white shadow" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
+                  {o.t}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-black uppercase tracking-wide text-slate-400">Show</span>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-white/10 dark:bg-white/5">
+              {[{ k: 0, t: "All" }, { k: 5, t: "Top 5" }, { k: 10, t: "Top 10" }, { k: 20, t: "Top 20" }].map((o) => (
+                <button key={o.k} onClick={() => setTopN(o.k)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${topN === o.k ? "bg-indigo-600 text-white shadow" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
+                  {o.t}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Exportable results card — professional summary with logo + watermark
-          (the same board used on the big screen / OBS when the auction finishes). */}
+      {/* Exportable card — the same board shown on screen is what downloads. */}
       <div ref={cardRef}>
-        <AuctionSummaryBoard state={state} variant="export" sort={sortBy} className="rounded-3xl shadow-sm ring-1 ring-slate-200" />
+        {view === "teams"
+          ? <AuctionSummaryBoard state={state} variant="export" sort={sortBy} className="rounded-3xl shadow-sm ring-1 ring-slate-200" />
+          : <AuctionLeaderboard state={state} limit={topN} className="rounded-3xl shadow-lg ring-1 ring-white/10" />}
       </div>
 
       {unsold.length > 0 && (

@@ -41,6 +41,7 @@ router.post("/:id/reorder-pending", protect, c.reorderPending);
 router.post("/:id/big-screen", protect, c.setBigScreen);
 router.post("/:id/finish", protect, c.finishAuction);
 router.post("/:id/undo", protect, c.undoBid);
+router.post("/:id/undo-result", protect, c.undoLastResult);
 router.post("/:id/sell", protect, c.sellCurrent);
 router.post("/:id/unsold", protect, c.markUnsold);
 router.post("/:id/reauction-unsold", protect, c.reauctionUnsold);

@@ -893,7 +893,8 @@ function SettingsTab({ id, token, auction, money, onChange }) {
           </div>
           <div className="rounded-2xl bg-slate-50 p-4 dark:bg-white/5">
             <Toggle checked={f.squadIncludesRetained} onChange={(v) => set("squadIncludesRetained", v)}
-              label="Players-per-team includes retained / managers" desc="On: retained members count within the number, so the team buys fewer. Off: they're extra on top of the number bought." />
+              label="Are retained players part of the squad size?"
+              desc="ON — Retained players & managers are counted in the squad size, so each team buys fewer at auction (e.g. squad 11 with 2 retained → the team buys 9). OFF — Retained players are extra: each team still buys the full squad size and retained are added on top (e.g. buys 11 + 2 retained = 13)." />
           </div>
         </div>
       </Card>

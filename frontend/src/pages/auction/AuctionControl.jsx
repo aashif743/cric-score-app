@@ -136,7 +136,11 @@ export default function AuctionControl() {
     const remaining = (t) => teamRemaining(t);
     // Most a team may bid now (min-squad protection). Falls back to remaining.
     const maxBid = (t) => (typeof t.maxBid === "number" ? t.maxBid : teamRemaining(t));
-    return { a, money, teamById, current, bidTeam, pending, sold, unsold, remaining, maxBid };
+    // The most recently completed lot (sold/unsold) — offered for "undo result".
+    const lastResult = state.players
+      .filter((p) => p.status === "sold" || p.status === "unsold")
+      .sort((x, y) => new Date(y.updatedAt || 0) - new Date(x.updatedAt || 0))[0] || null;
+    return { a, money, teamById, current, bidTeam, pending, sold, unsold, remaining, maxBid, lastResult };
   }, [state]);
 
   // Auto-advance: when enabled and the block is empty, open the next player.
@@ -154,7 +158,7 @@ export default function AuctionControl() {
 
   if (loading) return <Center><Spinner size={30} className="text-indigo-400" /></Center>;
   if (!d) return <Center>Auction not found.</Center>;
-  const { a, money, teamById, current, bidTeam, pending, sold, unsold, remaining, maxBid } = d;
+  const { a, money, teamById, current, bidTeam, pending, sold, unsold, remaining, maxBid, lastResult } = d;
   const online = a.settings?.biddingMode === "online";
   const canAdjust = !!bidTeam && !busy;
 
@@ -173,6 +177,22 @@ export default function AuctionControl() {
     if (!match) { toast.error(`No available player with ID "${q}".`); return; }
     setGoId("");
     act(() => auctionService.open(id, match._id, user.token));
+  };
+
+  // Undo the last completed lot (sold/unsold) — brings that player back on the
+  // block and refunds the buyer. Only when the block is clear.
+  const undoLastResult = async () => {
+    if (!lastResult) return;
+    const label = `#${lastResult.code || "?"} ${lastResult.name}`;
+    const ok = await confirmDialog({
+      title: "Undo the last result?",
+      message: lastResult.status === "sold"
+        ? `This brings ${label} back onto the block and refunds the buying team. You can re-bid or sell again.`
+        : `This brings ${label} back onto the block so you can re-open bidding.`,
+      confirmText: "Undo result",
+      tone: "danger",
+    });
+    if (ok) act(() => auctionService.undoResult(id, user.token));
   };
 
   return (
@@ -299,12 +319,21 @@ export default function AuctionControl() {
                   <FiInbox className="mx-auto mb-3 text-white/30" size={40} />
                   <div className="text-lg font-black text-white/70">No player on the block</div>
                   <div className="text-sm text-white/40">Pick a player from the list to start bidding →</div>
-                  {pending.length > 0 && (
-                    <button disabled={busy} onClick={() => act(() => auctionService.open(id, pending[0]._id, user.token))}
-                      className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-5 py-2.5 text-sm font-black transition hover:bg-indigo-400 disabled:opacity-50">
-                      <FiPlay size={15} /> Bring up {pending[0].name}
-                    </button>
-                  )}
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    {pending.length > 0 && (
+                      <button disabled={busy} onClick={() => act(() => auctionService.open(id, pending[0]._id, user.token))}
+                        className="inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-5 py-2.5 text-sm font-black transition hover:bg-indigo-400 disabled:opacity-50">
+                        <FiPlay size={15} /> Bring up #{pending[0].code || "?"}
+                      </button>
+                    )}
+                    {lastResult && (
+                      <button disabled={busy} onClick={undoLastResult}
+                        title={`Undo the last ${lastResult.status === "sold" ? "sale" : "result"} (#${lastResult.code || "?"} ${lastResult.name})`}
+                        className="inline-flex items-center gap-2 rounded-xl bg-amber-500/90 px-5 py-2.5 text-sm font-black text-black transition hover:bg-amber-400 disabled:opacity-50">
+                        <FiRotateCcw size={15} /> Undo last {lastResult.status === "sold" ? "sale" : "result"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -365,11 +394,10 @@ export default function AuctionControl() {
                 {tab === "available" && (
                   pending.length === 0 ? <Empty text="No players left in the pool." /> : pending.map((p, i) => (
                     <div key={p._id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/5">
-                      <button disabled={busy} onClick={() => act(() => auctionService.open(id, p._id, user.token))} className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50" title="Bring this player up">
-                        {p.code ? <span className="w-8 shrink-0 rounded bg-white/10 py-0.5 text-center text-[10px] font-black tabular-nums text-white/70">#{p.code}</span> : null}
-                        {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-7 w-7 rounded-full object-cover" /> : <div className="grid h-7 w-7 place-items-center rounded-full bg-white/15 text-xs font-bold">{p.name[0]}</div>}
-                        <span className="min-w-0 flex-1 truncate text-sm font-bold">{p.name}</span>
-                        <span className="text-[11px] font-bold text-white/50">{money(p.basePrice)}</span>
+                      <button disabled={busy} onClick={() => act(() => auctionService.open(id, p._id, user.token))} className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50" title="Bring this player up (blind draw — identity is revealed on screen)">
+                        <span className="rounded-lg bg-white/10 px-3 py-1 text-base font-black tabular-nums text-white/90">#{p.code || "?"}</span>
+                        <span className="min-w-0 flex-1" />
+                        <span className="text-[11px] font-bold text-white/50">Base {money(p.basePrice)}</span>
                       </button>
                       {/* reorder controls */}
                       <div className="flex items-center gap-0.5">
@@ -386,12 +414,8 @@ export default function AuctionControl() {
                     const t = teamById[String(p.soldTo)];
                     return (
                       <div key={p._id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
-                        {p.code ? <span className="w-8 shrink-0 rounded bg-white/10 py-0.5 text-center text-[10px] font-black tabular-nums text-white/70">#{p.code}</span> : null}
-                        {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-7 w-7 rounded-full object-cover" /> : <div className="grid h-7 w-7 place-items-center rounded-full bg-white/15 text-xs font-bold">{p.name[0]}</div>}
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-bold">{p.name}</div>
-                          <div className="truncate text-[11px] font-bold text-white/40">{t ? t.name : "—"}</div>
-                        </div>
+                        <span className="rounded-lg bg-white/10 px-3 py-1 text-base font-black tabular-nums text-white/90">#{p.code || "?"}</span>
+                        <div className="min-w-0 flex-1 truncate text-[11px] font-bold text-white/40">{t ? t.name : "—"}</div>
                         <span className="text-sm font-black text-emerald-400">{money(p.soldPrice)}</span>
                       </div>
                     );
@@ -407,9 +431,8 @@ export default function AuctionControl() {
                       </button>
                       {unsold.map((p) => (
                         <div key={p._id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
-                          {p.code ? <span className="w-8 shrink-0 rounded bg-white/10 py-0.5 text-center text-[10px] font-black tabular-nums text-white/70">#{p.code}</span> : null}
-                          {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-7 w-7 rounded-full object-cover" /> : <div className="grid h-7 w-7 place-items-center rounded-full bg-white/15 text-xs font-bold">{p.name[0]}</div>}
-                          <span className="min-w-0 flex-1 truncate text-sm font-bold">{p.name}</span>
+                          <span className="rounded-lg bg-white/10 px-3 py-1 text-base font-black tabular-nums text-white/90">#{p.code || "?"}</span>
+                          <span className="min-w-0 flex-1" />
                           <IconBtn disabled={busy} onClick={() => act(() => auctionService.open(id, p._id, user.token))} title="Bring this player up"><FiPlay size={12} /></IconBtn>
                         </div>
                       ))}

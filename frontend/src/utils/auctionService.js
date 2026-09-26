@@ -33,6 +33,7 @@ const auctionService = {
   setBigScreen: (id, showPurses, token) => API.post(`/auctions/${id}/big-screen`, { showPurses }, cfg(token)).then((r) => r.data.data),
   finish: (id, token) => API.post(`/auctions/${id}/finish`, {}, cfg(token)).then((r) => r.data.data),
   undo: (id, token) => API.post(`/auctions/${id}/undo`, {}, cfg(token)).then((r) => r.data.data),
+  undoResult: (id, token) => API.post(`/auctions/${id}/undo-result`, {}, cfg(token)).then((r) => r.data.data),
   sell: (id, token) => API.post(`/auctions/${id}/sell`, {}, cfg(token)).then((r) => r.data.data),
   unsold: (id, token) => API.post(`/auctions/${id}/unsold`, {}, cfg(token)).then((r) => r.data.data),
   reauctionUnsold: (id, token) => API.post(`/auctions/${id}/reauction-unsold`, {}, cfg(token)).then((r) => r.data.data),

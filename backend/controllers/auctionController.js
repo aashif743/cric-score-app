@@ -679,6 +679,7 @@ function liveAction(engineFn) {
       const extra = result.sold ? { justSold: result.sold }
         : result.unsold ? { justUnsold: result.unsold }
         : result.reordered ? { justReordered: result.reordered }
+        : result.restored ? { justRestored: result.restored }
         : {};
       broadcast(req, auction._id, state, extra);
       res.json({ success: true, data: state });
@@ -696,6 +697,7 @@ exports.reorderPending = liveAction((req, a) => engine.reorderPending(a._id, req
 exports.setBigScreen = liveAction((req, a) => engine.setBigScreen(a, { showPurses: req.body.showPurses }));
 exports.finishAuction = liveAction((req, a) => engine.finishAuction(a));
 exports.undoBid = liveAction((req, a) => engine.undoBid(a._id));
+exports.undoLastResult = liveAction((req, a) => engine.undoLastResult(a._id));
 exports.sellCurrent = liveAction((req, a) => engine.sellCurrent(a._id));
 exports.markUnsold = liveAction((req, a) => engine.markUnsold(a._id));
 

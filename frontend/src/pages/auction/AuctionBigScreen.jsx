@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { FiMaximize2, FiMinimize2 } from "react-icons/fi";
@@ -6,6 +6,7 @@ import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
 import { formatMoney } from "../../utils/auctionFormat";
 import AuctionSummaryBoard from "./AuctionSummaryBoard.jsx";
+import AuctionPurseBoard from "./AuctionPurseBoard.jsx";
 
 // Floating full-screen toggle — for projecting the big screen edge-to-edge.
 function FullscreenButton() {
@@ -35,8 +36,13 @@ export default function AuctionBigScreen() {
   const [auctionId, setAuctionId] = useState(null);
   const [flash, setFlash] = useState(null); // { type: 'sold'|'unsold', player, team, price }
   const [shuffle, setShuffle] = useState(null); // { mode, count } — reorder animation
+  const [idReveal, setIdReveal] = useState(null); // player being announced by ID before the reveal
   const timer = useRef(null);
   const shuffleTimer = useRef(null);
+  const revealTimer = useRef(null);
+  const initRef = useRef(false);   // skip the ID reveal on first load / refresh
+  const prevPlayerRef = useRef(null);
+  const skipRevealRef = useRef(false); // skip the ID reveal for a restore (undo)
 
   useEffect(() => {
     auctionService.getPublic(shareId).then((d) => { setState(d); setAuctionId(d.auctionId); }).catch(() => setState(null));
@@ -55,6 +61,7 @@ export default function AuctionBigScreen() {
     };
     if (payload.justSold) showFlash("sold", payload.justSold);
     else if (payload.justUnsold) showFlash("unsold", payload.justUnsold);
+    else if (payload.justRestored) { skipRevealRef.current = true; setFlash(null); clearTimeout(timer.current); }
     else if (payload.justReordered) {
       setShuffle(payload.justReordered);
       clearTimeout(shuffleTimer.current);
@@ -62,9 +69,35 @@ export default function AuctionBigScreen() {
     }
   });
 
-  // Close the sold/unsold result the moment a new player is brought up.
-  useEffect(() => {
-    if (state?.auction?.currentPlayer) { setFlash(null); clearTimeout(timer.current); }
+  // When a NEW player is brought up: clear any sold/unsold result, then play the
+  // "ID reveal" (big number) intro before the normal player card shows. Skipped
+  // on the first load / a mid-lot refresh so it only fires on a genuine draw.
+  // useLayoutEffect (not useEffect) so the reveal is committed BEFORE the browser
+  // paints the new player's card — otherwise the image flashes for a frame first.
+  useLayoutEffect(() => {
+    if (!state?.auction) return;
+    const pid = state.auction.currentPlayer ? String(state.auction.currentPlayer) : null;
+    if (!initRef.current) { initRef.current = true; prevPlayerRef.current = pid; return; }
+    const prev = prevPlayerRef.current;
+    prevPlayerRef.current = pid;
+    if (pid && pid !== prev) {
+      setFlash(null); clearTimeout(timer.current);
+      if (skipRevealRef.current) {
+        // Restored via undo — snap straight back to the lot, no ID reveal.
+        skipRevealRef.current = false;
+        setIdReveal(null); clearTimeout(revealTimer.current);
+      } else {
+        const player = state.players?.find((p) => String(p._id) === pid);
+        if (player) {
+          setIdReveal(player);
+          clearTimeout(revealTimer.current);
+          revealTimer.current = setTimeout(() => setIdReveal(null), 2400);
+        }
+      }
+    } else if (!pid) {
+      setIdReveal(null); clearTimeout(revealTimer.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.auction?.currentPlayer]);
 
   const d = useMemo(() => {
@@ -83,7 +116,7 @@ export default function AuctionBigScreen() {
   }, [state]);
 
   if (!d) return <div className="grid min-h-screen place-items-center bg-[#05060f] text-slate-500">Connecting to the auction…</div>;
-  const { a, money, current, bidTeam, soldCount, board, total } = d;
+  const { a, money, current, bidTeam, soldCount, total } = d;
   const bidStr = money(a.currentBid); // formatted once, kept on a single line
 
   // Auction finished → show the results summary instead of the live view.
@@ -138,9 +171,16 @@ export default function AuctionBigScreen() {
         </div>
       </header>
 
-      <div className={`relative grid gap-6 px-6 pb-6 lg:px-10 lg:pb-10 ${a.showPurses ? "lg:grid-cols-5" : "grid-cols-1"}`}>
-        {/* Main stage — full width by default; shares space when purses are shown */}
-        <div className={a.showPurses ? "lg:col-span-3" : ""}>
+      <div className="relative px-6 pb-6 lg:px-10 lg:pb-10">
+        {/* Purse toggle = full-screen takeover. When ON it replaces the live
+            stage entirely (and the sold/unsold popup is suppressed); OFF returns
+            to normal. */}
+        {a.showPurses ? (
+          <motion.div key="purse-board" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.35 }}>
+            <AuctionPurseBoard state={state} className="h-[80vh] lg:h-[calc(100vh-8rem)]" />
+          </motion.div>
+        ) : (
+        <div>
           <AnimatePresence mode="wait">
             {current ? (
               <motion.div key={current._id} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
@@ -209,53 +249,13 @@ export default function AuctionBigScreen() {
             )}
           </AnimatePresence>
         </div>
-
-        {/* Teams leaderboard — only when the admin toggles "Show purses". */}
-        <AnimatePresence>
-        {a.showPurses && (
-        <motion.div key="purses" initial={{ opacity: 0, x: 48 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 48 }} transition={{ type: "spring", stiffness: 200, damping: 26 }} className="lg:col-span-2">
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-sm lg:p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="text-sm font-black uppercase tracking-[0.25em] text-white/40">Teams</div>
-              <div className="text-[11px] font-bold text-white/30">Purse remaining</div>
-            </div>
-            <div className="space-y-2.5">
-              {board.map((t, i) => {
-                const isTop = bidTeam && String(bidTeam._id) === String(t._id);
-                const pct = t.purse ? Math.round(((t.purse - t.remaining) / t.purse) * 100) : 0;
-                return (
-                  <motion.div key={t._id} layout transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                    className={`rounded-2xl p-3 ring-1 transition ${isTop ? "bg-amber-400/15 ring-amber-400/40" : "bg-white/[0.03] ring-white/5"}`}>
-                    <div className="flex items-center gap-3">
-                      <span className="w-5 text-center text-sm font-black text-white/30">{i + 1}</span>
-                      {t.logoUrl ? <img src={t.logoUrl} alt="" className="h-10 w-10 rounded-xl object-cover" /> : <div className="grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-sm font-black">{t.name[0]}</div>}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-lg font-black">{t.name}</span>
-                          {isTop && <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[9px] font-black uppercase text-black">Top bid</span>}
-                        </div>
-                        <div className="text-[11px] font-bold text-white/40">{t.squad} player{t.squad === 1 ? "" : "s"}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xl font-black tabular-nums text-emerald-400">{money(t.remaining)}</div>
-                      </div>
-                    </div>
-                    <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
-                      <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400" style={{ width: `${100 - pct}%` }} />
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </div>
-        </motion.div>
         )}
-        </AnimatePresence>
       </div>
 
-      {/* SOLD / UNSOLD result — stays until the next player is brought up */}
+      {/* SOLD / UNSOLD result — stays until the next player is brought up, but
+          hidden while the purse board is showing (turning purses on closes it). */}
       <AnimatePresence>
-        {flash && (() => {
+        {flash && !a.showPurses && (() => {
           const sold = flash.type === "sold";
           const p = flash.player;
           return (
@@ -331,6 +331,26 @@ export default function AuctionBigScreen() {
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.78 }}
                 className="mt-1 text-base font-semibold text-white/50">{shuffle.count} players re-ordered · fair & random</motion.div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ID REVEAL — when a new player is drawn, announce the ID big first, then
+          it fades to reveal the normal player card underneath. */}
+      <AnimatePresence>
+        {idReveal && !a.showPurses && (
+          <motion.div initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }}
+            className="absolute inset-0 z-50 grid place-items-center bg-[#05060f]" style={{ backgroundColor: "#05060f" }}>
+            <div className="text-center">
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                className="text-2xl font-black uppercase tracking-[0.5em] text-white/40 lg:text-4xl">Player</motion.div>
+              <motion.div initial={{ scale: 0.3, opacity: 0, rotate: -8 }} animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 200, damping: 13, delay: 0.15 }}
+                className="mt-3 font-black leading-none text-white drop-shadow-[0_0_70px_rgba(129,140,248,0.6)]"
+                style={{ fontSize: "clamp(9rem,34vw,28rem)" }}>#{idReveal.code}</motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }}
+                className="mt-4 text-xl font-black uppercase tracking-[0.4em] text-indigo-300 lg:text-3xl">On the block</motion.div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

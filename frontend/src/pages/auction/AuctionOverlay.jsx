@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import auctionService from "../../utils/auctionService";
 import useAuctionSocket from "../../hooks/useAuctionSocket";
 import { formatMoney } from "../../utils/auctionFormat";
 import AuctionSummaryBoard from "./AuctionSummaryBoard.jsx";
+import AuctionPurseBoard from "./AuctionPurseBoard.jsx";
 
 // Transparent broadcast overlay for OBS / streaming software (Facebook Live,
 // YouTube, etc.). Add as a Browser Source at 1920×1080 over your live video.
@@ -20,12 +21,61 @@ export default function AuctionOverlay() {
 
   const [state, setState] = useState(null);
   const [auctionId, setAuctionId] = useState(null);
+  const [idReveal, setIdReveal] = useState(null); // announce the drawn player's ID first
+  const [flash, setFlash] = useState(null); // { type:'sold'|'unsold', player, team, price }
+  const revealTimer = useRef(null);
+  const flashTimer = useRef(null);
+  const initRef = useRef(false);
+  const prevPlayerRef = useRef(null);
+  const skipRevealRef = useRef(false); // skip the ID reveal for a restore (undo)
 
-  // Opt in to a fully transparent page only while this overlay is mounted.
+  // When a new player is drawn, flash the big ID before the lower-third shows.
+  // useLayoutEffect so it's committed before paint (no lower-third flash first).
+  useLayoutEffect(() => {
+    if (!state?.auction) return;
+    const pid = state.auction.currentPlayer ? String(state.auction.currentPlayer) : null;
+    if (!initRef.current) { initRef.current = true; prevPlayerRef.current = pid; return; }
+    const prev = prevPlayerRef.current;
+    prevPlayerRef.current = pid;
+    if (pid && pid !== prev) {
+      setFlash(null); clearTimeout(flashTimer.current); // clear any sold/unsold result
+      if (skipRevealRef.current) {
+        skipRevealRef.current = false;
+        setIdReveal(null); clearTimeout(revealTimer.current);
+      } else {
+        const player = state.players?.find((p) => String(p._id) === pid);
+        if (player) {
+          setIdReveal(player);
+          clearTimeout(revealTimer.current);
+          revealTimer.current = setTimeout(() => setIdReveal(null), 2400);
+        }
+      }
+    } else if (!pid) {
+      setIdReveal(null); clearTimeout(revealTimer.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.auction?.currentPlayer]);
+
+  // Make the whole page transparent while this overlay is mounted, so OBS's
+  // Browser Source shows ONLY the floating bar / popups over the live video.
+  // Done with inline styles (not a class) so it can't depend on a stylesheet
+  // that isn't loaded — otherwise the app's dark background fills the frame.
   useEffect(() => {
+    const root = document.getElementById("root");
+    const prev = {
+      html: document.documentElement.style.background,
+      body: document.body.style.background,
+      root: root ? root.style.background : "",
+    };
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+    if (root) root.style.background = "transparent";
     document.documentElement.classList.add("overlay-obs");
     document.body.classList.add("overlay-obs");
     return () => {
+      document.documentElement.style.background = prev.html;
+      document.body.style.background = prev.body;
+      if (root) root.style.background = prev.root;
       document.documentElement.classList.remove("overlay-obs");
       document.body.classList.remove("overlay-obs");
     };
@@ -35,7 +85,21 @@ export default function AuctionOverlay() {
     auctionService.getPublic(shareId).then((d) => { setState(d); setAuctionId(d.auctionId); }).catch(() => setState(null));
   }, [shareId]);
 
-  useAuctionSocket(auctionId, (payload) => setState((prev) => ({ ...prev, ...payload })));
+  useAuctionSocket(auctionId, (payload) => {
+    setState((prev) => ({ ...prev, ...payload }));
+    // Show the sold/unsold result as a floating popup (same info as the big
+    // screen). It clears when the next player is brought up.
+    const showFlash = (type, info) => {
+      const player = payload.players?.find((p) => String(p._id) === String(info.playerId));
+      const team = payload.teams?.find((t) => String(t._id) === String(info.teamId));
+      setFlash({ type, player, team, price: info.price });
+      clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlash(null), 120000);
+    };
+    if (payload.justSold) showFlash("sold", payload.justSold);
+    else if (payload.justUnsold) showFlash("unsold", payload.justUnsold);
+    else if (payload.justRestored) { skipRevealRef.current = true; setFlash(null); clearTimeout(flashTimer.current); }
+  });
 
   const d = useMemo(() => {
     if (!state?.auction) return null;
@@ -63,9 +127,77 @@ export default function AuctionOverlay() {
   }
 
   return (
+    <>
+    {/* Purse board — full-screen takeover when the admin turns purses on (closes
+        the sold/unsold popup and hides the bar); off returns to normal. */}
+    <AnimatePresence>
+      {a.showPurses && (
+        <motion.div key="obs-purse" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}
+          className="pointer-events-none fixed inset-0 z-40 p-[3vh]">
+          <AuctionPurseBoard state={state} className="h-full w-full" />
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* ID reveal — big number announced before the lower-third appears. Kept as a
+        compact centered card so the stream video stays visible around it. */}
+    <AnimatePresence>
+      {idReveal && !a.showPurses && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.35 }}
+          className="pointer-events-none fixed inset-0 z-50 grid place-items-center">
+          <motion.div initial={{ scale: 0.4, opacity: 0, rotate: -6 }} animate={{ scale: 1, opacity: 1, rotate: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 200, damping: 13 }}
+            className="rounded-[2.5rem] bg-slate-950/80 px-16 py-10 text-center shadow-2xl ring-1 ring-white/15 backdrop-blur-md">
+            <div className="text-lg font-black uppercase tracking-[0.5em] text-white/50">Player</div>
+            <div className="font-black leading-none text-white drop-shadow-[0_0_50px_rgba(129,140,248,0.6)]" style={{ fontSize: "clamp(6rem,18vw,16rem)" }}>#{idReveal.code}</div>
+            <div className="text-base font-black uppercase tracking-[0.4em] text-indigo-300">On the block</div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* SOLD / UNSOLD — a floating popup (no full backdrop, so the live video
+        shows around it), same info as the big screen. */}
+    <AnimatePresence>
+      {flash && !a.showPurses && (() => {
+        const sold = flash.type === "sold";
+        const p = flash.player;
+        return (
+          <motion.div initial={{ opacity: 0, scale: 0.85, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ type: "spring", stiffness: 200, damping: 18 }}
+            className="pointer-events-none fixed inset-0 z-40 grid place-items-center px-6">
+            <div className="flex w-full max-w-2xl items-stretch overflow-hidden rounded-3xl bg-slate-950/90 shadow-2xl ring-1 ring-white/15 backdrop-blur-md">
+              <div className={`flex items-center px-6 text-2xl font-black lg:text-3xl ${sold ? "bg-gradient-to-b from-emerald-400 to-green-600 text-black" : "bg-gradient-to-b from-slate-600 to-slate-800 text-white"}`}>{sold ? "SOLD" : "UNSOLD"}</div>
+              <div className="flex flex-1 items-center gap-4 p-5">
+                {p && (p.photoUrl
+                  ? <img src={p.photoUrl} alt="" className="h-20 w-20 shrink-0 rounded-2xl object-cover object-top ring-2 ring-white/15" />
+                  : <div className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl bg-white/10 text-2xl font-black text-white">{(p.name || "?")[0]}</div>)}
+                <div className="min-w-0 flex-1 text-white">
+                  <div className="flex items-center gap-2">
+                    {p?.code ? <span className="shrink-0 rounded bg-white/15 px-2 py-0.5 text-sm font-black tabular-nums">#{p.code}</span> : null}
+                    <span className="truncate text-2xl font-black">{p ? p.name : "Player"}</span>
+                  </div>
+                  {sold ? (
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="text-3xl font-black tabular-nums text-amber-300">{money(flash.price)}</span>
+                      <span className="text-white/40">→</span>
+                      {flash.team?.logoUrl ? <img src={flash.team.logoUrl} alt="" className="h-7 w-7 rounded-lg object-cover" /> : null}
+                      <span className="truncate text-lg font-black">{flash.team ? flash.team.name : ""}</span>
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-lg font-bold text-white/50">No bids — returned to the pool</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        );
+      })()}
+    </AnimatePresence>
+
     <div className={`pointer-events-none fixed inset-x-0 ${position === "top" ? "top-0" : "bottom-0"} p-5`}>
       <AnimatePresence mode="wait">
-        {current ? (
+        {idReveal || a.showPurses ? null : current ? (
           <motion.div key={current._id}
             initial={{ opacity: 0, y: position === "top" ? -40 : 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: position === "top" ? -30 : 30 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
@@ -140,5 +272,6 @@ export default function AuctionOverlay() {
         )}
       </AnimatePresence>
     </div>
+    </>
   );
 }

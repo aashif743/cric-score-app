@@ -276,6 +276,52 @@ async function markUnsold(auctionId) {
   return { state, unsold: { playerId: player ? String(player._id) : null } };
 }
 
+// Undo the most recently COMPLETED lot (sold or unsold), once the block is
+// clear. Brings that player back onto the block — refunding the buyer's purse if
+// it was sold — so a mistaken sale/unsold can be corrected after the fact.
+async function undoLastResult(auctionId) {
+  const auction = await Auction.findById(auctionId);
+  if (!auction) throw new Error("Auction not found");
+  if (auction.currentPlayer) throw new Error("A player is already on the block — undo or sell that first");
+
+  const last = await AuctionPlayer.findOne({ auction: auctionId, status: { $in: ["sold", "unsold"] } })
+    .sort({ updatedAt: -1 });
+  if (!last) throw new Error("Nothing to undo");
+
+  const wasSold = last.status === "sold";
+  // Refund the buyer.
+  if (wasSold && last.soldTo && last.soldPrice) {
+    await AuctionTeam.updateOne({ _id: last.soldTo }, { $inc: { spent: -last.soldPrice } });
+  }
+
+  if (wasSold) {
+    // Sale keeps its bid ledger — restore the winning-bid state so the lot
+    // resumes exactly where it hammered.
+    const top = await Bid.findOne({ player: last._id }).sort({ seq: -1 });
+    auction.currentBid = last.soldPrice != null ? last.soldPrice : (top ? top.amount : (last.basePrice || 0));
+    auction.currentBidTeam = last.soldTo || (top ? top.team : null);
+    auction.bidCount = top ? top.seq : 0;
+  } else {
+    // Unsold cleared its bids — reopen at base price with no bids.
+    auction.currentBid = last.basePrice || 0;
+    auction.currentBidTeam = null;
+    auction.bidCount = 0;
+  }
+
+  last.status = "current";
+  last.soldTo = null;
+  last.soldPrice = null;
+  await last.save();
+
+  auction.status = "live";
+  auction.currentPlayer = last._id;
+  await auction.save();
+
+  // Flag it as a restore so viewers snap straight back to the lot (with the
+  // last bid) instead of replaying the "new player" ID-reveal intro.
+  return { state: await getState(auctionId), restored: { playerId: String(last._id) } };
+}
+
 // Manually nudge the current bid up/down by one increment (auctioneer
 // correction). Keeps the same top team and syncs the latest ledger entry so
 // Undo stays correct. Requires an existing team bid to adjust.
@@ -390,6 +436,7 @@ module.exports = {
   openLot,
   markBid,
   undoBid,
+  undoLastResult,
   sellCurrent,
   markUnsold,
   adjustBid,
