@@ -73,19 +73,18 @@ export default function AuctionBigScreen() {
     const money = (n) => formatMoney(n, { symbol: a.currencySymbol, format: a.currencyFormat });
     const current = state.players.find((p) => String(p._id) === String(a.currentPlayer)) || null;
     const bidTeam = state.teams.find((t) => String(t._id) === String(a.currentBidTeam)) || null;
-    const pending = state.players.filter((p) => p.status === "pending").sort((x, y) => x.order - y.order);
-    const nextPlayer = pending.find((p) => String(p._id) !== String(a.currentPlayer)) || null;
     const soldCount = state.players.filter((p) => p.status === "sold").length;
     const board = [...state.teams].map((t) => {
       const bought = state.players.filter((p) => String(p.soldTo) === String(t._id)).length;
       // Retained players + a playing manager count toward the squad total.
       return { ...t, squad: bought + (t.retainedCount || 0), remaining: Math.max(0, (t.purse || 0) - (t.spent || 0) - (t.retainedCost || 0)) };
     }).sort((x, y) => y.remaining - x.remaining);
-    return { a, money, current, bidTeam, nextPlayer, soldCount, board, total: state.players.length };
+    return { a, money, current, bidTeam, soldCount, board, total: state.players.length };
   }, [state]);
 
   if (!d) return <div className="grid min-h-screen place-items-center bg-[#05060f] text-slate-500">Connecting to the auction…</div>;
-  const { a, money, current, bidTeam, nextPlayer, soldCount, board, total } = d;
+  const { a, money, current, bidTeam, soldCount, board, total } = d;
+  const bidStr = money(a.currentBid); // formatted once, kept on a single line
 
   // Auction finished → show the results summary instead of the live view.
   if (a.status === "completed") {
@@ -146,39 +145,45 @@ export default function AuctionBigScreen() {
             {current ? (
               <motion.div key={current._id} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                className="flex h-[76vh] overflow-hidden rounded-[2.5rem] border border-white/10 bg-white/[0.04] backdrop-blur-sm">
+                className="flex h-[80vh] overflow-hidden rounded-[2.5rem] border border-white/10 bg-white/[0.04] backdrop-blur-sm lg:h-[calc(100vh-8rem)]">
                 {/* Left: full-height player image */}
                 <div className="relative h-full w-[40%] shrink-0 bg-gradient-to-br from-indigo-900/40 to-violet-900/40 sm:w-[44%]">
                   {current.photoUrl
                     ? <img src={current.photoUrl} alt="" className="h-full w-full object-cover object-top" />
                     : <div className="grid h-full w-full place-items-center text-[16rem] font-black text-white/15">{current.name[0]}</div>}
                   <div className="absolute inset-y-0 right-0 w-28 bg-gradient-to-r from-transparent to-[#05060f]/70" />
-                  {current.isOverseas && <span className="absolute left-5 top-5 rounded-full bg-sky-500 px-4 py-2 text-base font-black shadow-lg">✈ OVERSEAS</span>}
+                  <div className="absolute left-5 top-5 flex flex-col items-start gap-2">
+                    {current.code ? <span className="rounded-2xl bg-black/70 px-5 py-2 text-4xl font-black leading-none text-white shadow-xl ring-1 ring-white/20 backdrop-blur lg:text-6xl">#{current.code}</span> : null}
+                    {current.isOverseas && <span className="rounded-full bg-sky-500 px-4 py-2 text-base font-black shadow-lg">✈ OVERSEAS</span>}
+                  </div>
                 </div>
 
-                {/* Right: player details + current bid */}
-                <div className="flex flex-1 flex-col justify-between p-8 lg:p-12">
-                  <div>
+                {/* Right: player details + current bid. min-h-0 + a shrinkable
+                    top block guarantee the Current Bid box is never pushed off
+                    the card, even when a long name takes two big lines. */}
+                <div className="flex min-h-0 flex-1 flex-col justify-between gap-4 p-8 lg:p-10">
+                  <div className="min-h-0 overflow-hidden">
                     <div className="text-sm font-black uppercase tracking-[0.35em] text-white/40 lg:text-base">On the block</div>
-                    <div className={`mt-2 font-black leading-[0.92] ${a.showPurses ? "text-5xl lg:text-7xl" : "text-6xl lg:text-9xl"}`}>{current.name}</div>
-                    <div className="mt-5 flex flex-wrap items-center gap-3">
-                      {current.role && <Tag>{current.role}</Tag>}
-                      {current.category && <Tag tone="amber">{current.category}</Tag>}
+                    <div className={`mt-2 break-words font-black leading-[0.95] ${a.showPurses ? "text-5xl lg:text-7xl" : "text-6xl lg:text-8xl"}`}
+                      style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{current.name}</div>
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      {current.role && <Tag size="lg">{current.role}</Tag>}
+                      {current.category && <Tag size="lg" tone="amber">{current.category}</Tag>}
                     </div>
-                    <div className="mt-4 text-base font-bold uppercase tracking-[0.2em] text-white/40 lg:text-xl">Base price · {money(current.basePrice)}</div>
+                    <div className="mt-4 text-2xl font-black uppercase tracking-[0.15em] text-white/50 lg:text-4xl">Base price · <span className="text-white/80">{money(current.basePrice)}</span></div>
                     <PlayerStats stats={current.stats} />
                   </div>
 
-                  {/* Current bid — the biggest thing on screen */}
-                  <div className="rounded-3xl bg-black/40 p-6 lg:p-8">
+                  {/* Current bid — the biggest thing on screen, always ONE line.
+                      A quick, contained pulse on each change (no overlapping
+                      enter/exit) so rapid bids read clearly and keep pace with
+                      the control panel. */}
+                  <div className="shrink-0 overflow-hidden rounded-3xl bg-black/40 p-6 lg:p-8">
                     <div className="text-sm font-black uppercase tracking-[0.35em] text-white/40 lg:text-lg">Current Bid</div>
-                    <AnimatePresence mode="popLayout">
-                      <motion.div key={a.currentBid} initial={{ scale: 0.6, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                        transition={{ type: "spring", stiffness: 260, damping: 18 }}
-                        className={`font-black tabular-nums leading-none text-amber-300 drop-shadow-[0_0_30px_rgba(252,211,77,0.4)] ${a.showPurses ? "text-7xl lg:text-8xl" : "text-8xl lg:text-[10rem]"}`}>
-                        {money(a.currentBid)}
-                      </motion.div>
-                    </AnimatePresence>
+                    <motion.div key={a.currentBid} initial={{ scale: 1.1 }} animate={{ scale: 1 }} transition={{ duration: 0.14, ease: "easeOut" }}
+                      className={`origin-left whitespace-nowrap font-black tabular-nums leading-none text-amber-300 drop-shadow-[0_0_30px_rgba(252,211,77,0.4)] ${bidSizeClass(bidStr, a.showPurses)}`}>
+                      {bidStr}
+                    </motion.div>
                     <div className="mt-3 flex items-center gap-3">
                       {bidTeam ? (
                         <>
@@ -194,7 +199,7 @@ export default function AuctionBigScreen() {
               </motion.div>
             ) : (
               <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="grid h-[76vh] place-items-center rounded-[2.5rem] border border-white/10 bg-white/[0.04]">
+                className="grid h-[80vh] place-items-center rounded-[2.5rem] border border-white/10 bg-white/[0.04] lg:h-[calc(100vh-8rem)]">
                 <div className="text-center">
                   <div className="mx-auto mb-4 h-16 w-16 animate-spin-slow rounded-full border-4 border-white/10 border-t-indigo-400" />
                   <div className="text-3xl font-black text-white/70">Next player coming up…</div>
@@ -203,19 +208,6 @@ export default function AuctionBigScreen() {
               </motion.div>
             )}
           </AnimatePresence>
-
-          {/* Next up preview */}
-          {nextPlayer && (
-            <div className="mt-4 flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3">
-              <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white/40">Next up</span>
-              {nextPlayer.photoUrl ? <img src={nextPlayer.photoUrl} alt="" className="h-11 w-11 rounded-xl object-cover" /> : <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/10 font-black">{nextPlayer.name[0]}</div>}
-              <div className="flex-1">
-                <div className="text-lg font-black">{nextPlayer.name}</div>
-                <div className="text-xs font-semibold text-white/50">{[nextPlayer.role, nextPlayer.category].filter(Boolean).join(" · ") || "—"}</div>
-              </div>
-              <div className="text-sm font-black text-white/60">Base {money(nextPlayer.basePrice)}</div>
-            </div>
-          )}
         </div>
 
         {/* Teams leaderboard — only when the admin toggles "Show purses". */}
@@ -280,6 +272,7 @@ export default function AuctionBigScreen() {
                     ? <img src={p.photoUrl} alt="" className="h-44 w-44 shrink-0 rounded-3xl object-cover object-top ring-4 ring-white/10 lg:h-56 lg:w-56" />
                     : <div className="grid h-44 w-44 shrink-0 place-items-center rounded-3xl bg-gradient-to-br from-indigo-600/40 to-violet-700/40 text-7xl font-black text-white/80 lg:h-56 lg:w-56">{(p.name || "?")[0]}</div>)}
                   <div className="min-w-0 flex-1 text-white">
+                    {p?.code ? <div className="text-2xl font-black text-white/50 lg:text-3xl">#{p.code}</div> : null}
                     <div className="truncate text-5xl font-black leading-tight lg:text-7xl">{p ? p.name : "Player"}</div>
                     <div className="mt-2 flex flex-wrap items-center gap-2.5">
                       {p?.role && <Tag>{p.role}</Tag>}
@@ -345,6 +338,24 @@ export default function AuctionBigScreen() {
   );
 }
 
+// Pick a font size for the current-bid number so it ALWAYS stays on one line,
+// shrinking as the formatted amount gets longer (big numbers / "pts" suffix).
+// `compact` = the purses column is showing, so the stage is narrower.
+function bidSizeClass(str, compact) {
+  const n = (str || "").length;
+  if (compact) {
+    if (n <= 8) return "text-6xl lg:text-7xl";
+    if (n <= 12) return "text-5xl lg:text-6xl";
+    if (n <= 16) return "text-4xl lg:text-5xl";
+    return "text-3xl lg:text-4xl";
+  }
+  if (n <= 8) return "text-8xl lg:text-[9rem]";
+  if (n <= 12) return "text-7xl lg:text-8xl";
+  if (n <= 16) return "text-6xl lg:text-7xl";
+  if (n <= 20) return "text-5xl lg:text-6xl";
+  return "text-4xl lg:text-5xl";
+}
+
 const SHUFFLE_LABELS = {
   shuffle: "Randomised order",
   priceDesc: "Ordered: highest base price first",
@@ -377,6 +388,6 @@ const Stat = ({ label, value }) => (
     <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">{label}</div>
   </div>
 );
-const Tag = ({ children, tone }) => (
-  <span className={`rounded-full px-3 py-1 text-sm font-black ${tone === "amber" ? "bg-amber-400/20 text-amber-300" : "bg-white/10 text-white/80"}`}>{children}</span>
+const Tag = ({ children, tone, size }) => (
+  <span className={`rounded-full font-black ${size === "lg" ? "px-5 py-2 text-xl lg:text-3xl" : "px-3 py-1 text-sm"} ${tone === "amber" ? "bg-amber-400/20 text-amber-300" : "bg-white/10 text-white/80"}`}>{children}</span>
 );

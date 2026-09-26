@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   FiChevronLeft, FiAward, FiMonitor, FiRotateCcw, FiX, FiCheck, FiRefreshCw, FiInbox,
   FiVideo, FiPlus, FiMinus, FiArrowUp, FiArrowDown, FiChevronsUp, FiZap, FiPlay, FiShuffle, FiDollarSign, FiCheckCircle,
@@ -22,6 +22,7 @@ export default function AuctionControl() {
   const [auto, setAuto] = useState(false);
   const [selTeam, setSelTeam] = useState(null); // team id whose detail popup is open
   const [confirmSale, setConfirmSale] = useState(false); // show the "confirm sale" popup
+  const [goId, setGoId] = useState(""); // "bring up by ID" quick draw
   const autoTimer = useRef(null);
 
   useEffect(() => {
@@ -29,17 +30,63 @@ export default function AuctionControl() {
     auctionService.get(id, user.token)
       .then((data) => {
         if (data && data.isAdmin === false) { navigate(`/auctions/${id}/team`, { replace: true }); return; }
+        if (data?.auction) lotRef.current = { player: data.auction.currentPlayer == null ? null : String(data.auction.currentPlayer), count: data.auction.bidCount || 0 };
         setState(data);
       })
       .catch(() => setState(null)).finally(() => setLoading(false));
   }, [id, user?.token]);
 
-  useAuctionSocket(id, (payload) => setState((prev) => ({ ...prev, ...payload })));
+  // ---- Authoritative-state reconciliation -----------------------------------
+  // The control panel shows bids optimistically (instant), then the server
+  // confirms via the HTTP response AND a socket broadcast. During fast clicking
+  // those confirmations arrive slightly behind and out of step with the newest
+  // optimistic state, so we must NOT let a stale snapshot rubber-band the live
+  // lot (price / top team / count) backwards. Rules for the live-lot fields:
+  //   • a different (or cleared) current player → always accept (new lot / sold)
+  //   • bids still in flight                    → keep our optimistic lot
+  //   • otherwise                               → accept only if it's not older
+  // Teams / players / bids are always merged fresh (purses, sold list, squads).
+  const inFlightBids = useRef(0);              // optimistic bids not yet confirmed
+  const lotRef = useRef({ player: null, count: -1 }); // last accepted lot signature
+  const sOrNull = (v) => (v == null ? null : String(v));
+
+  const reconcile = (next, { force = false } = {}) => {
+    if (!next) return;
+    setState((prev) => {
+      if (!prev?.auction || !next.auction) {
+        if (next.auction) lotRef.current = { player: sOrNull(next.auction.currentPlayer), count: next.auction.bidCount || 0 };
+        return { ...prev, ...next };
+      }
+      const merged = { ...prev, ...next };
+      const inPlayer = sOrNull(next.auction.currentPlayer);
+      const inCount = next.auction.bidCount || 0;
+      const samePlayer = inPlayer === lotRef.current.player;
+      let accept;
+      if (force || !samePlayer) accept = true;
+      else if (inFlightBids.current > 0) accept = false;
+      else accept = inCount >= lotRef.current.count;
+      if (accept) {
+        lotRef.current = { player: inPlayer, count: inCount };
+      } else {
+        // Preserve our (newer) optimistic live-lot fields, take everything else.
+        merged.auction = {
+          ...next.auction,
+          currentPlayer: prev.auction.currentPlayer,
+          currentBid: prev.auction.currentBid,
+          currentBidTeam: prev.auction.currentBidTeam,
+          bidCount: prev.auction.bidCount,
+        };
+      }
+      return merged;
+    });
+  };
+
+  useAuctionSocket(id, (payload) => reconcile(payload));
 
   const act = async (fn) => {
     if (busy) return;
     setBusy(true);
-    try { const next = await fn(); setState((prev) => ({ ...prev, ...next })); }
+    try { const next = await fn(); inFlightBids.current = 0; reconcile(next, { force: true }); }
     catch (e) { toast.error(e?.error || e?.message || "Action failed"); }
     finally { setBusy(false); }
   };
@@ -47,24 +94,32 @@ export default function AuctionControl() {
   // Fast bid marking: update the UI INSTANTLY (optimistic), then send the bid in
   // the background. Requests are chained so they hit the server in click order
   // (no races), while the auctioneer can keep clicking at full speed — no waiting
-  // for the round-trip. The socket / responses reconcile to authoritative state.
+  // for the round-trip. reconcile() folds in the authoritative state safely.
   const bidChain = useRef(Promise.resolve());
   const markBidFast = (team) => {
+    let ok = true;
     setState((prev) => {
-      if (!prev?.auction) return prev;
+      if (!prev?.auction) { ok = false; return prev; }
       const a = prev.auction;
-      if (a.currentBidTeam && String(a.currentBidTeam) === String(team._id)) return prev; // can't outbid self
+      if (team.full) { ok = false; return prev; } // squad already full
+      if (a.currentBidTeam && String(a.currentBidTeam) === String(team._id)) { ok = false; return prev; } // can't outbid self
       const amount = nextBidAmount(a); // first bid = base price, else + tier increment
       return { ...prev, auction: { ...a, currentBid: amount, currentBidTeam: team._id, bidCount: (a.bidCount || 0) + 1 } };
     });
+    if (!ok) return;
+    inFlightBids.current += 1;
     bidChain.current = bidChain.current
       .catch(() => {})
       .then(() => auctionService.bid(id, team._id, user.token))
-      .then((next) => { if (next) setState((prev) => ({ ...prev, ...next })); })
+      .then((next) => { inFlightBids.current = Math.max(0, inFlightBids.current - 1); reconcile(next); })
       .catch((e) => {
-        toast.error(e?.error || "Bid not accepted");
-        // Re-sync to the server's authoritative state after a rejected bid.
-        return auctionService.get(id, user.token).then((data) => setState((prev) => ({ ...prev, ...data }))).catch(() => {});
+        inFlightBids.current = Math.max(0, inFlightBids.current - 1);
+        toast.error(e?.error || e?.message || "Bid not accepted");
+        // Only re-sync once the burst has fully drained, so a rejection mid-burst
+        // doesn't rubber-band the newer optimistic bids still being confirmed.
+        if (inFlightBids.current === 0) {
+          return auctionService.get(id, user.token).then((data) => reconcile(data, { force: true })).catch(() => {});
+        }
       });
   };
 
@@ -108,6 +163,17 @@ export default function AuctionControl() {
     { key: "sold", label: "Sold", count: sold.length },
     { key: "unsold", label: "Unsold", count: unsold.length },
   ];
+
+  // "Draw" a player by their ID — the auctioneer calls an ID and brings that
+  // player onto the block. Matches against still-available players.
+  const openById = () => {
+    const q = goId.trim();
+    if (!q) return;
+    const match = pending.find((p) => String(p.code || "").toLowerCase() === q.toLowerCase());
+    if (!match) { toast.error(`No available player with ID "${q}".`); return; }
+    setGoId("");
+    act(() => auctionService.open(id, match._id, user.token));
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-4 py-5 text-white" style={{ backgroundColor: "#0b1120" }}>
@@ -163,8 +229,12 @@ export default function AuctionControl() {
                   {current.photoUrl
                     ? <img src={current.photoUrl} alt="" className="h-24 w-24 rounded-2xl object-cover ring-4 ring-white/20" />
                     : <div className="grid h-24 w-24 place-items-center rounded-2xl bg-white/15 text-3xl font-black">{current.name[0]}</div>}
-                  <div className="flex-1">
-                    <div className="text-2xl font-black">{current.name}{current.isOverseas && <span className="ml-2 text-sm text-sky-300">✈</span>}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      {current.code ? <span className="shrink-0 rounded-lg bg-black/30 px-2.5 py-1 text-lg font-black tabular-nums">#{current.code}</span> : null}
+                      <span className="truncate text-2xl font-black">{current.name}</span>
+                      {current.isOverseas && <span className="shrink-0 text-sm text-sky-300">✈</span>}
+                    </div>
                     <div className="text-sm font-semibold text-white/70">{[current.role, current.category].filter(Boolean).join(" · ") || "—"} · Base {money(current.basePrice)}</div>
                   </div>
                 </div>
@@ -176,13 +246,15 @@ export default function AuctionControl() {
                     className="grid w-16 place-items-center rounded-2xl bg-black/25 text-white transition hover:bg-black/40 disabled:cursor-not-allowed disabled:opacity-40">
                     <FiMinus size={22} /><span className="text-[9px] font-black uppercase">Bid&nbsp;down</span>
                   </button>
-                  <div className="flex-1 rounded-2xl bg-black/25 p-4 text-center">
+                  <div className="min-w-0 flex-1 overflow-hidden rounded-2xl bg-black/25 p-4 text-center">
                     <div className="text-xs font-bold uppercase tracking-widest text-white/60">Current bid</div>
-                    <AnimatePresence mode="popLayout">
-                      <motion.div key={a.currentBid} initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0 }}
-                        className="text-5xl font-black tabular-nums">{money(a.currentBid)}</motion.div>
-                    </AnimatePresence>
-                    <div className="mt-1 text-sm font-bold text-amber-300">{bidTeam ? bidTeam.name : "No bids yet"}</div>
+                    {/* Quick contained pulse on each change — no overlapping enter/exit,
+                        so rapid bids stay clear. Always one line. */}
+                    <motion.div key={a.currentBid} initial={{ scale: 1.08 }} animate={{ scale: 1 }} transition={{ duration: 0.11, ease: "easeOut" }}
+                      className={cx("whitespace-nowrap font-black tabular-nums leading-none", money(a.currentBid).length > 12 ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl")}>
+                      {money(a.currentBid)}
+                    </motion.div>
+                    <div className="mt-1 truncate text-sm font-bold text-amber-300">{bidTeam ? bidTeam.name : "No bids yet"}</div>
                   </div>
                   <button disabled={!canAdjust} onClick={() => act(() => auctionService.adjustBid(id, "up", user.token))}
                     title="Raise the current bid by one increment"
@@ -254,6 +326,16 @@ export default function AuctionControl() {
               {/* Auto-advance toggle + queue ordering (only on Available) */}
               {tab === "available" && (
                 <>
+                  {/* Draw by ID — call an ID and bring that player up. */}
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <input value={goId} onChange={(e) => setGoId(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") openById(); }}
+                      placeholder="Enter player ID…" inputMode="text"
+                      className="min-w-0 flex-1 rounded-xl bg-black/25 px-3 py-2 text-sm font-bold text-white placeholder-white/30 outline-none ring-1 ring-white/10 focus:ring-indigo-400" />
+                    <button disabled={busy || !goId.trim()} onClick={openById}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-500 px-3 py-2 text-xs font-black transition hover:bg-indigo-400 disabled:opacity-40">
+                      <FiPlay size={13} /> Bring up
+                    </button>
+                  </div>
                   <button onClick={() => setAuto((v) => !v)}
                     className={cx("mb-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition", auto ? "bg-emerald-500/20 text-emerald-300" : "bg-white/5 text-white/60 hover:bg-white/10")}>
                     <span className={cx("relative h-4 w-7 shrink-0 rounded-full transition", auto ? "bg-emerald-500" : "bg-white/20")}>
@@ -284,6 +366,7 @@ export default function AuctionControl() {
                   pending.length === 0 ? <Empty text="No players left in the pool." /> : pending.map((p, i) => (
                     <div key={p._id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/5">
                       <button disabled={busy} onClick={() => act(() => auctionService.open(id, p._id, user.token))} className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50" title="Bring this player up">
+                        {p.code ? <span className="w-8 shrink-0 rounded bg-white/10 py-0.5 text-center text-[10px] font-black tabular-nums text-white/70">#{p.code}</span> : null}
                         {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-7 w-7 rounded-full object-cover" /> : <div className="grid h-7 w-7 place-items-center rounded-full bg-white/15 text-xs font-bold">{p.name[0]}</div>}
                         <span className="min-w-0 flex-1 truncate text-sm font-bold">{p.name}</span>
                         <span className="text-[11px] font-bold text-white/50">{money(p.basePrice)}</span>
@@ -303,6 +386,7 @@ export default function AuctionControl() {
                     const t = teamById[String(p.soldTo)];
                     return (
                       <div key={p._id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+                        {p.code ? <span className="w-8 shrink-0 rounded bg-white/10 py-0.5 text-center text-[10px] font-black tabular-nums text-white/70">#{p.code}</span> : null}
                         {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-7 w-7 rounded-full object-cover" /> : <div className="grid h-7 w-7 place-items-center rounded-full bg-white/15 text-xs font-bold">{p.name[0]}</div>}
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-bold">{p.name}</div>
@@ -323,6 +407,7 @@ export default function AuctionControl() {
                       </button>
                       {unsold.map((p) => (
                         <div key={p._id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+                          {p.code ? <span className="w-8 shrink-0 rounded bg-white/10 py-0.5 text-center text-[10px] font-black tabular-nums text-white/70">#{p.code}</span> : null}
                           {p.photoUrl ? <img src={p.photoUrl} alt="" className="h-7 w-7 rounded-full object-cover" /> : <div className="grid h-7 w-7 place-items-center rounded-full bg-white/15 text-xs font-bold">{p.name[0]}</div>}
                           <span className="min-w-0 flex-1 truncate text-sm font-bold">{p.name}</span>
                           <IconBtn disabled={busy} onClick={() => act(() => auctionService.open(id, p._id, user.token))} title="Bring this player up"><FiPlay size={12} /></IconBtn>

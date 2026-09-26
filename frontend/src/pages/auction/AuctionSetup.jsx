@@ -449,16 +449,31 @@ function PriceControl({ value, shown, onAdd, onClear, onChange }) {
   );
 }
 
+// The next player ID this auction will use (mirrors the server: max numeric
+// code + 1). Shown pre-filled in the add form so the organiser sees the ID
+// before adding — and can override it.
+function computeNextCode(players) {
+  let max = 0;
+  (players || []).forEach((p) => {
+    const n = parseInt(String(p.code ?? "").trim(), 10);
+    if (!Number.isNaN(n) && n > max) max = n;
+  });
+  return String(max + 1);
+}
+
 // ---------------------------------------------------------------- Players ---
 function PlayersTab({ id, token, players, money, onChange }) {
-  const blank = { name: "", role: "", category: "", basePrice: "", photoUrl: "", isOverseas: false };
+  const blank = { name: "", code: "", role: "", category: "", basePrice: "", photoUrl: "", isOverseas: false };
   const [form, setForm] = useState(blank);
+  const [codeTouched, setCodeTouched] = useState(false); // did the user override the ID?
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [bulk, setBulk] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); };
+  const nextCode = useMemo(() => computeNextCode(players), [players]);
+  const shownCode = codeTouched ? form.code : nextCode; // pre-filled ID, editable
 
   const validate = () => {
     const e = {};
@@ -473,10 +488,12 @@ function PlayersTab({ id, token, players, money, onChange }) {
     try {
       setBusy(true);
       await auctionService.addPlayer(id, {
-        name: form.name.trim(), role: form.role.trim(), category: form.category.trim(),
+        // Only send an explicit ID if the user overrode it; otherwise let the
+        // server auto-assign (== the pre-filled next ID they saw).
+        name: form.name.trim(), code: codeTouched ? form.code.trim() : "", role: form.role.trim(), category: form.category.trim(),
         basePrice: parseMoney(form.basePrice), photoUrl: form.photoUrl.trim(), isOverseas: form.isOverseas,
       }, token);
-      setForm(blank); setErrors({});
+      setForm(blank); setErrors({}); setCodeTouched(false);
       toast.success(`Player "${form.name.trim()}" added.`);
       onChange(await auctionService.get(id, token));
     } catch (e) { toast.error(e?.error || "Could not add the player."); }
@@ -503,11 +520,11 @@ function PlayersTab({ id, token, players, money, onChange }) {
   // Download a ready-to-fill Excel template (headers + a couple of example rows).
   const downloadTemplate = () => {
     const example = [
-      { Name: "Kusal Mendis", "Base Price": 500000, Role: "Batsman", Category: "A", Overseas: "No" },
-      { Name: "Wanindu Hasaranga", "Base Price": 1000000, Role: "All-rounder", Category: "Marquee", Overseas: "No" },
+      { ID: 1, Name: "Kusal Mendis", "Base Price": 500000, Role: "Batsman", Category: "A", Overseas: "No" },
+      { ID: 2, Name: "Wanindu Hasaranga", "Base Price": 1000000, Role: "All-rounder", Category: "Marquee", Overseas: "No" },
     ];
-    const ws = XLSX.utils.json_to_sheet(example, { header: ["Name", "Base Price", "Role", "Category", "Overseas"] });
-    ws["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 }];
+    const ws = XLSX.utils.json_to_sheet(example, { header: ["ID", "Name", "Base Price", "Role", "Category", "Overseas"] });
+    ws["!cols"] = [{ wch: 8 }, { wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Players");
     XLSX.writeFile(wb, "criczone-players-template.xlsx");
@@ -526,6 +543,7 @@ function PlayersTab({ id, token, players, money, onChange }) {
         const r = {};
         Object.keys(row).forEach((k) => { r[String(k).trim().toLowerCase()] = row[k]; });
         return {
+          code: String(r.id ?? r["player id"] ?? r.code ?? r["#"] ?? "").trim(),
           name: String(r.name || r["player name"] || r.player || "").trim(),
           basePrice: parseMoney(r["base price"] ?? r.baseprice ?? r.base ?? r.price ?? 0),
           role: String(r.role || "").trim(),
@@ -533,7 +551,7 @@ function PlayersTab({ id, token, players, money, onChange }) {
           isOverseas: /^(y|yes|true|1|overseas)$/i.test(String(r.overseas ?? r.isoverseas ?? "").trim()),
         };
       }).filter((p) => p.name);
-      if (!players.length) { toast.error("No valid rows found. Use the template's columns (Name, Base Price, Role, Category, Overseas)."); return; }
+      if (!players.length) { toast.error("No valid rows found. Use the template's columns (ID, Name, Base Price, Role, Category, Overseas)."); return; }
       await auctionService.addPlayersBulk(id, players, token);
       toast.success(`${players.length} player${players.length > 1 ? "s" : ""} imported from Excel.`);
       setShowBulk(false);
@@ -563,6 +581,9 @@ function PlayersTab({ id, token, players, money, onChange }) {
         <div className="mb-4"><ImageUpload value={form.photoUrl} onChange={(url) => set("photoUrl", url)} round label="Player photo" hint="Optional · shown when the player is on the block" /></div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Player ID" hint="Auto-generated · edit to change">
+            <Input value={shownCode} onChange={(e) => { setCodeTouched(true); setForm((f) => ({ ...f, code: e.target.value })); }} onKeyDown={(e) => e.key === "Enter" && add()} />
+          </Field>
           <Field label="Player name" required error={errors.name} className="lg:col-span-1">
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Kusal Mendis" error={!!errors.name} onKeyDown={(e) => e.key === "Enter" && add()} />
           </Field>
@@ -589,7 +610,7 @@ function PlayersTab({ id, token, players, money, onChange }) {
             {/* Excel import */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
               <div className="text-sm font-black text-slate-700 dark:text-slate-200">Import from Excel</div>
-              <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">Download the template, fill in your players, then upload the file. Columns: <span className="font-bold">Name, Base Price, Role, Category, Overseas</span>.</p>
+              <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">Download the template, fill in your players, then upload the file. Columns: <span className="font-bold">ID, Name, Base Price, Role, Category, Overseas</span>. Leave ID blank to auto-number.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2.5">
                 <Button variant="soft" icon={FiDownload} onClick={downloadTemplate}>Download template</Button>
                 <label className={cx("inline-flex cursor-pointer items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-700", bulkBusy && "cursor-not-allowed opacity-60")}>
@@ -622,9 +643,9 @@ function PlayersTab({ id, token, players, money, onChange }) {
             <SectionTitle>Player pool ({players.length})</SectionTitle>
           </div>
           <div className="divide-y divide-slate-100 dark:divide-white/10">
-            {players.map((p, i) => (
+            {players.map((p) => (
               <div key={p._id} className="flex items-center gap-3 px-5 py-3">
-                <span className="w-6 text-xs font-bold text-slate-400">{i + 1}</span>
+                <PlayerIdInput id={id} token={token} player={p} onChange={onChange} />
                 <ImageUpload compact round value={p.photoUrl}
                   onChange={async (url) => { await auctionService.updatePlayer(id, p._id, { photoUrl: url }, token); onChange(await auctionService.get(id, token)); }} />
                 <div className="min-w-0 flex-1">
@@ -643,6 +664,34 @@ function PlayersTab({ id, token, players, money, onChange }) {
         </Card>
       )}
     </div>
+  );
+}
+
+// Inline-editable player ID shown at the start of each pool row. Saves on blur
+// or Enter; reverts on error (e.g. duplicate ID).
+function PlayerIdInput({ id, token, player, onChange }) {
+  const [val, setVal] = useState(player.code || "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setVal(player.code || ""); }, [player.code]);
+  const save = async () => {
+    const next = val.trim();
+    if (next === (player.code || "")) { setVal(next); return; }
+    if (!next) { setVal(player.code || ""); return; }
+    try {
+      setSaving(true);
+      await auctionService.updatePlayer(id, player._id, { code: next }, token);
+      onChange(await auctionService.get(id, token));
+      toast.success("Player ID updated.");
+    } catch (e) {
+      toast.error(e?.error || "Could not update the ID.");
+      setVal(player.code || "");
+    } finally { setSaving(false); }
+  };
+  return (
+    <input value={val} disabled={saving} onChange={(e) => setVal(e.target.value)} onBlur={save}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      title="Player ID — click to edit"
+      className="w-12 shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-1 py-1 text-center text-xs font-black text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:focus:ring-indigo-500/20" />
   );
 }
 

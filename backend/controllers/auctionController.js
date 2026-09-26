@@ -512,18 +512,62 @@ exports.deleteTeam = async (req, res) => {
 
 // ------------------------------------------------------------------ Players ---
 
+// ---- Player IDs (auction "tokens") ----------------------------------------
+// A per-auction identifier the auctioneer draws/announces. Auto-assigned as the
+// next free integer, but the organiser may set any string (e.g. "A12"), kept
+// unique within the auction.
+const numericCode = (c) => { const n = parseInt(String(c ?? "").trim(), 10); return Number.isNaN(n) ? null : n; };
+
+// Snapshot of codes already in use + the next integer to try, so a batch can
+// allocate many codes without re-querying per row.
+async function codeContext(auctionId) {
+  const players = await AuctionPlayer.find({ auction: auctionId }).select("code").lean();
+  const used = new Set();
+  let max = 0;
+  players.forEach((p) => {
+    const c = String(p.code || "").trim();
+    if (c) used.add(c);
+    const n = numericCode(c);
+    if (n != null && n > max) max = n;
+  });
+  return { used, next: max + 1 };
+}
+// Claim a code: use `preferred` if given and free, else the next free integer.
+function takeCode(ctx, preferred) {
+  const want = String(preferred ?? "").trim();
+  if (want && !ctx.used.has(want)) {
+    ctx.used.add(want);
+    const n = numericCode(want);
+    if (n != null && n >= ctx.next) ctx.next = n + 1;
+    return want;
+  }
+  while (ctx.used.has(String(ctx.next))) ctx.next++;
+  const code = String(ctx.next);
+  ctx.used.add(code);
+  ctx.next++;
+  return code;
+}
+
 exports.addPlayer = async (req, res) => {
   try {
     const auction = await loadOwned(req, res);
     if (!auction) return;
-    const { name, photoUrl, role, category, basePrice, stats, isOverseas, order } = req.body;
+    const { name, code, photoUrl, role, category, basePrice, stats, isOverseas, order } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: "Player name is required" });
     }
+    // Reject an explicit ID that clashes with an existing player.
+    const wantCode = String(code ?? "").trim();
+    if (wantCode) {
+      const clash = await AuctionPlayer.findOne({ auction: auction._id, code: wantCode }).select("_id").lean();
+      if (clash) return res.status(400).json({ success: false, error: `Player ID "${wantCode}" is already used.` });
+    }
+    const ctx = await codeContext(auction._id);
     const count = await AuctionPlayer.countDocuments({ auction: auction._id });
     const player = await AuctionPlayer.create({
       auction: auction._id,
       name: name.trim(),
+      code: takeCode(ctx, wantCode),
       photoUrl: photoUrl || "",
       role: role || "",
       category: category || "",
@@ -549,11 +593,15 @@ exports.addPlayersBulk = async (req, res) => {
     const rows = Array.isArray(req.body.players) ? req.body.players : [];
     if (!rows.length) return res.status(400).json({ success: false, error: "No players provided" });
     let count = await AuctionPlayer.countDocuments({ auction: auction._id });
+    const ctx = await codeContext(auction._id);
     const docs = rows
       .filter((p) => p && p.name && p.name.trim())
       .map((p) => ({
         auction: auction._id,
         name: p.name.trim(),
+        // Use the sheet's ID if free, otherwise auto-assign — never fail the
+        // whole import on a duplicate/blank ID.
+        code: takeCode(ctx, p.code),
         photoUrl: p.photoUrl || "",
         role: p.role || "",
         category: p.category || "",
@@ -578,6 +626,14 @@ exports.updatePlayer = async (req, res) => {
     if (!auction) return;
     const player = await AuctionPlayer.findOne({ _id: req.params.playerId, auction: auction._id });
     if (!player) return res.status(404).json({ success: false, error: "Player not found" });
+    // Player ID: must be non-empty and unique within the auction.
+    if (req.body.code !== undefined) {
+      const want = String(req.body.code).trim();
+      if (!want) return res.status(400).json({ success: false, error: "Player ID cannot be empty." });
+      const clash = await AuctionPlayer.findOne({ auction: auction._id, code: want, _id: { $ne: player._id } }).select("_id").lean();
+      if (clash) return res.status(400).json({ success: false, error: `Player ID "${want}" is already used by another player.` });
+      player.code = want;
+    }
     const fields = ["name", "photoUrl", "role", "category", "basePrice", "stats", "isOverseas", "order"];
     fields.forEach((f) => { if (req.body[f] !== undefined) player[f] = req.body[f]; });
     await player.save();

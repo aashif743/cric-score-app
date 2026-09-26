@@ -12,6 +12,10 @@ const auctionPlayerSchema = mongoose.Schema(
       index: true,
     },
     name: { type: String, required: true, trim: true },
+    // Per-auction player ID/token the auctioneer draws & announces (like a
+    // physical lottery number). Auto-assigned (next free integer) but editable.
+    // Kept unique within an auction by the controller.
+    code: { type: String, trim: true, default: "" },
     photoUrl: { type: String, default: "" },
     role: { type: String, trim: true, default: "" }, // Batsman / Bowler / All-rounder / WK ...
     category: { type: String, trim: true, default: "" }, // grade / set (A, Marquee, ...)
@@ -32,5 +36,8 @@ const auctionPlayerSchema = mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Fast lookup + uniqueness scoping by (auction, code).
+auctionPlayerSchema.index({ auction: 1, code: 1 });
 
 module.exports = mongoose.model("AuctionPlayer", auctionPlayerSchema);
