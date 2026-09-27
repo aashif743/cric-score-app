@@ -946,10 +946,13 @@ const FullScorecardScreen = ({ navigation, route }) => {
   };
 
   const getBallColor = (ball) => {
-    if (ball === 'W') return colors.error;
-    if (ball === '4' || ball === '6') return colors.success;
-    if (ball.includes('WD') || ball.includes('NB')) return colors.warning;
-    if (ball.includes('BYE') || ball.includes('LB')) return '#f97316';
+    // Coerce to string first — a non-string/undefined ball entry from legacy or
+    // partially-written over data would otherwise crash on .includes().
+    const b = String(ball ?? '');
+    if (b === 'W') return colors.error;
+    if (b === '4' || b === '6') return colors.success;
+    if (b.includes('WD') || b.includes('NB')) return colors.warning;
+    if (b.includes('BYE') || b.includes('LB')) return '#f97316';
     return colors.primaryLight;
   };
 

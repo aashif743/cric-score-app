@@ -7,7 +7,19 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const http = require("http");
+const helmet = require("helmet");
+const compression = require("compression");
 const { Server } = require("socket.io");
+
+// Keep the process alive on stray async errors. Without these, a single
+// unhandled promise rejection (e.g. a transient DB blip on a hot path) would
+// terminate the whole server and drop every connected user.
+process.on("unhandledRejection", (reason) => {
+  console.error("⚠️ Unhandled Rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("⚠️ Uncaught Exception:", err);
+});
 
 // Import your route files (now safe — env vars are populated).
 const matchRoutes = require("./routes/matchRoutes");
@@ -21,6 +33,11 @@ const appRoutes = require("./routes/appRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 
 const app = express();
+
+// Render (and most hosts) put a reverse proxy in front. Trust the first proxy
+// hop so req.ip reflects the real client IP — required for per-IP rate limiting
+// to bucket users individually instead of lumping everyone under the proxy IP.
+app.set("trust proxy", 1);
 
 // ✅ Create HTTP server from the Express app
 const server = http.createServer(app);
@@ -60,10 +77,16 @@ const io = new Server(server, {
 // Make the Socket.io server available to controllers (auction broadcasts).
 app.set("io", io);
 
+// Security headers + gzip (big JSON payloads compress well for mobile clients).
+// helmet's default CSP is disabled — this is a JSON API, not an HTML app, and a
+// strict CSP here can interfere with cross-origin asset/image use.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
+app.use(compression());
+
 // CORS configuration for Express API routes
 app.use(cors(corsOptions));
 
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
 // Health check endpoint (for keep-alive pings)
 app.get("/api/health", (req, res) => {
@@ -81,11 +104,21 @@ app.use("/api/auctions", auctionRoutes);
 app.use("/api/app", appRoutes);
 app.use("/api/uploads", uploadRoutes);
 
-// MongoDB Connection
+// MongoDB Connection — bounded pool + fast failover so a slow/broken DB rejects
+// quickly instead of hanging requests and exhausting sockets under load.
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    maxPoolSize: 50,
+    minPoolSize: 5,
+    serverSelectionTimeoutMS: 8000,
+    socketTimeoutMS: 45000,
+  })
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
+
+mongoose.connection.on("error", (err) => console.error("⚠️ MongoDB error:", err.message));
+mongoose.connection.on("disconnected", () => console.warn("⚠️ MongoDB disconnected"));
+mongoose.connection.on("reconnected", () => console.log("✅ MongoDB reconnected"));
 
 // In-memory cache of "is this match's tournament public?" so the fan-out
 // hot path doesn't hit MongoDB on every ball. Entries expire after 5 minutes
@@ -118,11 +151,8 @@ async function isMatchPublic(matchId) {
 
 // Socket.io Events
 io.on("connection", (socket) => {
-  console.log("🟢 A user connected");
-
   socket.on("join-match", (matchId) => {
     socket.join(matchId);
-    console.log(`User ${socket.id} joined room: ${matchId}`);
   });
 
   // Dashboard live strip subscribes to this global room. Any score update on
@@ -154,7 +184,6 @@ io.on("connection", (socket) => {
 
   socket.on("leave-match", (matchId) => {
     socket.leave(matchId);
-    console.log(`User ${socket.id} left room: ${matchId}`);
   });
 
   // Auction rooms — control panel, big screen and owner devices join to receive
@@ -167,9 +196,15 @@ io.on("connection", (socket) => {
     if (auctionId) socket.leave(`auction:${auctionId}`);
   });
 
-  socket.on("disconnect", () => {
-    console.log("🔴 A user disconnected");
-  });
+  socket.on("disconnect", () => {});
+});
+
+// Global error handler — anything a route throws lands here as JSON instead of a
+// default HTML 500, and is logged consistently (never crashes the process).
+app.use((err, req, res, next) => {
+  console.error("API error:", err.message);
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ success: false, error: "Server error" });
 });
 
 // Start Server

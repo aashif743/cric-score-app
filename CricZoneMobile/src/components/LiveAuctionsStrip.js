@@ -86,7 +86,7 @@ export default function LiveAuctionsStrip({ navigation }) {
               <View style={styles.cardTop}>
                 <View style={styles.livePill}>
                   {a.status === 'live' ? <LiveDot /> : null}
-                  <Text style={styles.livePillText}>{a.status === 'paused' ? 'PAUSED' : 'LIVE'}</Text>
+                  <Text style={styles.livePillText}>{a.status === 'completed' ? 'RESULTS' : a.status === 'paused' ? 'PAUSED' : 'LIVE'}</Text>
                 </View>
                 <View style={styles.auctionTag}><Text style={styles.auctionTagText}>AUCTION</Text></View>
               </View>

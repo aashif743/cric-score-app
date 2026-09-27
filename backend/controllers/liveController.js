@@ -1,6 +1,12 @@
 const Tournament = require("../models/Tournament");
 const Match = require("../models/Match");
 
+// The live feed is identical for every viewer, so cache it briefly in-process.
+// Under launch load this collapses the 1000-user poll + per-ball socket refetch
+// storm into ~1 DB pass every few seconds. 5s staleness is imperceptible.
+let liveCache = { data: null, exp: 0 };
+const LIVE_CACHE_TTL = 5000;
+
 // GET /api/live/matches
 // Returns every match currently in progress (status in_progress / innings_break)
 // whose tournament is public. Used to populate the home-feed live strip and
@@ -13,6 +19,10 @@ const Match = require("../models/Match");
 // runs, wickets, overs, current innings) without dumping full innings rosters.
 exports.getLiveMatches = async (req, res) => {
   try {
+    // Serve the shared cached feed if fresh (absorbs the poll/socket herd).
+    if (liveCache.data && liveCache.exp > Date.now()) {
+      return res.json({ success: true, data: liveCache.data });
+    }
     // Find ids of public tournaments first. Two-stage rather than $lookup
     // because both collections are independently indexed.
     // Treat anything not explicitly "private" as public: tournaments created
@@ -96,23 +106,31 @@ exports.getLiveMatches = async (req, res) => {
       return new Date(m.updatedAt).getTime() >= partialCutoff;
     });
 
-    // Match number within its tournament — the position in creation order
-    // (ObjectIds are monotonic, so _id order ≈ fixture/schedule order). Shown
-    // on the card as "1st match", "2nd match", etc.
-    const matchNumbers = await Promise.all(
-      visible.map((m) =>
-        Match.countDocuments({ tournament: m.tournament, _id: { $lt: m._id } }).then((n) => n + 1),
-      ),
-    );
+    // Match number within its tournament — position in creation order (ObjectId
+    // hex sorts chronologically ≈ fixture order). Computed IN-PROCESS from the
+    // status scan we already ran, instead of a countDocuments per match (which
+    // was an N+1 that melted the DB under the per-ball refetch storm).
+    const idsByTournament = new Map();
+    for (const row of statusRows) {
+      const key = String(row.tournament);
+      if (!idsByTournament.has(key)) idsByTournament.set(key, []);
+      idsByTournament.get(key).push(String(row._id));
+    }
+    for (const arr of idsByTournament.values()) arr.sort();
+    const matchNumberOf = (m) => {
+      const arr = idsByTournament.get(String(m.tournament)) || [];
+      const idx = arr.indexOf(String(m._id));
+      return idx >= 0 ? idx + 1 : 1;
+    };
 
-    const data = visible.map((m, i) => {
+    const data = visible.map((m) => {
       const t = tournamentById.get(String(m.tournament));
       return {
         _id: m._id,
         tournament: m.tournament,
         tournamentName: t?.name || "",
         tournamentFormat: t?.format || "quick",
-        matchNumber: matchNumbers[i],
+        matchNumber: matchNumberOf(m),
         stage: m.stage,
         group: m.group || null,
         matchLabel: m.matchLabel || null,
@@ -139,6 +157,7 @@ exports.getLiveMatches = async (req, res) => {
       return new Date(b.updatedAt) - new Date(a.updatedAt);
     });
 
+    liveCache = { data, exp: Date.now() + LIVE_CACHE_TTL };
     res.json({ success: true, data });
   } catch (error) {
     console.error("Get live matches error:", error);

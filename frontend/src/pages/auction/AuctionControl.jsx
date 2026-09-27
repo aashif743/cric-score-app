@@ -83,10 +83,20 @@ export default function AuctionControl() {
 
   useAuctionSocket(id, (payload) => reconcile(payload));
 
+  // Optimistic bids are sent in click order on this chain; actions await it.
+  const bidChain = useRef(Promise.resolve());
+
   const act = async (fn) => {
     if (busy) return;
     setBusy(true);
-    try { const next = await fn(); inFlightBids.current = 0; reconcile(next, { force: true }); }
+    try {
+      // Let any in-flight optimistic bids reach the server FIRST, so an action
+      // like SELL uses the true final bid (not a stale, still-catching-up value).
+      await bidChain.current.catch(() => {});
+      const next = await fn();
+      inFlightBids.current = 0;
+      reconcile(next, { force: true });
+    }
     catch (e) { toast.error(e?.error || e?.message || "Action failed"); }
     finally { setBusy(false); }
   };
@@ -95,7 +105,6 @@ export default function AuctionControl() {
   // the background. Requests are chained so they hit the server in click order
   // (no races), while the auctioneer can keep clicking at full speed — no waiting
   // for the round-trip. reconcile() folds in the authoritative state safely.
-  const bidChain = useRef(Promise.resolve());
   const markBidFast = (team) => {
     let ok = true;
     setState((prev) => {

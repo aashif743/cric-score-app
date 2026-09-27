@@ -39,5 +39,9 @@ const auctionPlayerSchema = mongoose.Schema(
 
 // Fast lookup + uniqueness scoping by (auction, code).
 auctionPlayerSchema.index({ auction: 1, code: 1 });
+// Hot-path compound indexes: sold/pending counts (markBid, maxBid, public feed)
+// and the order-sorted getState fetch run on every auction action.
+auctionPlayerSchema.index({ auction: 1, status: 1 });
+auctionPlayerSchema.index({ auction: 1, order: 1, createdAt: 1 });
 
 module.exports = mongoose.model("AuctionPlayer", auctionPlayerSchema);

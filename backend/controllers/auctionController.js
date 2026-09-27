@@ -33,6 +33,15 @@ function broadcast(req, auctionId, state, extra = {}) {
   if (io && state) io.to(room(auctionId)).emit("auction:update", { ...state, ...extra });
 }
 
+// Short in-process caches for the two hot PUBLIC endpoints. Under launch load
+// (hundreds of spectators polling) this collapses the herd into ~1 DB pass per
+// few seconds. Real-time changes still flow over the socket, so a few seconds of
+// staleness on the poll fallback is harmless.
+const publicListCache = { data: null, exp: 0 };
+const PUBLIC_LIST_TTL = 5000;
+const publicAuctionCache = new Map(); // shareId -> { data, exp }
+const PUBLIC_AUCTION_TTL = 3000;
+
 // Load the auction and confirm the caller owns it (the management account).
 async function loadOwned(req, res) {
   const { id } = req.params;
@@ -190,10 +199,15 @@ exports.getAuction = async (req, res) => {
 // Public read-only snapshot for the big screen / spectator link (no auth).
 exports.getPublicAuction = async (req, res) => {
   try {
-    const auction = await Auction.findOne({ shareId: req.params.shareId }).select("_id").lean();
+    const key = req.params.shareId;
+    const hit = publicAuctionCache.get(key);
+    if (hit && hit.exp > Date.now()) return res.json({ success: true, data: hit.data });
+    const auction = await Auction.findOne({ shareId: key }).select("_id").lean();
     if (!auction) return res.status(404).json({ success: false, error: "Auction not found" });
     const state = await engine.getState(auction._id);
-    res.json({ success: true, data: { ...state, auctionId: String(auction._id) } });
+    const data = { ...state, auctionId: String(auction._id) };
+    publicAuctionCache.set(key, { data, exp: Date.now() + PUBLIC_AUCTION_TTL });
+    res.json({ success: true, data });
   } catch (error) {
     console.error("Get public auction error:", error);
     res.status(500).json({ success: false, error: "Failed to load auction" });
@@ -257,7 +271,20 @@ exports.getAuctionForImport = async (req, res) => {
 // Lightweight summaries only — the detail screen fetches the full snapshot.
 exports.listPublicLiveAuctions = async (req, res) => {
   try {
-    const auctions = await Auction.find({ visibility: "public", status: { $in: ["live", "paused"] } })
+    if (publicListCache.data && publicListCache.exp > Date.now()) {
+      return res.json({ success: true, data: publicListCache.data });
+    }
+    // Show live/paused auctions, PLUS recently-completed ones for 3 days so
+    // people can still view the results after the auction ends.
+    const RESULTS_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+    const completedSince = new Date(Date.now() - RESULTS_WINDOW_MS);
+    const auctions = await Auction.find({
+      visibility: "public",
+      $or: [
+        { status: { $in: ["live", "paused"] } },
+        { status: "completed", updatedAt: { $gte: completedSince } },
+      ],
+    })
       .select("name logoUrl coverUrl venue status shareId currentBid currentPlayer currentBidTeam bidCount currencyCode currencyFormat currencySymbol updatedAt")
       .sort({ updatedAt: -1 })
       .limit(30)
@@ -289,6 +316,12 @@ exports.listPublicLiveAuctions = async (req, res) => {
       };
     }));
 
+    // Live/paused first, then recently-completed (each newest-first).
+    const rank = (s) => (s === "completed" ? 1 : 0);
+    data.sort((a, b) => rank(a.status) - rank(b.status) || new Date(b.updatedAt) - new Date(a.updatedAt));
+
+    publicListCache.data = data;
+    publicListCache.exp = Date.now() + PUBLIC_LIST_TTL;
     res.json({ success: true, data });
   } catch (error) {
     console.error("List public live auctions error:", error);
@@ -669,7 +702,7 @@ exports.deletePlayer = async (req, res) => {
 // -------------------------------------------------------------- Live actions ---
 // Admin-only. Run the engine, then broadcast the new state to the room.
 
-function liveAction(engineFn) {
+function liveAction(engineFn, { lite = false } = {}) {
   return async (req, res) => {
     try {
       const auction = await loadOwned(req, res);
@@ -681,7 +714,13 @@ function liveAction(engineFn) {
         : result.reordered ? { justReordered: result.reordered }
         : result.restored ? { justRestored: result.restored }
         : {};
-      broadcast(req, auction._id, state, extra);
+      // On a plain bid nothing about the player list or purses changes — only the
+      // live-lot fields. Broadcasting a LITE payload (no big `players` array) to
+      // every spectator slashes egress during fast bidding; clients merge it over
+      // their existing state. Player/team changes (sell/open/unsold/reorder) still
+      // send the full snapshot. The HTTP response to the admin stays full.
+      const payload = lite ? { auction: state.auction, teams: state.teams, recentBids: state.recentBids } : state;
+      broadcast(req, auction._id, payload, extra);
       res.json({ success: true, data: state });
     } catch (error) {
       res.status(400).json({ success: false, error: error.message || "Action failed" });
@@ -690,13 +729,13 @@ function liveAction(engineFn) {
 }
 
 exports.openLot = liveAction((req, a) => engine.openLot(a._id, req.body.playerId));
-exports.markBid = liveAction((req, a) => engine.markBid(a, req.body.teamId));
-exports.adjustBid = liveAction((req, a) => engine.adjustBid(a._id, req.body.direction));
+exports.markBid = liveAction((req, a) => engine.markBid(a, req.body.teamId), { lite: true });
+exports.adjustBid = liveAction((req, a) => engine.adjustBid(a._id, req.body.direction), { lite: true });
 exports.movePlayer = liveAction((req, a) => engine.movePlayer(a._id, req.body.playerId, req.body.direction));
 exports.reorderPending = liveAction((req, a) => engine.reorderPending(a._id, req.body.mode));
 exports.setBigScreen = liveAction((req, a) => engine.setBigScreen(a, { showPurses: req.body.showPurses }));
 exports.finishAuction = liveAction((req, a) => engine.finishAuction(a));
-exports.undoBid = liveAction((req, a) => engine.undoBid(a._id));
+exports.undoBid = liveAction((req, a) => engine.undoBid(a._id), { lite: true });
 exports.undoLastResult = liveAction((req, a) => engine.undoLastResult(a._id));
 exports.sellCurrent = liveAction((req, a) => engine.sellCurrent(a._id));
 exports.markUnsold = liveAction((req, a) => engine.markUnsold(a._id));

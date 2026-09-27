@@ -132,9 +132,11 @@ export default function AuctionOverlay() {
         the sold/unsold popup and hides the bar); off returns to normal. */}
     <AnimatePresence>
       {a.showPurses && (
-        <motion.div key="obs-purse" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}
-          className="pointer-events-none fixed inset-0 z-40 p-[3vh]">
-          <AuctionPurseBoard state={state} className="h-full w-full" />
+        <motion.div key="obs-purse" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={{ duration: 0.3 }}
+          className={`pointer-events-none fixed z-40 flex ${position === "top" ? "inset-x-0 top-0 justify-center pt-[3vh]" : "inset-x-0 bottom-0 justify-center pb-[3vh]"}`}>
+          {/* Compact floating panel that scales with the stream canvas — video
+              stays visible around it. Width caps so it never fills the screen. */}
+          <AuctionPurseBoard state={state} compact className="max-h-[70vh] w-[min(58vw,860px)] shadow-2xl ring-1 ring-white/10" />
         </motion.div>
       )}
     </AnimatePresence>

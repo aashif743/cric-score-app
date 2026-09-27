@@ -409,5 +409,7 @@ MatchSchema.pre('save', function(next) {
 MatchSchema.index({ user: 1, updatedAt: -1 });
 MatchSchema.index({ tournament: 1, status: 1 });
 MatchSchema.index({ tournament: 1, updatedAt: -1 });
+// Serves the public live-feed candidate query (status + recency window).
+MatchSchema.index({ status: 1, updatedAt: -1 });
 
 module.exports = mongoose.model("Match", MatchSchema);

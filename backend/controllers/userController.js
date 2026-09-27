@@ -111,45 +111,51 @@ const sendOtp = async (req, res) => {
 // @desc    Verify OTP and log in or prepare for registration
 // @route   POST /api/users/verify-otp
 const verifyOtp = async (req, res) => {
-  const { phoneNumber, otp } = req.body;
-  if (!phoneNumber || !otp) {
-    return res.status(400).json({ message: 'Phone number and OTP are required' });
-  }
+  try {
+    const { phoneNumber, otp } = req.body;
+    if (!phoneNumber || !otp) {
+      return res.status(400).json({ message: 'Phone number and OTP are required' });
+    }
 
-  const user = await User.findOne({ 
-    phoneNumber,
-    otp,
-    otpExpires: { $gt: Date.now() } 
-  });
-
-  if (!user) {
-    return res.status(400).json({ message: 'Invalid OTP or OTP has expired.' });
-  }
-
-  user.otp = undefined;
-  user.otpExpires = undefined;
-  await user.save();
-
-  if (user.name) {
-    res.status(200).json({
-      _id: user.id,
-      name: user.name,
-      phoneNumber: user.phoneNumber,
-      token: generateToken(user._id),
-      isNewUser: false
+    const user = await User.findOne({
+      phoneNumber,
+      otp,
+      otpExpires: { $gt: Date.now() }
     });
-  } else {
-    res.status(200).json({
-      message: "OTP verified. Please provide a name.",
-      isNewUser: true,
-      phoneNumber: user.phoneNumber 
-    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid OTP or OTP has expired.' });
+    }
+
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
+
+    if (user.name) {
+      res.status(200).json({
+        _id: user.id,
+        name: user.name,
+        phoneNumber: user.phoneNumber,
+        token: generateToken(user._id),
+        isNewUser: false
+      });
+    } else {
+      res.status(200).json({
+        message: "OTP verified. Please provide a name.",
+        isNewUser: true,
+        phoneNumber: user.phoneNumber
+      });
+    }
+  } catch (err) {
+    console.error("verifyOtp error:", err.message);
+    res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 };
 
 // @desc    Set user's name to complete registration
 // @route   POST /api/users/complete-registration
 const setUserName = async (req, res) => {
+  try {
     const { phoneNumber, name } = req.body;
     if (!phoneNumber || !name) {
         return res.status(400).json({ message: 'Phone number and name are required' });
@@ -169,6 +175,10 @@ const setUserName = async (req, res) => {
       phoneNumber: user.phoneNumber,
       token: generateToken(user._id),
     });
+  } catch (err) {
+    console.error("setUserName error:", err.message);
+    res.status(500).json({ message: "Something went wrong. Please try again." });
+  }
 };
 
 // @desc    Delete user account and all associated data
