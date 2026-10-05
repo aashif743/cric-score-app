@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "29",
+      "buildNumber": "30",
       "infoPlist": {
         "NSCameraUsageDescription": "CricZone needs camera access to scan auction QR codes and capture scorecard images.",
         "NSPhotoLibraryUsageDescription": "CricZone needs photo library access to save and share scorecard images.",

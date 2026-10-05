@@ -19,6 +19,12 @@ const winnerOf = (m) => {
   return idx > 0 ? m.result.slice(0, idx) : '';
 };
 
+// Normalise a team name for matching: trim, collapse inner whitespace, lowercase.
+// Used so a completed match whose stored name differs only cosmetically from the
+// tournament's canonical name is STILL counted — a finished game must never fall
+// out of the points table over a stray space or capital letter.
+const norm = (s) => (s || '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
+
 export function computeGroupStandings(matches, teamNames) {
   const row = (team) => ({
     team, played: 0, won: 0, lost: 0, tied: 0, points: 0,
@@ -27,14 +33,18 @@ export function computeGroupStandings(matches, teamNames) {
     nrr: 0,
   });
   const table = Object.fromEntries(teamNames.map((t) => [t, row(t)]));
+  // normalised name → canonical team key
+  const lookup = {};
+  teamNames.forEach((t) => { lookup[norm(t)] = t; });
+  const resolve = (name) => (table[name] ? name : lookup[norm(name)]);
 
   matches.forEach((m) => {
     if (m.status !== 'completed') return;
-    const a = m.teamA?.name; const b = m.teamB?.name;
-    if (!a || !b || !table[a] || !table[b]) return;
+    const a = resolve(m.teamA?.name); const b = resolve(m.teamB?.name);
+    if (!a || !b || a === b) return;
     const i1 = m.innings1 || {}; const i2 = m.innings2 || {};
 
-    const aFirst = i1.battingTeam === a;
+    const aFirst = norm(i1.battingTeam) === norm(a);
     const aBat = aFirst ? i1 : i2;
     const bBat = aFirst ? i2 : i1;
     const aRuns = aBat.runs || 0;
@@ -43,12 +53,19 @@ export function computeGroupStandings(matches, teamNames) {
     const bOv = oversToDecimal(bBat.overs);
 
     table[a].played++; table[b].played++;
-    table[a].runsFor += aRuns; table[a].runsAgainst += bRuns;
-    table[a].oversFor += aOv;  table[a].oversAgainst += bOv;
-    table[b].runsFor += bRuns; table[b].runsAgainst += aRuns;
-    table[b].oversFor += bOv;  table[b].oversAgainst += aOv;
+    // A TIE never affects NRR — skip the run/over accumulation when the scores
+    // are level, so a tied match (whether it went to a super over or not)
+    // contributes 0 NRR to both teams. (Super-over runs live in match.superOver
+    // and never reach the innings, so a super-over match is still level here.)
+    const isTie = aRuns === bRuns;
+    if (!isTie) {
+      table[a].runsFor += aRuns; table[a].runsAgainst += bRuns;
+      table[a].oversFor += aOv;  table[a].oversAgainst += bOv;
+      table[b].runsFor += bRuns; table[b].runsAgainst += aRuns;
+      table[b].oversFor += bOv;  table[b].oversAgainst += aOv;
+    }
 
-    const winner = winnerOf(m);
+    const winner = resolve(winnerOf(m));
     if (winner === a) {
       table[a].won++; table[b].lost++;
       table[a].points += 2;

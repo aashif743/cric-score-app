@@ -1212,6 +1212,16 @@ exports.getTeamRosters = async (req, res) => {
         (inn.bowling || []).forEach((p) => add(inn.bowlingTeam, p && p.name));
       }
     }
+
+    // Also include each team's imported/defined squad (e.g. from an auction
+    // import) so reserves who haven't batted/bowled yet are still suggested —
+    // strictly team-scoped, so no opponent names ever leak in.
+    const tournament = await Tournament.findById(id).select("teamSquads").lean();
+    const squads = squadsOf(tournament);
+    Object.keys(squads || {}).forEach((team) => {
+      (squads[team] || []).forEach((p) => add(team, p && p.name));
+    });
+
     return res.json({ success: true, data: rosters });
   } catch (error) {
     console.error("Get team rosters error:", error);

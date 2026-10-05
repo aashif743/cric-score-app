@@ -44,6 +44,10 @@ const PlayerNameEditModal = ({
   allowMerge = false,
   mergeOptions = [],
   mergeLabel = 'Same bowler (combine overs)',
+  // Tournament matches: suggest ONLY this team's own players — never the global
+  // name pool (which includes the opposing team & other tournaments), so a
+  // scorer can't accidentally pick an opponent's player.
+  teamOnly = false,
 }) => {
   const [value, setValue] = useState(initialValue);
   const [suggestions, setSuggestions] = useState([]);
@@ -71,7 +75,7 @@ const PlayerNameEditModal = ({
   const mergeMatchSet = new Set(mergeMatches.map((n) => n.toLowerCase()));
   const teamMatches = (prioritySuggestions || [])
     .filter((n) => n && !takenSet.has(n.trim().toLowerCase()) && !mergeMatchSet.has(n.toLowerCase()) && (!q || n.toLowerCase().startsWith(q)))
-    .slice(0, 8);
+    .slice(0, teamOnly ? 24 : 8);
   const teamSet = new Set(teamMatches.map((n) => n.toLowerCase()));
   const generalSuggestions = suggestions.filter(
     (s) => !teamSet.has((s.name || '').toLowerCase())
@@ -100,6 +104,7 @@ const PlayerNameEditModal = ({
 
   // Fetch recent/popular suggestions when input is empty
   const fetchRecentSuggestions = async () => {
+    if (teamOnly) { setSuggestions([]); return; } // team-scoped only — no global pool
     try {
       const results = type === 'player'
         ? await suggestionService.getPlayerSuggestions('')
@@ -112,6 +117,7 @@ const PlayerNameEditModal = ({
 
   // Fetch suggestions - immediate, no debounce
   const fetchSuggestions = async (query) => {
+    if (teamOnly) { setSuggestions([]); return; } // team-scoped only — no global pool
     requestId.current += 1;
     const currentRequestId = requestId.current;
 

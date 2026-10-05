@@ -90,6 +90,14 @@ const matchService = {
     return response.data;
   },
 
+  // Cancel an accidental start — revert the match to "scheduled", clearing all
+  // live scoring data (owner only).
+  resetMatch: async (matchId, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.post(`/matches/${matchId}/reset`, {}, config);
+    return response.data;
+  },
+
   // Delete single match
   deleteMatch: async (matchId, token) => {
     try {

@@ -1,10 +1,10 @@
-import React, { useState, useContext, useMemo } from 'react';
+import React, { useState, useContext, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
-  Modal, TouchableWithoutFeedback,
+  Modal, TouchableWithoutFeedback, BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CommonActions } from '@react-navigation/native';
+import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
 import GradientHeader from '../components/GradientHeader';
@@ -42,9 +42,13 @@ const SuperOverScreen = ({ navigation, route }) => {
   const [phase, setPhase] = useState(0);     // 0 = first batting, 1 = chase, 2 = decided
   const [history, setHistory] = useState([]); // for undo
   const [saving, setSaving] = useState(false);
+  const [finalizing, setFinalizing] = useState(false); // recording the result as a tie
   const [round, setRound] = useState(1);      // super-over number (re-tie → next round)
   const [extraModal, setExtraModal] = useState(null); // 'Wd' | 'Nb' | null
   const [wicketModal, setWicketModal] = useState(false);
+  // Wide/No-ball popup selection (mirrors the main scorer's extras popup).
+  const [wideNoBallRuns, setWideNoBallRuns] = useState(null);
+  const [wideNoBallRunOut, setWideNoBallRunOut] = useState(false);
 
   const cur = innings[phase] || innings[1];
   const target = phase === 1 ? innings[0].runs + 1 : null;
@@ -84,7 +88,13 @@ const SuperOverScreen = ({ navigation, route }) => {
         inn.log.push(evt.runs ? `${evt.runs}+W` : 'W');
       } else if (evt.type === 'extra') {
         const add = 1 + (evt.runs || 0);
-        inn.runs += add; inn.log.push(evt.runs ? `${evt.label}+${evt.runs}` : evt.label);
+        inn.runs += add;
+        if (evt.runOut) inn.wickets += 1; // run out off a wide/no-ball (re-bowled)
+        inn.log.push(
+          evt.runOut
+            ? `${evt.label}${evt.runs ? '+' + evt.runs : ''}+W`
+            : (evt.runs ? `${evt.label}+${evt.runs}` : evt.label)
+        );
       }
 
       // Decide transitions off the freshly-updated innings.
@@ -99,6 +109,14 @@ const SuperOverScreen = ({ navigation, route }) => {
   };
 
   const applyAndClose = (evt) => { applyEvent(evt); setExtraModal(null); setWicketModal(false); };
+
+  // Open the wide/no-ball popup fresh (no run selected, run-out off).
+  const openExtra = (label) => { setWideNoBallRuns(null); setWideNoBallRunOut(false); setExtraModal(label); };
+  const confirmExtra = () => {
+    if (wideNoBallRuns === null) return;
+    applyEvent({ type: 'extra', label: extraModal, runs: wideNoBallRuns, runOut: wideNoBallRunOut });
+    setExtraModal(null); setWideNoBallRuns(null); setWideNoBallRunOut(false);
+  };
 
   const undo = () => {
     if (!history.length || saving) return;
@@ -165,6 +183,45 @@ const SuperOverScreen = ({ navigation, route }) => {
     }
   };
 
+  // Cancelling / backing out of the Super Over records the match as a TIE (the
+  // main match was level) — never leaves it stuck in-progress. The tie can be
+  // broken later by playing the Super Over again from the schedule.
+  const finalizeAsTie = async () => {
+    if (saving || finalizing) return;
+    setFinalizing(true);
+    try {
+      if (user?.token && matchId && !String(matchId).startsWith('guest_')) {
+        await matchService.endMatch(matchId, { ...mainMatchData, status: 'completed' }, user.token);
+      }
+    } catch (e) { /* best-effort — a retry from the schedule can re-save */ }
+    navigation.dispatch((state) => {
+      const kept = state.routes.filter((r) => !['SuperOver', 'ScoreCard', 'MatchSetup'].includes(r.name));
+      kept.push({ name: 'FullScorecard', params: { matchId, matchData: { _id: matchId, ...mainMatchData } } });
+      return CommonActions.reset({ ...state, routes: kept, index: kept.length - 1 });
+    });
+  };
+
+  const confirmCancel = () => {
+    if (saving || finalizing) return true;
+    Alert.alert(
+      'Cancel Super Over?',
+      'The match will be recorded as a TIE. You can play the Super Over again later from the schedule.',
+      [
+        { text: 'Keep Scoring', style: 'cancel' },
+        { text: 'Record as Tie', style: 'destructive', onPress: finalizeAsTie },
+      ],
+    );
+    return true; // block the default back action
+  };
+
+  // Android hardware back → same confirm (don't silently drop the match).
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', confirmCancel);
+      return () => sub.remove();
+    }, [saving, finalizing]),
+  );
+
   const RunBtn = ({ label, onPress, style, textStyle }) => (
     <TouchableOpacity style={[styles.btn, style]} onPress={onPress} activeOpacity={0.8} disabled={phase === 2 || saving}>
       <Text style={[styles.btnText, textStyle]}>{label}</Text>
@@ -178,7 +235,7 @@ const SuperOverScreen = ({ navigation, route }) => {
       <GradientHeader
         title="Super Over"
         subtitle={tournamentName || 'Tie-breaker'}
-        onBack={() => navigation.goBack()}
+        onBack={confirmCancel}
       />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -258,8 +315,8 @@ const SuperOverScreen = ({ navigation, route }) => {
             <View style={styles.padRow}>
               <RunBtn label="4" style={styles.btnBoundary} textStyle={styles.btnBoundaryText} onPress={() => applyEvent({ type: 'run', runs: 4 })} />
               <RunBtn label="6" style={styles.btnBoundary} textStyle={styles.btnBoundaryText} onPress={() => applyEvent({ type: 'run', runs: 6 })} />
-              <RunBtn label="Wd" style={styles.btnExtra} textStyle={styles.btnExtraText} onPress={() => setExtraModal('Wd')} />
-              <RunBtn label="Nb" style={styles.btnExtra} textStyle={styles.btnExtraText} onPress={() => setExtraModal('Nb')} />
+              <RunBtn label="Wd" style={styles.btnExtra} textStyle={styles.btnExtraText} onPress={() => openExtra('Wd')} />
+              <RunBtn label="Nb" style={styles.btnExtra} textStyle={styles.btnExtraText} onPress={() => openExtra('Nb')} />
             </View>
             <View style={styles.padRow}>
               <RunBtn label="WICKET" style={[styles.btnWide, styles.btnWicket]} textStyle={styles.btnWicketText} onPress={() => setWicketModal(true)} />
@@ -304,29 +361,76 @@ const SuperOverScreen = ({ navigation, route }) => {
         ) : null}
       </ScrollView>
 
-      {/* Wide / No-ball: add the penalty run + any extra runs, re-bowled */}
+      {/* Wide / No-ball — same design, buttons, texts & options as the main
+          scorer's extras popup. */}
       <Modal visible={!!extraModal} transparent animationType="fade" onRequestClose={() => setExtraModal(null)}>
-        <TouchableWithoutFeedback onPress={() => setExtraModal(null)}>
-          <View style={styles.mOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.mCard}>
-                <Text style={styles.mTitle}>{extraModal === 'Wd' ? 'Wide ball' : 'No ball'}</Text>
-                <Text style={styles.mHint}>
-                  +1 {extraModal === 'Wd' ? 'wide' : 'no-ball'} run · add any runs {extraModal === 'Wd' ? 'run (byes)' : 'off the bat'}
-                </Text>
-                <View style={styles.mGrid}>
-                  {[0, 1, 2, 3, 4, extraModal === 'Nb' ? 6 : 5].map((r) => (
-                    <TouchableOpacity key={r} style={styles.mBtn} onPress={() => applyAndClose({ type: 'extra', label: extraModal, runs: r })} activeOpacity={0.8}>
-                      <Text style={styles.mBtnText}>+{1 + r}</Text>
-                      <Text style={styles.mBtnSub}>{r === 0 ? 'just extra' : `${r} run${r === 1 ? '' : 's'}`}</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.extraBallModal}>
+            {/* Header */}
+            <View style={[styles.extraBallHeader, extraModal === 'Nb' && styles.noBallHeader]}>
+              <View style={styles.extraBallIconContainer}>
+                <Text style={styles.extraBallIcon}>{extraModal === 'Wd' ? 'WD' : 'NB'}</Text>
+              </View>
+              <Text style={styles.extraBallTitle}>{extraModal === 'Wd' ? 'Wide Ball' : 'No Ball'}</Text>
+              <Text style={styles.extraBallSubtitle}>Select runs and options</Text>
+            </View>
+
+            {/* Content */}
+            <ScrollView style={styles.extraBallContent} showsVerticalScrollIndicator={false}>
+              <View style={styles.extraBallSection}>
+                <Text style={styles.extraBallSectionTitle}>Runs</Text>
+                <View style={styles.extraBallGrid}>
+                  {(extraModal === 'Wd' ? [0, 1, 2, 3, 4] : [0, 1, 2, 3, 4, 5, 6]).map((runs) => (
+                    <TouchableOpacity
+                      key={runs}
+                      style={[styles.extraBallOption, wideNoBallRuns === runs && styles.extraBallOptionSelected]}
+                      onPress={() => setWideNoBallRuns(runs)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.extraBallOptionText, wideNoBallRuns === runs && styles.extraBallOptionTextSelected]}>
+                        {runs === 0 ? (extraModal === 'Wd' ? 'WD' : 'NB') : `+${runs}`}
+                      </Text>
+                      <Text style={[styles.extraBallOptionSubtext, wideNoBallRuns === runs && styles.extraBallOptionSubtextSelected]}>
+                        {runs === 0 ? '1 run' : `${runs + 1} runs`}
+                      </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-                <TouchableOpacity style={styles.mCancel} onPress={() => setExtraModal(null)} activeOpacity={0.7}><Text style={styles.mCancelText}>Cancel</Text></TouchableOpacity>
               </View>
-            </TouchableWithoutFeedback>
+
+              {/* Run Out (Optional) */}
+              <View style={styles.extraBallSection}>
+                <Text style={styles.extraBallSectionTitle}>Run Out (Optional)</Text>
+                <TouchableOpacity
+                  style={[styles.runOutToggleButton, wideNoBallRunOut && styles.runOutToggleButtonSelected]}
+                  onPress={() => setWideNoBallRunOut((v) => !v)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.runOutToggleLeft}>
+                    <Text style={styles.runOutToggleIcon}>{wideNoBallRunOut ? '✓' : '○'}</Text>
+                    <Text style={[styles.runOutToggleLabel, wideNoBallRunOut && styles.runOutToggleLabelSelected]}>Batsman Run Out</Text>
+                  </View>
+                  <Text style={styles.runOutToggleHint}>{wideNoBallRunOut ? 'Selected' : 'Tap to select'}</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+
+            {/* Action Buttons */}
+            <View style={styles.extraBallActions}>
+              <TouchableOpacity style={styles.extraBallCancelButton} onPress={() => setExtraModal(null)} activeOpacity={0.8}>
+                <Text style={styles.extraBallCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.extraBallConfirmButton, wideNoBallRuns === null && styles.extraBallConfirmDisabled]}
+                onPress={confirmExtra}
+                disabled={wideNoBallRuns === null}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.extraBallConfirmText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </TouchableWithoutFeedback>
+        </View>
       </Modal>
 
       {/* Wicket: plain out, or a run-out with the runs completed */}
@@ -466,6 +570,39 @@ const styles = StyleSheet.create({
   logBallBoundary: { backgroundColor: '#dbeafe' },
   logBallText: { fontSize: 13, fontWeight: '800', color: '#334155' },
   logBallTextW: { color: '#dc2626' },
+
+  // Wide / No-ball popup — matches the main scorer's extras modal design.
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  extraBallModal: { backgroundColor: '#fff', borderRadius: 22, overflow: 'hidden', width: '100%', maxWidth: 400, maxHeight: '90%' },
+  extraBallHeader: { backgroundColor: '#fbbf24', padding: 20, alignItems: 'center' },
+  noBallHeader: { backgroundColor: '#ef4444' },
+  extraBallIconContainer: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(255,255,255,0.3)', justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  extraBallIcon: { fontSize: 20, fontWeight: '800', color: '#fff' },
+  extraBallTitle: { fontSize: 22, fontWeight: '700', color: '#fff' },
+  extraBallSubtitle: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
+  extraBallContent: { padding: 20, flexShrink: 1 },
+  extraBallSection: { marginBottom: 20 },
+  extraBallSectionTitle: { fontSize: 12, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  extraBallGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  extraBallOption: { backgroundColor: '#f8fafc', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12, minWidth: 60, alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
+  extraBallOptionSelected: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
+  extraBallOptionText: { fontSize: 18, fontWeight: '700', color: '#0f172a' },
+  extraBallOptionTextSelected: { color: '#2563eb' },
+  extraBallOptionSubtext: { fontSize: 10, color: '#94a3b8', marginTop: 2 },
+  extraBallOptionSubtextSelected: { color: '#2563eb' },
+  runOutToggleButton: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 14, padding: 12, borderWidth: 2, borderColor: 'transparent' },
+  runOutToggleButtonSelected: { backgroundColor: '#fef2f2', borderColor: '#dc2626' },
+  runOutToggleLeft: { flexDirection: 'row', alignItems: 'center' },
+  runOutToggleIcon: { fontSize: 18, marginRight: 8, color: '#94a3b8' },
+  runOutToggleLabel: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
+  runOutToggleLabelSelected: { color: '#dc2626' },
+  runOutToggleHint: { fontSize: 12, color: '#94a3b8' },
+  extraBallActions: { flexDirection: 'row', gap: 8, padding: 20, paddingTop: 0 },
+  extraBallCancelButton: { flex: 1, backgroundColor: '#f8fafc', borderRadius: 14, padding: 12, alignItems: 'center' },
+  extraBallCancelText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
+  extraBallConfirmButton: { flex: 1, backgroundColor: '#2563eb', borderRadius: 14, padding: 12, alignItems: 'center', shadowColor: '#1e40af', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 3 },
+  extraBallConfirmDisabled: { backgroundColor: '#94a3b8' },
+  extraBallConfirmText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 });
 
 export default SuperOverScreen;

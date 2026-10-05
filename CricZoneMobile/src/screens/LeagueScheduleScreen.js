@@ -16,11 +16,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
+import matchService from '../utils/matchService';
 import GradientHeader from '../components/GradientHeader';
 import TournamentTopTabs from '../components/TournamentTopTabs';
 import PointsTableView from '../components/PointsTableView';
 import { TeamCrest } from '../components/LogoPicker';
 import TournamentStatsView from '../components/TournamentStatsView';
+import ScheduleShareButton from '../components/ScheduleShareButton';
 import QualifierBracket from '../components/QualifierBracket';
 import BracketTeamPicker from '../components/BracketTeamPicker';
 import { slotSourceLabel, knockoutGameNumbers, groupSourceLabel } from '../utils/bracketLabels';
@@ -148,9 +150,11 @@ const AnimatedCard = ({ index, children, onPress }) => {
 
 // --- Group-stage match card ------------------------------------------------
 
-const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, isOwner, logos = {} }) => {
+const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, onPlaySuperOver, isOwner, logos = {} }) => {
   const isCompleted = match.status === 'completed';
   const isLive = match.status === 'in_progress' || match.status === 'innings_break';
+  // A tie that has NOT been broken by a super over yet → offer to play one.
+  const isTieNoSO = isCompleted && match.result === 'Match Tied' && !match.superOver;
   const winner = winnerOf(match);
   const teamA = match.teamA?.name || 'Team A';
   const teamB = match.teamB?.name || 'Team B';
@@ -231,6 +235,18 @@ const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, isOwner, logo
             </View>
           ) : null}
 
+          {/* Tie not yet decided → let the owner play a Super Over (for when the
+              tie-break was accidentally skipped). Hidden once one is played. */}
+          {isTieNoSO && isOwner ? (
+            <TouchableOpacity
+              style={{ marginTop: 10, backgroundColor: '#fffbeb', borderWidth: 1.5, borderColor: '#fde68a', borderRadius: 12, paddingVertical: 11, alignItems: 'center' }}
+              onPress={() => onPlaySuperOver && onPlaySuperOver(match)}
+              activeOpacity={0.85}
+            >
+              <Text style={{ color: '#b45309', fontWeight: '900', fontSize: 14, letterSpacing: 0.3 }}>⚡ Play Super Over</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {/* Action button. Owners see Start/Resume/View Summary; visitors
               only get the read-only View Summary (live → tap card to watch). */}
           {(isOwner || isCompleted) ? (
@@ -279,9 +295,10 @@ const GroupMatchCard = ({ match, index, ordinal, groupId, onStart, isOwner, logo
 
 // --- Knockout match card (bracket-style, polished) -------------------------
 
-const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner, koMatches, gameNoMap, onEditSlot, logos = {} }) => {
+const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, onPlaySuperOver, isOwner, koMatches, gameNoMap, onEditSlot, logos = {} }) => {
   const isCompleted = match.status === 'completed';
   const isLive = match.status === 'in_progress' || match.status === 'innings_break';
+  const isTieNoSO = isCompleted && match.result === 'Match Tied' && !match.superOver;
   const winner = winnerOf(match);
   const teamAName = match.teamA?.name || 'TBD';
   const teamBName = match.teamB?.name || 'TBD';
@@ -385,6 +402,17 @@ const KnockoutMatchCard = ({ match, index, ordinal, roundLabel, onStart, isOwner
               <View style={styles.resultBullet} />
               <Text style={styles.resultText} numberOfLines={2}>{match.result}</Text>
             </View>
+          ) : null}
+
+          {/* Knockout tie not yet decided → play a Super Over to break it. */}
+          {isTieNoSO && isOwner ? (
+            <TouchableOpacity
+              style={{ marginTop: 10, backgroundColor: '#fffbeb', borderWidth: 1.5, borderColor: '#fde68a', borderRadius: 12, paddingVertical: 11, alignItems: 'center' }}
+              onPress={() => onPlaySuperOver && onPlaySuperOver(match)}
+              activeOpacity={0.85}
+            >
+              <Text style={{ color: '#b45309', fontWeight: '900', fontSize: 14, letterSpacing: 0.3 }}>⚡ Play Super Over</Text>
+            </TouchableOpacity>
           ) : null}
 
           {(isOwner || isCompleted) ? (
@@ -659,6 +687,33 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
     navigation.navigate('MatchSetup', startMatchPayload(match));
   };
 
+  // Play a Super Over to break a tie that wasn't resolved earlier. Fetch the
+  // FULL match (preserving the completed innings scorecard), then launch the
+  // Super Over scorer with that as the match to finalise.
+  const playSuperOver = async (match) => {
+    if (!isOwner) return;
+    try {
+      const res = await matchService.getMatch(match._id, user?.token);
+      const m = res?.data || res || match;
+      navigation.navigate('SuperOver', {
+        matchId: match._id,
+        battingOrder: [match.teamA?.name, match.teamB?.name],
+        overs: 1,
+        ballsPerOver: match.ballsPerOver || tournament?.ballsPerOver || 6,
+        maxWickets: 2,
+        mainMatchData: {
+          ...m,
+          status: 'completed',
+          result: 'Match Tied',
+          matchSummary: { ...(m.matchSummary || {}), winner: '', margin: 'tied' },
+        },
+        tournamentName: tournament?.name,
+      });
+    } catch (e) {
+      Alert.alert('Could not load match', 'Please try again.');
+    }
+  };
+
   const matchesForActiveTab = useMemo(() => {
     if (activeTab.kind === 'group') {
       return groupMatches
@@ -759,6 +814,10 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
         )
       ) : (
       <>
+      {/* Share the full schedule (all groups, rounds, playoffs) as image / PDF */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, alignItems: 'flex-end' }}>
+        <ScheduleShareButton tournament={tournament} matches={matches} />
+      </View>
       {/* Stage tab strip — group / playoff filters, Matches page only */}
       <View style={styles.tabStripWrap}>
         <ScrollView
@@ -859,6 +918,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
                 roundLabel={m.matchLabel || '2nd Round'}
                 match={m}
                 onStart={handleStartMatch}
+                onPlaySuperOver={playSuperOver}
                 isOwner={isOwner}
                 koMatches={knockoutMatches}
                 gameNoMap={koGameNos}

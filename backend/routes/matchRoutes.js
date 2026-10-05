@@ -24,5 +24,6 @@ router.put("/:id/end", protect, validateEndMatch, matchController.endMatch); // 
 router.patch("/:id/rename-player", protect, matchController.renamePlayer);   // Rename a player (owner)
 router.patch("/:id/rename-team", protect, matchController.renameMatchTeam);  // Rename a team (owner)
 router.patch("/:id/restore-scorecard", protect, matchController.restoreScorecard); // Undo (owner)
+router.post("/:id/reset", protect, matchController.resetMatch);              // Cancel an accidental start → back to scheduled (owner)
 
 module.exports = router;

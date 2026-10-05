@@ -276,12 +276,24 @@ exports.updateMatch = async (req, res) => {
     }
 
     // First check authorization (also fetch teamA, teamB, tournament for propagation)
-    const existingMatch = await Match.findById(id).select('user teamA teamB tournament').lean();
+    const existingMatch = await Match.findById(id).select('user teamA teamB tournament status').lean();
     if (!existingMatch) {
       return res.status(404).json({ success: false, error: "Match not found" });
     }
     if (existingMatch.user.toString() !== req.user.id) {
       return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+
+    // GUARD AGAINST A LAST-WRITE-WINS RACE.
+    // This endpoint only ever saves LIVE progress and always stamps status
+    // "in_progress". A completed match must NEVER be silently downgraded back to
+    // in_progress by a stale/in-flight live-sync update that lands AFTER the
+    // match was finalized — that was dropping the finished game out of the points
+    // table ("both teams not played"). Once a match is completed, ignore live
+    // updates here (the client has dedicated endpoints — /end, reset — for any
+    // legitimate state change). Respond 200 so the stale client doesn't retry.
+    if (existingMatch.status === 'completed') {
+      return res.json({ success: true, data: { status: 'completed', ignored: 'match-already-completed' } });
     }
 
     const { innings1, innings2, currentState, innings, target, totalOvers, ballsPerOver, playersPerTeam, teamA, teamB } = req.body;
@@ -369,12 +381,19 @@ exports.updateMatch = async (req, res) => {
 
     console.log('Updating with data keys:', Object.keys(updateData));
 
-    // Use findByIdAndUpdate with runValidators disabled for flexibility
-    const updatedMatch = await Match.findByIdAndUpdate(
-      id,
+    // ATOMIC race guard: only write if the match is NOT already completed. This
+    // closes the window where a stale live-sync read status "in_progress", then
+    // the match was finalized elsewhere, and this write would have downgraded it
+    // back to in_progress (dropping the finished game from the points table).
+    const updatedMatch = await Match.findOneAndUpdate(
+      { _id: id, status: { $ne: 'completed' } },
       { $set: updateData },
       { new: true, runValidators: false }
     );
+    if (!updatedMatch) {
+      // Match was completed between our read and write — never resurrect it.
+      return res.json({ success: true, data: { status: 'completed', ignored: 'match-already-completed' } });
+    }
 
     console.log('=== MATCH SAVED SUCCESSFULLY ===');
     console.log('Has currentState:', !!updatedMatch.currentState);
@@ -752,15 +771,22 @@ const computeGroupStandings = (matches, teamNames) => {
     h2h: {}, // opponent → 'won'|'lost'|'tied'
   });
   const table = Object.fromEntries(teamNames.map((t) => [t, row(t)]));
+  // normalised name → canonical team key, so a completed match is still counted
+  // (and the knockout bracket still fills) even if its stored team name differs
+  // only by case/whitespace from the tournament's canonical name.
+  const norm = (s) => (s || '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
+  const lookup = {};
+  teamNames.forEach((t) => { lookup[norm(t)] = t; });
+  const resolve = (name) => (table[name] ? name : lookup[norm(name)]);
 
   matches.forEach((m) => {
     if (m.status !== 'completed') return;
-    const a = m.teamA?.name; const b = m.teamB?.name;
-    if (!a || !b || !table[a] || !table[b]) return;
+    const a = resolve(m.teamA?.name); const b = resolve(m.teamB?.name);
+    if (!a || !b || a === b) return;
     const i1 = m.innings1 || {}; const i2 = m.innings2 || {};
 
     // Identify which innings each team batted in.
-    const aFirst = i1.battingTeam === a;
+    const aFirst = norm(i1.battingTeam) === norm(a);
     const aBat = aFirst ? i1 : i2;
     const bBat = aFirst ? i2 : i1;
     const aRuns = aBat.runs || 0;
@@ -769,15 +795,21 @@ const computeGroupStandings = (matches, teamNames) => {
     const bOv = oversToDecimal(bBat.overs);
 
     table[a].played++; table[b].played++;
-    table[a].runsFor += aRuns; table[a].runsAgainst += bRuns;
-    table[a].oversFor += aOv;   table[a].oversAgainst += bOv;
-    table[b].runsFor += bRuns; table[b].runsAgainst += aRuns;
-    table[b].oversFor += bOv;   table[b].oversAgainst += aOv;
+    // A TIE never affects NRR — skip run/over accumulation when scores are level
+    // (a super-over-decided match is still level here; super-over runs live in
+    // match.superOver and never reach the innings). Keeps NRR at 0 for ties.
+    const isTie = aRuns === bRuns;
+    if (!isTie) {
+      table[a].runsFor += aRuns; table[a].runsAgainst += bRuns;
+      table[a].oversFor += aOv;   table[a].oversAgainst += bOv;
+      table[b].runsFor += bRuns; table[b].runsAgainst += aRuns;
+      table[b].oversFor += bOv;   table[b].oversAgainst += aOv;
+    }
 
-    const winner = m.matchSummary?.winner || (() => {
+    const winner = resolve(m.matchSummary?.winner || (() => {
       const idx = m.result?.indexOf(' won by ') ?? -1;
       return idx > 0 ? m.result.slice(0, idx) : '';
-    })();
+    })());
     if (winner === a) {
       table[a].won++; table[b].lost++;
       table[a].points += 2;
@@ -1191,13 +1223,71 @@ exports.restoreScorecard = async (req, res) => {
 };
 
 // Add this new exported function
+// Reset a match back to "scheduled" (owner only) — used when a scorer
+// accidentally started/opened a match and wants to cancel the start cleanly
+// instead of leaving it stuck "in progress". Clears all live scoring data so
+// the match can be re-started fresh (and, for a tournament bracket match, so
+// its teams become editable again).
+exports.resetMatch = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid match ID" });
+    }
+    const match = await Match.findById(id);
+    if (!match) return res.status(404).json({ success: false, error: "Match not found" });
+
+    let isOwner = String(match.user) === req.user.id;
+    if (!isOwner && match.tournament) {
+      const Tournament = require('../models/Tournament');
+      const t = await Tournament.findById(match.tournament).select('user').lean();
+      if (t && String(t.user) === req.user.id) isOwner = true;
+    }
+    if (!isOwner) return res.status(403).json({ success: false, error: "Only the scorer can reset the match." });
+
+    // Never wipe a finished match this way.
+    if (match.status === 'completed') {
+      return res.status(400).json({ success: false, error: "A completed match cannot be reset." });
+    }
+
+    match.status = 'scheduled';
+    match.innings = 1;
+    match.innings1 = undefined;
+    match.innings2 = undefined;
+    match.currentState = undefined;
+    match.target = undefined;
+    match.result = '';
+    match.superOver = undefined;
+    if (match.matchSummary) { match.matchSummary = undefined; match.markModified('matchSummary'); }
+    match.markModified('innings1');
+    match.markModified('innings2');
+    match.markModified('currentState');
+    match.markModified('superOver');
+    match.updatedAt = new Date();
+    await match.save();
+
+    return res.json({ success: true, data: { status: 'scheduled' } });
+  } catch (error) {
+    console.error("Reset match error:", error);
+    res.status(500).json({ success: false, error: "Failed to reset the match." });
+  }
+};
+
 exports.deleteAllMatches = async (req, res) => {
   try {
-    await Match.deleteMany({ user: req.user.id });
-    res.json({ success: true, message: "All matches deleted successfully." });
+    // ONLY quick / standalone matches (not linked to a tournament). Tournament
+    // matches must never be wiped by "clear match history" — they are removed by
+    // deleting the tournament itself. ({ tournament: null } also matches docs
+    // where the field is absent, i.e. older quick matches.)
+    const result = await Match.deleteMany({ user: req.user.id, tournament: null });
+    res.json({
+      success: true,
+      message: "Quick matches deleted. Tournament matches are kept — delete the tournament to remove those.",
+      deletedCount: result.deletedCount,
+    });
   } catch (error) {
     console.error("Delete all matches error:", error);
-    res.status(500).json({ success: false, error: "Failed to delete all matches." });
+    res.status(500).json({ success: false, error: "Failed to delete matches." });
   }
 };
 
@@ -1212,6 +1302,7 @@ module.exports = {
   renamePlayer: exports.renamePlayer,
   renameMatchTeam: exports.renameMatchTeam,
   restoreScorecard: exports.restoreScorecard,
+  resetMatch: exports.resetMatch,
   deleteAllMatches: exports.deleteAllMatches,
   // Exposed so the tournament controller can re-fill knockout slots after the
   // playoff format is changed mid-tournament.

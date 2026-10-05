@@ -326,6 +326,28 @@ const ScoreCardScreen = ({ navigation, route }) => {
   const [teamAPlayersOpen, setTeamAPlayersOpen] = useState(false);
   const [teamBPlayersOpen, setTeamBPlayersOpen] = useState(false);
 
+  // Open Settings and PREFILL the player-name editor from the LIVE scoring state
+  // — batting XI from allBatsmen, bowling XI from allBowlers — so it shows the
+  // names actually in use (not stale placeholders). Placeholder names show blank
+  // so the input's own "Player N" hint appears.
+  const openSettingsModal = () => {
+    const bk = getBattingTeamKey();
+    const wk = getBowlingTeamKey();
+    const n = settings.playersPerTeam || 0;
+    const nameAt = (arr, i, teamName) => {
+      const nm = (arr[i]?.name || '').trim();
+      return (!nm || isPlaceholderPlayerName(nm, teamName)) ? '' : nm;
+    };
+    const batNames = Array.from({ length: n }, (_, i) => nameAt(allBatsmen || [], i, teams[bk]?.name));
+    const bowlNames = Array.from({ length: n }, (_, i) => nameAt(allBowlers || [], i, teams[wk]?.name));
+    setTeams(prev => ({
+      ...prev,
+      [bk]: { ...prev[bk], playerNames: batNames },
+      [wk]: { ...prev[wk], playerNames: bowlNames },
+    }));
+    setShowSettingsModal(true);
+  };
+
   // Selected values in modals
   const [selectedRuns, setSelectedRuns] = useState(0);
   const [selectedWicketType, setSelectedWicketType] = useState('');
@@ -2828,20 +2850,58 @@ const ScoreCardScreen = ({ navigation, route }) => {
     };
   }, []);
 
-  // Handle leaving match - confirm, save, and leave
+  // Reset an accidentally-started match back to "scheduled" and leave. For a
+  // tournament bracket match this also re-enables team editing on the schedule.
+  const discardAndLeave = async () => {
+    const id = matchData?._id;
+    // Guest / unsaved matches were never persisted as in_progress — just leave.
+    if (user?.token && id && !String(id).startsWith('guest_')) {
+      try {
+        await matchService.resetMatch(id, user.token);
+      } catch (e) {
+        Alert.alert('Could not cancel', e?.error || 'Please try again.');
+        return;
+      }
+    }
+    navigation.goBack();
+  };
+
+  // Handle leaving match. Two ways out:
+  //  • "Save & Leave"  → keep progress, match stays "in progress" (resume later)
+  //  • "Cancel Start"  → accidental start: wipe progress, back to "scheduled"
   const handleLeaveMatch = () => {
+    // How much has actually happened? Used to add a safety confirm before a
+    // destructive discard when real scoring exists.
+    const hasProgress =
+      (match?.balls || 0) > 0 || (match?.runs || 0) > 0 ||
+      (match?.wickets || 0) > 0 || !!firstInningsData || match?.innings > 1;
+
+    const doDiscard = () => {
+      if (!hasProgress) return discardAndLeave();
+      // Real scoring exists → confirm once more so it's never a single misfire.
+      Alert.alert(
+        'Cancel this match?',
+        'This will erase all scoring in this match and set it back to "not started". This cannot be undone.',
+        [
+          { text: 'Keep Match', style: 'cancel' },
+          { text: 'Erase & Cancel', style: 'destructive', onPress: discardAndLeave },
+        ]
+      );
+    };
+
     Alert.alert(
       'Leave Match',
-      'Are you sure you want to leave? Your progress will be saved.',
+      'Keep scoring where it is, or cancel the match if you opened it by mistake?',
       [
         { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel Start', style: 'destructive', onPress: doDiscard },
         {
-          text: 'Leave',
+          text: 'Save & Leave',
           onPress: async () => {
             const saved = await saveMatchProgress();
             console.log('Match save result:', saved);
             navigation.goBack();
-          }
+          },
         },
       ]
     );
@@ -3123,35 +3183,47 @@ const ScoreCardScreen = ({ navigation, route }) => {
   // Update player name
   const handleUpdatePlayerName = (playerId, newName, isStriker, isBowler = false) => {
     if (isBowler) {
-      setCurrentBowler(prev => prev.id === playerId ? { ...prev, name: newName } : prev);
+      setCurrentBowler(prev => (prev?.id === playerId ? { ...prev, name: newName } : prev));
       setAllBowlers(prev => prev.map(b => b.id === playerId ? { ...b, name: newName } : b));
     } else {
-      if (isStriker) {
-        setCurrentBatsmen(prev => ({ ...prev, striker: { ...prev.striker, name: newName } }));
-      } else {
-        setCurrentBatsmen(prev => ({ ...prev, nonStriker: { ...prev.nonStriker, name: newName } }));
-      }
+      // Guard the current-batsmen mirror BY ID so renaming any batsman from the
+      // scorecard (not just the on-strike pair) can't clobber the wrong batsman.
+      setCurrentBatsmen(prev => ({
+        striker: prev?.striker?.id === playerId ? { ...prev.striker, name: newName } : prev?.striker,
+        nonStriker: prev?.nonStriker?.id === playerId ? { ...prev.nonStriker, name: newName } : prev?.nonStriker,
+      }));
       setAllBatsmen(prev => prev.map(b => b.id === playerId ? { ...b, name: newName } : b));
     }
   };
 
-  // Open player name edit modal
-  const openPlayerNameModal = (playerType) => {
+  // Open player name edit modal.
+  // `explicit` lets the full-scorecard tab rename ANY batsman/bowler row by id
+  // (not just the on-strike pair / current bowler). Shape: { id, name, role }
+  // where role is 'batsman' | 'bowler'.
+  const openPlayerNameModal = (playerType, explicit = null) => {
     let playerId, playerName, title;
 
-    if (playerType === 'striker') {
-      playerId = striker.id;
-      playerName = striker.name;
+    if (explicit) {
+      playerId = explicit.id;
+      playerName = explicit.name;
+      title = explicit.role === 'bowler' ? 'Edit Bowler' : 'Edit Batsman';
+      // Normalise role so downstream logic (team side, same-list) is correct.
+      playerType = explicit.role === 'bowler' ? 'bowler' : 'batsman';
+    } else if (playerType === 'striker') {
+      playerId = striker?.id;
+      playerName = striker?.name;
       title = 'Edit Striker';
     } else if (playerType === 'nonStriker') {
-      playerId = nonStriker.id;
-      playerName = nonStriker.name;
+      playerId = nonStriker?.id;
+      playerName = nonStriker?.name;
       title = 'Edit Non-Striker';
     } else if (playerType === 'bowler') {
-      playerId = currentBowler.id;
-      playerName = currentBowler.name;
+      playerId = currentBowler?.id;
+      playerName = currentBowler?.name;
       title = 'Edit Bowler';
     }
+
+    if (playerId == null) return; // nothing to rename (missing player)
 
     // The team this player belongs to (batsmen → current batting side; bowler →
     // current bowling side).
@@ -3210,12 +3282,16 @@ const ScoreCardScreen = ({ navigation, route }) => {
   // Handle save from player name edit modal
   const handlePlayerNameModalSave = (newName) => {
     const { playerId, playerType } = playerNameEditModal;
+    const clean = (newName || '').trim();
+    if (!clean || playerId == null) return;
 
     if (playerType === 'bowler') {
-      handleUpdatePlayerName(playerId, newName, false, true);
+      handleUpdatePlayerName(playerId, clean, false, true);
     } else {
-      handleUpdatePlayerName(playerId, newName, playerType === 'striker', false);
+      handleUpdatePlayerName(playerId, clean, playerType === 'striker', false);
     }
+    // Persist the rename so it survives a reload / app restart.
+    setTimeout(() => saveProgressRef.current?.({ silent: true }), 60);
   };
 
   // Close player name edit modal
@@ -3258,25 +3334,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
     }
   };
 
-  // Update batsman name in scorecard
-  const handleUpdateBatsmanName = (batsmanId, newName) => {
-    setAllBatsmen(prev => prev.map(b => b.id === batsmanId ? { ...b, name: newName } : b));
-    // Also update striker/nonStriker if it's the current batsman
-    if (striker.id === batsmanId) {
-      setCurrentBatsmen(prev => ({ ...prev, striker: { ...prev.striker, name: newName } }));
-    }
-    if (nonStriker.id === batsmanId) {
-      setCurrentBatsmen(prev => ({ ...prev, nonStriker: { ...prev.nonStriker, name: newName } }));
-    }
-  };
-
-  // Update bowler name in scorecard
-  const handleUpdateBowlerName = (bowlerId, newName) => {
-    setAllBowlers(prev => prev.map(b => b.id === bowlerId ? { ...b, name: newName } : b));
-    if (currentBowler.id === bowlerId) {
-      setCurrentBowler(prev => ({ ...prev, name: newName }));
-    }
-  };
+  // (Scorecard batsman/bowler renames now go through the robust
+  //  openPlayerNameModal → handlePlayerNameModalSave → handleUpdatePlayerName
+  //  flow, which is id-guarded, deduped, trimmed and persisted.)
 
   // Get ball color
   const getBallColor = (ball) => {
@@ -3373,7 +3433,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
 
           <TouchableOpacity
             style={styles.settingsButton}
-            onPress={() => setShowSettingsModal(true)}
+            onPress={openSettingsModal}
           >
             <View style={styles.settingsIcon}>
               <Icon name="settings" size={22} color={colors.textSecondary} />
@@ -3557,10 +3617,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
                     <Text style={styles.scorecardTableHeaderText}>ER</Text>
                   </View>
                   {firstInningsData.bowling?.filter(b => {
-                    const [overs, balls] = b.overs.split('.').map(Number);
+                    const [overs, balls] = String(b?.overs ?? '0.0').split('.').map(Number);
                     return overs > 0 || balls > 0;
                   }).map((bowler, index) => {
-                    const [overs, balls] = bowler.overs.split('.').map(Number);
+                    const [overs, balls] = String(bowler?.overs ?? '0.0').split('.').map(Number);
                     const totalBalls = overs * 6 + balls;
                     const economyRate = totalBalls > 0 ? ((bowler.runs / totalBalls) * 6).toFixed(2) : '0.00';
                     return (
@@ -3642,20 +3702,21 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   {allBatsmen.filter(b => b.balls > 0 || b.runs > 0 || b.isOut).map((batsman, index) => (
                     <View key={batsman.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
                       <View style={styles.scorecardNameCol}>
-                        <TextInput
-                          style={styles.scorecardPlayerNameInput}
-                          value={batsman.name}
-                          onChangeText={(text) => handleUpdateBatsmanName(batsman.id, text)}
-                          selectTextOnFocus={true}
-                          returnKeyType="done"
-                        />
+                        <TouchableOpacity
+                          onPress={() => openPlayerNameModal('batsman', { id: batsman.id, name: batsman.name, role: 'batsman' })}
+                          activeOpacity={0.6}
+                        >
+                          <Text style={styles.scorecardPlayerNameEditable} numberOfLines={1}>
+                            {batsman.name} <Text style={styles.scorecardEditPencil}>✎</Text>
+                          </Text>
+                        </TouchableOpacity>
                         <Text style={[
                           styles.scorecardPlayerStatus,
                           batsman.isOut && styles.scorecardPlayerStatusOut
                         ]}>
                           {batsman.isOut ? batsman.outType || 'Out' :
-                           batsman.id === striker.id ? 'Batting *' :
-                           batsman.id === nonStriker.id ? 'Batting' :
+                           batsman.id === striker?.id ? 'Batting *' :
+                           batsman.id === nonStriker?.id ? 'Batting' :
                            batsman.isRetired ? 'Retired' : 'Not Out'}
                         </Text>
                       </View>
@@ -3669,12 +3730,12 @@ const ScoreCardScreen = ({ navigation, route }) => {
                     </View>
                   ))}
                   {/* Yet to bat */}
-                  {allBatsmen.filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker.id && b.id !== nonStriker.id && !b.isRetired).length > 0 && (
+                  {allBatsmen.filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker?.id && b.id !== nonStriker?.id && !b.isRetired).length > 0 && (
                     <View style={styles.scorecardYetToBat}>
                       <Text style={styles.scorecardYetToBatLabel}>Yet to bat: </Text>
                       <Text style={styles.scorecardYetToBatNames}>
                         {allBatsmen
-                          .filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker.id && b.id !== nonStriker.id && !b.isRetired)
+                          .filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker?.id && b.id !== nonStriker?.id && !b.isRetired)
                           .map(b => b.name)
                           .join(', ')}
                       </Text>
@@ -3705,23 +3766,24 @@ const ScoreCardScreen = ({ navigation, route }) => {
                     <Text style={styles.scorecardTableHeaderText}>ER</Text>
                   </View>
                   {allBowlers.filter(b => {
-                    const [overs, balls] = b.overs.split('.').map(Number);
+                    const [overs, balls] = String(b?.overs ?? '0.0').split('.').map(Number);
                     return overs > 0 || balls > 0;
                   }).map((bowler, index) => {
-                    const [overs, balls] = bowler.overs.split('.').map(Number);
+                    const [overs, balls] = String(bowler?.overs ?? '0.0').split('.').map(Number);
                     const totalBalls = overs * 6 + balls;
                     const economyRate = totalBalls > 0 ? ((bowler.runs / totalBalls) * 6).toFixed(2) : '0.00';
                     return (
                       <View key={bowler.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
                         <View style={styles.scorecardNameCol}>
-                          <TextInput
-                            style={styles.scorecardPlayerNameInput}
-                            value={bowler.name}
-                            onChangeText={(text) => handleUpdateBowlerName(bowler.id, text)}
-                            selectTextOnFocus={true}
-                            returnKeyType="done"
-                          />
-                          {bowler.id === currentBowler.id && (
+                          <TouchableOpacity
+                            onPress={() => openPlayerNameModal('bowler', { id: bowler.id, name: bowler.name, role: 'bowler' })}
+                            activeOpacity={0.6}
+                          >
+                            <Text style={styles.scorecardPlayerNameEditable} numberOfLines={1}>
+                              {bowler.name} <Text style={styles.scorecardEditPencil}>✎</Text>
+                            </Text>
+                          </TouchableOpacity>
+                          {bowler.id === currentBowler?.id && (
                             <Text style={styles.scorecardCurrentBowler}>Bowling</Text>
                           )}
                         </View>
@@ -3769,7 +3831,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                       <View key={index} style={styles.scorecardOverItem}>
                         <Text style={styles.scorecardOverNumber}>Over {overHistory.length - 5 + index}</Text>
                         <View style={styles.scorecardOverBalls}>
-                          {over.balls.map((ball, ballIndex) => (
+                          {over.balls?.map((ball, ballIndex) => (
                             <Text key={ballIndex} style={styles.scorecardOverBall}>{ball}</Text>
                           ))}
                         </View>
@@ -3782,7 +3844,15 @@ const ScoreCardScreen = ({ navigation, route }) => {
             </>
           )}
 
-          {/* Back to Live Button */}
+          {/* Footer actions */}
+          <TouchableOpacity
+            style={styles.scorecardEndInningsButton}
+            onPress={() => setShowEndInningsModal(true)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.scorecardEndInningsText}>End Innings / Match</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.backToLiveButton}
             onPress={() => setViewMode('live')}
@@ -4725,7 +4795,10 @@ const ScoreCardScreen = ({ navigation, route }) => {
       </Modal>
 
       {/* Tie chooser: keep tie (group/quick only) or play a Super Over */}
-      <Modal visible={showTieModal} transparent animationType="fade">
+      {/* Android back / dismiss here = keep as a tie (never leaves the match
+          stuck in-progress). The tie is always savable; a knockout can still be
+          decided later by playing the Super Over from the schedule. */}
+      <Modal visible={showTieModal} transparent animationType="fade" onRequestClose={confirmMatchEnd}>
         <View style={styles.modalOverlay}>
           <View style={tieStyles.card}>
             <Text style={tieStyles.badge}>MATCH TIED</Text>
@@ -4734,7 +4807,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
             </Text>
             <Text style={tieStyles.hint}>
               {isKnockoutMatch()
-                ? 'A knockout match must have a winner. Play a Super Over to decide it.'
+                ? 'A knockout needs a winner — play a Super Over now, or keep it as a tie and decide it later from the schedule.'
                 : 'How do you want to resolve this tie?'}
             </Text>
 
@@ -4747,11 +4820,9 @@ const ScoreCardScreen = ({ navigation, route }) => {
               <Text style={tieStyles.superText}>Play Super Over</Text>
             </TouchableOpacity>
 
-            {!isKnockoutMatch() ? (
-              <TouchableOpacity style={tieStyles.keepBtn} onPress={confirmMatchEnd} activeOpacity={0.8}>
-                <Text style={tieStyles.keepText}>Keep as a Tie</Text>
-              </TouchableOpacity>
-            ) : null}
+            <TouchableOpacity style={tieStyles.keepBtn} onPress={confirmMatchEnd} activeOpacity={0.8}>
+              <Text style={tieStyles.keepText}>{isKnockoutMatch() ? 'Keep as Tie (decide later)' : 'Keep as a Tie'}</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -5916,22 +5987,23 @@ const ScoreCardScreen = ({ navigation, route }) => {
                     }
                   }));
 
-                  // Update bowlers names (order last to 1 - reversed)
+                  // Update bowlers names — FORWARD mapping (index 0 = bowler 1),
+                  // matching how the bowling XI is built at init. (Previously this
+                  // was reversed, which scrambled the bowlers' names.)
                   setAllBowlers(prev => prev.map((bowler, index) => ({
                     ...bowler,
-                    name: bowlingPlayerNames[settings.playersPerTeam - 1 - index] || bowler.name
+                    name: bowlingPlayerNames[index] || bowler.name
                   })));
 
-                  // Update current bowler
-                  setCurrentBowler(prev => {
-                    const bowlerIndex = settings.playersPerTeam - prev.id;
-                    return {
-                      ...prev,
-                      name: bowlingPlayerNames[bowlerIndex] || prev.name
-                    };
-                  });
+                  // Update current bowler (id N → index N-1).
+                  setCurrentBowler(prev => ({
+                    ...prev,
+                    name: bowlingPlayerNames[prev.id - 1] || prev.name
+                  }));
 
                   setShowSettingsModal(false);
+                  // Persist the renamed line-ups once the state updates commit.
+                  setTimeout(() => { saveProgressRef.current?.({ silent: true }); }, 60);
                 }}
               >
                 <Text style={styles.settingsApplyButtonText}>Apply Changes</Text>
@@ -5953,6 +6025,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         prioritySuggestions={playerNameEditModal.teamPlayers}
         priorityLabel={playerNameEditModal.teamLabel}
         takenNames={playerNameEditModal.takenNames}
+        teamOnly={!!matchData?.tournament}
         onSave={handlePlayerNameModalSave}
         onClose={closePlayerNameModal}
       />
@@ -8427,6 +8500,17 @@ const styles = StyleSheet.create({
     minHeight: 20,
     lineHeight: 20,
   },
+  scorecardPlayerNameEditable: {
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.semibold,
+    color: colors.textPrimary,
+    minHeight: 20,
+    lineHeight: 20,
+  },
+  scorecardEditPencil: {
+    fontSize: fontSizes.xs,
+    color: colors.primary,
+  },
   scorecardPlayerStatus: {
     fontSize: fontSizes.xs,
     color: colors.textMuted,
@@ -8577,6 +8661,22 @@ const styles = StyleSheet.create({
     color: colors.primary,
     width: 50,
     textAlign: 'right',
+  },
+
+  // End Innings / Match (scorecard footer)
+  scorecardEndInningsButton: {
+    backgroundColor: colors.error,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    alignItems: 'center',
+    marginTop: spacing.md,
+    ...shadows.md,
+  },
+  scorecardEndInningsText: {
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.bold,
+    color: colors.surface,
   },
 
   // Back to Live Button

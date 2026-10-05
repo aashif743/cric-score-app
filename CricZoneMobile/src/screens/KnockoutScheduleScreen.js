@@ -13,10 +13,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import Svg, { Path } from 'react-native-svg';
 import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
+import matchService from '../utils/matchService';
 import GradientHeader from '../components/GradientHeader';
 import BracketTeamPicker from '../components/BracketTeamPicker';
 import Icon from '../components/Icon';
 import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
+import ScheduleShareButton from '../components/ScheduleShareButton';
 
 // Clean line-style settings gear (matches the league schedule screen).
 const SettingsIcon = ({ size = 20, color = '#475569' }) => (
@@ -139,6 +141,32 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
     return idx > 0 ? m.result.slice(0, idx) : null;
   };
 
+  // Play a Super Over to break a tie that wasn't resolved earlier. Fetches the
+  // full match (preserving the completed scorecard) then launches the scorer.
+  const playSuperOver = async (match) => {
+    if (!isOwner) return;
+    try {
+      const res = await matchService.getMatch(match._id, user?.token);
+      const m = res?.data || res || match;
+      navigation.navigate('SuperOver', {
+        matchId: match._id,
+        battingOrder: [match.teamA?.name, match.teamB?.name],
+        overs: 1,
+        ballsPerOver: match.ballsPerOver || tournament?.ballsPerOver || 6,
+        maxWickets: 2,
+        mainMatchData: {
+          ...m,
+          status: 'completed',
+          result: 'Match Tied',
+          matchSummary: { ...(m.matchSummary || {}), winner: '', margin: 'tied' },
+        },
+        tournamentName: tournament?.name,
+      });
+    } catch (e) {
+      Alert.alert('Could not load match', 'Please try again.');
+    }
+  };
+
   const handleStartMatch = (match) => {
     if (match.status === 'completed') {
       navigation.navigate('FullScorecard', { matchId: match._id });
@@ -189,6 +217,8 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
   const renderMatchCard = (match, idx) => {
     const isCompleted = match.status === 'completed';
     const isLive = match.status === 'in_progress' || match.status === 'innings_break';
+    // A knockout tie not yet broken by a super over → owner can play one.
+    const isTieNoSO = isCompleted && match.result === 'Match Tied' && !match.superOver && isOwner;
     const winner = winnerOf(match);
     const teamAName = match.teamA?.name || 'TBD';
     const teamBName = match.teamB?.name || 'TBD';
@@ -201,8 +231,70 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
     const editA = canEdit ? () => openEditSlot(match, 'A') : null;
     const editB = canEdit ? () => openEditSlot(match, 'B') : null;
 
-    const buttonLabel = isCompleted ? 'View Summary' : 'Start Match';
     const buttonDisabled = !isCompleted && !bothKnown;
+
+    // Tapping the match card is now the primary action: start / resume / view /
+    // watch / play super over (whatever applies). Changing a bracket team is the
+    // secondary action — done by tapping the team NAME (nested touchable below).
+    const onCardPress = () => {
+      if (isTieNoSO) return playSuperOver(match);
+      handleStartMatch(match);
+    };
+    const cardActionable =
+      isCompleted || isTieNoSO || isLive ||
+      (isOwner && match.status === 'scheduled' && bothKnown);
+
+    // Status chip (not tappable itself — the card handles the tap). It simply
+    // tells the user what tapping will do.
+    let chipText, chipStyle, chipTextStyle;
+    if (isOwner || isCompleted) {
+      if (buttonDisabled) {
+        chipText = 'Waiting…'; chipStyle = styles.actionButtonDisabled; chipTextStyle = styles.actionButtonTextDisabled;
+      } else if (isTieNoSO) {
+        chipText = '⚡ Super Over'; chipStyle = { backgroundColor: '#fffbeb', borderColor: '#fde68a' }; chipTextStyle = { color: '#b45309' };
+      } else if (isCompleted) {
+        chipText = 'View Summary'; chipStyle = styles.actionButtonCompleted; chipTextStyle = styles.actionButtonTextCompleted;
+      } else {
+        chipText = 'Tap to Start'; chipStyle = styles.actionButtonStart; chipTextStyle = styles.actionButtonTextStart;
+      }
+    } else if (isLive) {
+      chipText = 'Watch Live'; chipStyle = styles.actionButtonStart; chipTextStyle = styles.actionButtonTextStart;
+    } else {
+      chipText = 'Upcoming'; chipStyle = styles.actionButtonDisabled; chipTextStyle = styles.actionButtonTextDisabled;
+    }
+
+    const renderTeam = (slot) => {
+      const name = slot === 'A' ? teamAName : teamBName;
+      const label = slot === 'A' ? labelA : labelB;
+      const isWin = winner === name;
+      const edit = slot === 'A' ? editA : editB;
+      return (
+        <View style={[styles.teamBox, name === 'TBD' && styles.teamBoxTBD, isWin && styles.teamBoxWinner]}>
+          <View style={[styles.seedBadge, name === 'TBD' && styles.seedBadgeTBD, isWin && styles.seedBadgeWin]}>
+            <Text style={[styles.seedBadgeText, isWin && styles.seedBadgeTextWin]}>{seedOf(name) ?? '–'}</Text>
+          </View>
+          {edit ? (
+            // Owner + scheduled → the NAME is tappable to swap the team. The
+            // surrounding card still starts the match.
+            <TouchableOpacity
+              style={styles.teamNameEdit}
+              onPress={edit}
+              activeOpacity={0.6}
+              hitSlop={{ top: 12, bottom: 12, left: 4, right: 10 }}
+            >
+              <Text style={[styles.teamBoxText, styles.teamBoxTextEditable, name === 'TBD' && styles.teamBoxTextTBD]} numberOfLines={1}>
+                {label}
+              </Text>
+              <Icon name="edit" size={13} color="#2563eb" />
+            </TouchableOpacity>
+          ) : (
+            <Text style={[styles.teamBoxText, name === 'TBD' && styles.teamBoxTextTBD, isWin && styles.teamBoxTextWin]} numberOfLines={1}>
+              {label}
+            </Text>
+          )}
+        </View>
+      );
+    };
 
     return (
       <View key={match._id}>
@@ -213,80 +305,21 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
             <Text style={styles.matchNumberText}>{idx + 1}</Text>
           </View>
 
-          {/* Left column: Team A / button / Team B */}
-          <View style={styles.matchCenter}>
-            <TouchableOpacity
-              style={[
-                styles.teamBox,
-                teamAName === 'TBD' && styles.teamBoxTBD,
-                winner === teamAName && styles.teamBoxWinner,
-              ]}
-              activeOpacity={editA ? 0.6 : 1}
-              onPress={editA || undefined}
-              disabled={!editA}
-            >
-              <View style={[styles.seedBadge, teamAName === 'TBD' && styles.seedBadgeTBD, winner === teamAName && styles.seedBadgeWin]}>
-                <Text style={[styles.seedBadgeText, winner === teamAName && styles.seedBadgeTextWin]}>{seedOf(teamAName) ?? '–'}</Text>
-              </View>
-              <Text style={[styles.teamBoxText, teamAName === 'TBD' && styles.teamBoxTextTBD, winner === teamAName && styles.teamBoxTextWin]} numberOfLines={1}>
-                {labelA}
-              </Text>
-              {editA ? <Icon name="edit" size={12} color="#94a3b8" /> : null}
-            </TouchableOpacity>
-            {(isOwner || isCompleted) ? (
-              <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  isCompleted ? styles.actionButtonCompleted : styles.actionButtonStart,
-                  buttonDisabled && styles.actionButtonDisabled,
-                ]}
-                onPress={() => handleStartMatch(match)}
-                disabled={buttonDisabled}
-                activeOpacity={0.7}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.actionButtonText,
-                    isCompleted ? styles.actionButtonTextCompleted : styles.actionButtonTextStart,
-                    buttonDisabled && styles.actionButtonTextDisabled,
-                  ]}
-                >
-                  {buttonDisabled ? 'Waiting…' : buttonLabel}
-                </Text>
-              </TouchableOpacity>
-            ) : isLive ? (
-              <TouchableOpacity
-                style={[styles.actionButton, styles.actionButtonStart]}
-                onPress={() => handleStartMatch(match)}
-                activeOpacity={0.7}
-              >
-                <Text numberOfLines={1} style={[styles.actionButtonText, styles.actionButtonTextStart]}>Watch Live</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={[styles.actionButton, styles.actionButtonDisabled]}>
-                <Text numberOfLines={1} style={[styles.actionButtonText, styles.actionButtonTextDisabled]}>Upcoming</Text>
-              </View>
-            )}
-            <TouchableOpacity
-              style={[
-                styles.teamBox,
-                teamBName === 'TBD' && styles.teamBoxTBD,
-                winner === teamBName && styles.teamBoxWinner,
-              ]}
-              activeOpacity={editB ? 0.6 : 1}
-              onPress={editB || undefined}
-              disabled={!editB}
-            >
-              <View style={[styles.seedBadge, teamBName === 'TBD' && styles.seedBadgeTBD, winner === teamBName && styles.seedBadgeWin]}>
-                <Text style={[styles.seedBadgeText, winner === teamBName && styles.seedBadgeTextWin]}>{seedOf(teamBName) ?? '–'}</Text>
-              </View>
-              <Text style={[styles.teamBoxText, teamBName === 'TBD' && styles.teamBoxTextTBD, winner === teamBName && styles.teamBoxTextWin]} numberOfLines={1}>
-                {labelB}
-              </Text>
-              {editB ? <Icon name="edit" size={12} color="#94a3b8" /> : null}
-            </TouchableOpacity>
-          </View>
+          {/* Left column: the whole thing is one tap-target that starts the
+              match. Team names inside are separate tap-targets that change the
+              team (owner, scheduled only). */}
+          <TouchableOpacity
+            style={styles.matchCenter}
+            activeOpacity={cardActionable ? 0.7 : 1}
+            onPress={cardActionable ? onCardPress : undefined}
+            disabled={!cardActionable}
+          >
+            {renderTeam('A')}
+            <View style={[styles.actionButton, chipStyle]}>
+              <Text numberOfLines={1} style={[styles.actionButtonText, chipTextStyle]}>{chipText}</Text>
+            </View>
+            {renderTeam('B')}
+          </TouchableOpacity>
 
           {/* Bracket connector — both teams join into the winner */}
           <View style={styles.bracket}>
@@ -350,6 +383,11 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
             ) : null}
           </View>
 
+          {/* Share the full bracket (all rounds → final) as image / PDF */}
+          <View style={{ paddingHorizontal: 16, paddingBottom: 6, alignItems: 'flex-end' }}>
+            <ScheduleShareButton tournament={tournament} matches={matches} />
+          </View>
+
           {/* Round Tabs (equal-width, fit-to-screen) */}
           <View style={styles.roundTabs}>
             {Array.from({ length: numRounds }, (_, i) => i + 1).map((round) => {
@@ -371,6 +409,11 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
               );
             })}
           </View>
+
+          {/* Usage hint (owner only) */}
+          {isOwner ? (
+            <Text style={styles.ownerHint}>Tap a match to start · tap a team name to change it</Text>
+          ) : null}
 
           {/* Match Cards */}
           <ScrollView contentContainerStyle={styles.scheduleList}>
@@ -565,6 +608,26 @@ const styles = StyleSheet.create({
   teamBoxTextTBD: { color: '#94a3b8', fontWeight: '500', fontSize: 13 },
   slotEditIcon: { fontSize: 12, color: '#94a3b8', marginLeft: 4 },
   teamBoxTextWin: { color: '#047857', fontWeight: '800' },
+  // Tappable team-name region (owner, scheduled) — swaps the bracket team.
+  teamNameEdit: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  teamBoxTextEditable: {
+    color: '#1d4ed8',
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'dotted',
+  },
+  ownerHint: {
+    fontSize: 11,
+    color: '#94a3b8',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    marginTop: -4,
+    marginBottom: 8,
+  },
 
   // Seed number badge shown next to each team.
   seedBadge: {

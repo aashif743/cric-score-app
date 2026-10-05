@@ -11,6 +11,7 @@ import {
   Animated,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
@@ -346,7 +347,29 @@ const TournamentCreateScreen = ({ navigation, route }) => {
     });
   };
 
+  // Default fallback name for a team slot (Team A, Team B, …).
+  const defaultTeamName = (index) => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRST';
+    return `Team ${alphabet[index] || index + 1}`;
+  };
+  // The name a squad is keyed under for a slot (user name, else the default).
+  const squadKeyFor = (index) => (teamNames[index]?.trim() || defaultTeamName(index));
+
   const handleTeamNameChange = (index, value) => {
+    // teamSquads is keyed by team NAME — move the squad to the new key so an
+    // entered squad follows a rename instead of being orphaned (and dropped at
+    // submit, which only keeps squads whose key still matches a team name).
+    const oldKey = squadKeyFor(index);
+    const newKey = (value?.trim() || defaultTeamName(index));
+    if (oldKey !== newKey) {
+      setTeamSquads((prev) => {
+        if (!prev || !prev[oldKey]) return prev;
+        const next = { ...prev };
+        next[newKey] = next[oldKey];
+        delete next[oldKey];
+        return next;
+      });
+    }
     setTeamNames((prev) => {
       const updated = [...prev];
       updated[index] = value;
@@ -409,8 +432,20 @@ const TournamentCreateScreen = ({ navigation, route }) => {
               {displayName}
             </Text>
           </View>
-          <View style={styles.editIconContainer}>
-            <Text style={styles.editIcon}>✎</Text>
+          <View style={styles.teamRowActions}>
+            <TouchableOpacity
+              style={[styles.squadChip, squadCountFor(flatIndex) > 0 && styles.squadChipFilled]}
+              onPress={() => openSquadModal(flatIndex)}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            >
+              <Text style={[styles.squadChipText, squadCountFor(flatIndex) > 0 && styles.squadChipTextFilled]}>
+                {squadCountFor(flatIndex) > 0 ? `Squad ${squadCountFor(flatIndex)}` : '+ Squad'}
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.editIconContainer}>
+              <Text style={styles.editIcon}>✎</Text>
+            </View>
           </View>
         </TouchableOpacity>
         {showDivider && <View style={styles.teamDivider} />}
@@ -439,6 +474,57 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   const closeTeamNameModal = () => {
     setTeamNameModal({ visible: false, index: null, currentName: '' });
   };
+
+  // ───────────────────────── Squad editor ─────────────────────────
+  // A team's squad can be larger than the per-match playing count. The first
+  // `playersPerTeam` names are the playing XI; any extra names are reserves that
+  // stay available during scoring (suggested when renaming a player). Squads are
+  // stored name-keyed in teamSquads (same shape as an auction import).
+  const [squadModal, setSquadModal] = useState({ visible: false, teamKey: '', players: [] });
+
+  const openSquadModal = (index) => {
+    const key = squadKeyFor(index);
+    const existing = (teamSquads?.[key] || []).map((p) => ({ name: p?.name || '', role: p?.role || '' }));
+    setSquadModal({ visible: true, teamKey: key, players: existing.length ? existing : [{ name: '', role: '' }] });
+  };
+  const closeSquadModal = () => setSquadModal({ visible: false, teamKey: '', players: [] });
+
+  const squadSetPlayer = (i, name) => setSquadModal((prev) => {
+    const players = prev.players.map((p, k) => (k === i ? { ...p, name } : p));
+    return { ...prev, players };
+  });
+  const squadAddPlayer = () => setSquadModal((prev) => ({ ...prev, players: [...prev.players, { name: '', role: '' }] }));
+  const squadRemovePlayer = (i) => setSquadModal((prev) => ({ ...prev, players: prev.players.filter((_, k) => k !== i) }));
+  const squadMovePlayer = (i, dir) => setSquadModal((prev) => {
+    const j = i + dir;
+    if (j < 0 || j >= prev.players.length) return prev;
+    const players = [...prev.players];
+    [players[i], players[j]] = [players[j], players[i]];
+    return { ...prev, players };
+  });
+  const saveSquad = () => {
+    const cleaned = squadModal.players
+      .map((p) => ({ name: (p.name || '').trim(), role: (p.role || '').trim() }))
+      .filter((p) => p.name);
+    // Drop duplicate names (case-insensitive), keeping first occurrence.
+    const seen = new Set();
+    const deduped = cleaned.filter((p) => {
+      const k = p.name.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+    setTeamSquads((prev) => {
+      const next = { ...(prev || {}) };
+      if (deduped.length) next[squadModal.teamKey] = deduped;
+      else delete next[squadModal.teamKey];
+      return next;
+    });
+    closeSquadModal();
+  };
+  // Count of squad members for a slot, for the row badge.
+  const squadCountFor = (index) => (teamSquads?.[squadKeyFor(index)] || []).length;
+  // How many of each squad play per match (the rest are reserves/extras).
+  const playingXICount = parseInt(playersPerTeam) || 11;
 
   const handleSubmit = async () => {
     if (!name.trim()) {
@@ -1044,6 +1130,88 @@ const TournamentCreateScreen = ({ navigation, route }) => {
         onClose={() => setShowScanner(false)}
         onScanned={(code) => { setShowScanner(false); setImportCode(code); handleImportAuction(code); }}
       />
+
+      {/* Squad editor — add the full squad (playing XI + extras) for a team */}
+      <Modal
+        visible={squadModal.visible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeSquadModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.squadOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.squadCard}>
+            <View style={styles.squadHeader}>
+              <Text style={styles.squadTitle} numberOfLines={1}>{squadModal.teamKey} · Squad</Text>
+              <TouchableOpacity onPress={closeSquadModal} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={styles.squadClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.squadHint}>
+              First {playingXICount} players are the playing XI. Extra players are reserves —
+              they're suggested when you rename a player while scoring.
+            </Text>
+            <ScrollView
+              style={styles.squadList}
+              contentContainerStyle={{ paddingBottom: 8 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {squadModal.players.map((p, i) => {
+                const isXI = i < playingXICount;
+                const isFirstExtra = i === playingXICount && squadModal.players.length > playingXICount;
+                return (
+                  <View key={i}>
+                    {isFirstExtra && (
+                      <View style={styles.squadExtraDivider}>
+                        <View style={styles.squadExtraLine} />
+                        <Text style={styles.squadExtraLabel}>EXTRAS / RESERVES</Text>
+                        <View style={styles.squadExtraLine} />
+                      </View>
+                    )}
+                    <View style={styles.squadRow}>
+                      <View style={[styles.squadTag, isXI ? styles.squadTagXI : styles.squadTagExt]}>
+                        <Text style={[styles.squadTagText, isXI ? styles.squadTagTextXI : styles.squadTagTextExt]}>
+                          {isXI ? `${i + 1}` : 'EXT'}
+                        </Text>
+                      </View>
+                      <TextInput
+                        style={styles.squadInput}
+                        value={p.name}
+                        onChangeText={(t) => squadSetPlayer(i, t)}
+                        placeholder={isXI ? `Player ${i + 1}` : 'Reserve player'}
+                        placeholderTextColor="#94a3b8"
+                        returnKeyType="done"
+                      />
+                      <TouchableOpacity style={styles.squadMoveBtn} onPress={() => squadMovePlayer(i, -1)} disabled={i === 0}>
+                        <Text style={[styles.squadMoveText, i === 0 && styles.squadMoveDisabled]}>▲</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.squadMoveBtn} onPress={() => squadMovePlayer(i, 1)} disabled={i === squadModal.players.length - 1}>
+                        <Text style={[styles.squadMoveText, i === squadModal.players.length - 1 && styles.squadMoveDisabled]}>▼</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.squadDelBtn} onPress={() => squadRemovePlayer(i)} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+                        <Text style={styles.squadDelText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+              <TouchableOpacity style={styles.squadAddBtn} onPress={squadAddPlayer} activeOpacity={0.8}>
+                <Text style={styles.squadAddText}>＋ Add player</Text>
+              </TouchableOpacity>
+            </ScrollView>
+            <View style={styles.squadFooter}>
+              <TouchableOpacity style={styles.squadCancelBtn} onPress={closeSquadModal} activeOpacity={0.8}>
+                <Text style={styles.squadCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.squadSaveBtn} onPress={saveSquad} activeOpacity={0.85}>
+                <Text style={styles.squadSaveText}>Save squad</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1053,6 +1221,76 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
+  // Per-team-row squad chip + actions
+  teamRowActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  squadChip: {
+    paddingHorizontal: 10, height: 28, borderRadius: 8,
+    borderWidth: 1.5, borderColor: '#cbd5e1', backgroundColor: '#f8fafc',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  squadChipFilled: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  squadChipText: { fontSize: 12, fontWeight: '700', color: '#64748b' },
+  squadChipTextFilled: { color: '#2563eb' },
+
+  // Squad editor modal
+  squadOverlay: {
+    flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'flex-end',
+  },
+  squadCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    paddingHorizontal: 18, paddingTop: 16, paddingBottom: 20,
+    maxHeight: '85%',
+  },
+  squadHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  squadTitle: { flex: 1, fontSize: 18, fontWeight: '800', color: '#0f172a', marginRight: 10 },
+  squadClose: { fontSize: 20, fontWeight: '700', color: '#94a3b8' },
+  squadHint: { fontSize: 12.5, color: '#64748b', lineHeight: 18, marginTop: 6, marginBottom: 12 },
+  squadList: { flexGrow: 0 },
+  squadRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  squadTag: {
+    width: 34, height: 38, borderRadius: 9, justifyContent: 'center', alignItems: 'center',
+  },
+  squadTagXI: { backgroundColor: '#1e293b' },
+  squadTagExt: { backgroundColor: '#fef3c7' },
+  squadTagText: { fontSize: 12, fontWeight: '800' },
+  squadTagTextXI: { color: '#fff' },
+  squadTagTextExt: { color: '#b45309' },
+  squadInput: {
+    flex: 1, height: 44, borderWidth: 1.5, borderColor: '#e2e8f0', borderRadius: 10,
+    paddingHorizontal: 12, fontSize: 15, color: '#0f172a', backgroundColor: '#fff',
+  },
+  squadMoveBtn: {
+    width: 30, height: 38, borderRadius: 8, backgroundColor: '#f1f5f9',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  squadMoveText: { fontSize: 12, color: '#475569', fontWeight: '700' },
+  squadMoveDisabled: { color: '#cbd5e1' },
+  squadDelBtn: {
+    width: 34, height: 38, borderRadius: 8, backgroundColor: '#fef2f2',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  squadDelText: { fontSize: 14, color: '#ef4444', fontWeight: '800' },
+  squadExtraDivider: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 8 },
+  squadExtraLine: { flex: 1, height: 1, backgroundColor: '#fcd34d' },
+  squadExtraLabel: { fontSize: 10.5, fontWeight: '800', color: '#b45309', letterSpacing: 0.5 },
+  squadAddBtn: {
+    height: 44, borderRadius: 10, borderWidth: 1.5, borderColor: '#2563eb', borderStyle: 'dashed',
+    justifyContent: 'center', alignItems: 'center', marginTop: 4,
+  },
+  squadAddText: { fontSize: 14, fontWeight: '700', color: '#2563eb' },
+  squadFooter: { flexDirection: 'row', gap: 12, marginTop: 14 },
+  squadCancelBtn: {
+    flex: 1, height: 48, borderRadius: 12, borderWidth: 1.5, borderColor: '#e2e8f0',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  squadCancelText: { fontSize: 15, fontWeight: '700', color: '#475569' },
+  squadSaveBtn: {
+    flex: 2, height: 48, borderRadius: 12, backgroundColor: '#2563eb',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  squadSaveText: { fontSize: 15, fontWeight: '800', color: '#fff' },
+
   // Top-right Save chip in the gradient header (edit mode only).
   headerSaveButton: {
     minWidth: 70, height: 36,

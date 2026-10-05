@@ -431,7 +431,10 @@ const PastMatchesScreen = ({ navigation }) => {
       if (showLoader) setLoading(true);
       setError('');
       const userMatches = await matchService.getMyMatches(user.token);
-      setMatches(userMatches || []);
+      // Match History is for QUICK/standalone matches only. Tournament matches
+      // live under their tournament (Tournaments tab) and must be managed there,
+      // so they never appear here and can't be cleared by "Clear History".
+      setMatches((userMatches || []).filter((m) => !m.tournament));
     } catch (err) {
       console.warn('Fetch matches error:', err);
       if (showLoader) setError('Failed to fetch matches. Please try again later.');
@@ -677,9 +680,9 @@ const PastMatchesScreen = ({ navigation }) => {
             <View style={styles.modalIconCircle}>
               <TrashIcon size={28} color={palette.error} />
             </View>
-            <Text style={styles.modalTitle}>Clear All History?</Text>
+            <Text style={styles.modalTitle}>Clear Quick Matches?</Text>
             <Text style={styles.modalBody}>
-              {matches.length} matches will be permanently deleted. This cannot be undone.
+              {matches.length} quick {matches.length === 1 ? 'match' : 'matches'} will be permanently deleted. This cannot be undone.{'\n\n'}Tournament matches are not affected — to remove those, delete the tournament.
             </Text>
             <View style={styles.modalActions}>
               <TouchableOpacity

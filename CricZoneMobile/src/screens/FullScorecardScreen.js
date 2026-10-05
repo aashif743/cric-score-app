@@ -159,6 +159,12 @@ const FullScorecardScreen = ({ navigation, route }) => {
 
   // Safe navigation functions
   const handleGoBack = () => {
+    // Tournament match → never fall back to the just-finished scoring screen;
+    // rebuild the stack onto the tournament schedule (defined below).
+    if ((matchData?.tournament || initialMatchData?.tournament) && typeof resetToTournament === 'function') {
+      resetToTournament();
+      return;
+    }
     if (navigation.canGoBack()) {
       navigation.goBack();
     } else {
@@ -183,6 +189,10 @@ const FullScorecardScreen = ({ navigation, route }) => {
   // Tournament data for "Next Match" navigation
   const [tournamentDefaults, setTournamentDefaults] = useState(null);
   const [tournamentFormat, setTournamentFormat] = useState(null);
+  const [tournamentMatches, setTournamentMatches] = useState([]);
+  // This tournament's team rosters (names used across ALL its matches), so the
+  // rename picker suggests ONLY this team's players — never another team's.
+  const [teamRosters, setTeamRosters] = useState({});
 
   // Owner-only player rename (fixes a mis-typed name after the match).
   const [renameModal, setRenameModal] = useState({
@@ -248,12 +258,21 @@ const FullScorecardScreen = ({ navigation, route }) => {
     if (!isOwner || !teamName) return;
     const others = otherRoleNames(teamName, playerType, currentName);
     const isBowler = playerType === 'bowler';
+    // Suggest ONLY this team's players: this match's line-up + the team's roster
+    // across the tournament (real names only). Never another team's players.
+    const roster = [];
+    const addName = (n) => {
+      const nm = (n || '').trim();
+      if (nm && !isPlaceholderPlayerName(nm, teamName) && !roster.some((x) => x.toLowerCase() === nm.toLowerCase())) roster.push(nm);
+    };
+    teamLineup(teamName).forEach(addName);
+    (teamRosters[teamName] || []).forEach(addName);
     setRenameModal({
       visible: true,
       teamName,
       oldName: currentName || '',
       playerType,
-      teamPlayers: teamLineup(teamName),
+      teamPlayers: roster,
       // Batsmen must stay unique (a batsman can't bat twice), so their other
       // names are blocked. A bowler can bowl several overs, so their other rows
       // are offered as MERGE targets instead of being blocked.
@@ -481,11 +500,69 @@ const FullScorecardScreen = ({ navigation, route }) => {
               tournamentName: tournament.name,
             });
             setTournamentFormat(tournament.format || null);
+            setTournamentMatches(Array.isArray(tournament.matches) ? tournament.matches : []);
           }
         })
         .catch((err) => console.log('Tournament pre-fetch error:', err));
     }
   }, [matchData?.tournament, initialMatchData?.tournament, user?.token]);
+
+  // Load this tournament's team rosters so the rename picker can suggest the
+  // team's known players (from every match), team-scoped. No-op for quick games.
+  useEffect(() => {
+    const tid = matchData?.tournament || initialMatchData?.tournament;
+    if (!tid || !user?.token) return;
+    let cancelled = false;
+    tournamentService.getTeamRosters(tid, user.token)
+      .then((rosters) => { if (!cancelled && rosters && typeof rosters === 'object') setTeamRosters(rosters); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [matchData?.tournament, initialMatchData?.tournament, user?.token]);
+
+  // --- Tournament navigation --------------------------------------------------
+  // Leaving this finished scorecard must REBUILD the stack, otherwise Back keeps
+  // returning here. We reset to Dashboard → Tournaments list → the schedule, so
+  // Back from the schedule goes to the tournaments page (not this scorecard).
+  const tournamentId = matchData?.tournament || initialMatchData?.tournament;
+  const scheduleRoute = () =>
+    tournamentFormat === 'knockout' ? 'KnockoutSchedule'
+      : tournamentFormat === 'league' ? 'LeagueSchedule'
+        : 'TournamentDetail';
+
+  const resetToTournament = (leaf) => {
+    const routes = [
+      { name: 'MainTabs', params: { screen: 'Dashboard' } },
+      { name: 'TournamentList' },
+      { name: scheduleRoute(), params: { tournamentId } },
+    ];
+    if (leaf) routes.push(leaf);
+    navigation.reset({ index: routes.length - 1, routes });
+  };
+
+  // "Next Match": open the next not-yet-played fixture (teams known) directly in
+  // its setup; if none remain, just land on the schedule. Back stays clean.
+  const openNextMatch = () => {
+    const finishedId = matchData?._id || matchId;
+    const next = (tournamentMatches || [])
+      .filter((m) =>
+        m && m.status === 'scheduled' &&
+        m.teamA?.name && m.teamA.name !== 'TBD' &&
+        m.teamB?.name && m.teamB.name !== 'TBD' &&
+        String(m._id) !== String(finishedId))
+      .sort((a, b) => String(a._id).localeCompare(String(b._id)))[0];
+    if (!next) { resetToTournament(); return; }
+    resetToTournament({
+      name: 'MatchSetup',
+      params: {
+        tournamentId,
+        matchId: next._id,
+        tournamentDefaults: {
+          ...(tournamentDefaults || {}),
+          teamNames: [next.teamA.name, next.teamB.name],
+        },
+      },
+    });
+  };
 
   useEffect(() => {
     // Animate tab indicator
@@ -640,6 +717,16 @@ const FullScorecardScreen = ({ navigation, route }) => {
   };
 
   const nrrData = calculateNetRunRates();
+
+  // A TIED match never affects NRR (even if a Super Over decided a winner) — show
+  // 0 for both teams here so the scorecard matches the points table.
+  const superOver = matchData?.superOver && Array.isArray(matchData.superOver.innings) ? matchData.superOver : null;
+  const _r1 = matchData?.innings1?.runs, _r2 = matchData?.innings2?.runs;
+  const matchIsTie = matchData?.status === 'completed' && _r1 != null && _r2 != null && _r1 === _r2;
+  if (matchIsTie && nrrData?.teamA && nrrData?.teamB) {
+    nrrData.teamA = { ...nrrData.teamA, nrr: '0.000' };
+    nrrData.teamB = { ...nrrData.teamB, nrr: '0.000' };
+  }
 
   // Capture scorecard as image
   const captureScorecard = async () => {
@@ -1410,32 +1497,42 @@ const FullScorecardScreen = ({ navigation, route }) => {
             '2nd Innings'
           )}
 
+        {/* Super Over — shown separately below the main innings when one was played */}
+        {superOver && superOver.innings.length > 0 && (
+          <View style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 4, backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#fde68a', overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fffbeb', paddingHorizontal: 14, paddingVertical: 10 }}>
+              <Text style={{ fontSize: 14, fontWeight: '900', color: '#b45309', letterSpacing: 0.5 }}>⚡ SUPER OVER</Text>
+              {superOver.round > 1 ? <Text style={{ fontSize: 11, fontWeight: '800', color: '#d97706' }}>Super Over #{superOver.round}</Text> : null}
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10, padding: 12 }}>
+              {superOver.innings.map((inn, i) => {
+                const win = superOver.winner && superOver.winner === inn.team;
+                return (
+                  <View key={i} style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, backgroundColor: win ? '#ecfdf5' : '#f8fafc', borderWidth: 1, borderColor: win ? '#6ee7b7' : '#eef2f7' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: win ? '#047857' : '#64748b', marginBottom: 4 }} numberOfLines={1}>{inn.team}</Text>
+                    <Text style={{ fontSize: 24, fontWeight: '900', color: '#0f172a', fontVariant: ['tabular-nums'] }}>{inn.runs}/{inn.wickets}</Text>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 2 }}>{inn.balls} balls</Text>
+                  </View>
+                );
+              })}
+            </View>
+            {superOver.winner ? (
+              <Text style={{ textAlign: 'center', fontSize: 13, fontWeight: '800', color: '#047857', paddingBottom: 12 }}>🏆 {superOver.winner} won the Super Over</Text>
+            ) : null}
+          </View>
+        )}
+
         {/* Action Buttons */}
         {(() => {
           const tid = matchData?.tournament || initialMatchData?.tournament;
-          // Bracketed tournaments (knockout, league) live in their own schedule
-          // screens, not TournamentDetail. Both Tournament and Next Match jump
-          // back to the schedule so the user can pick the next slot.
-          const isKnockout = tournamentFormat === 'knockout';
-          const isLeague = tournamentFormat === 'league';
-          const tournamentRoute = isKnockout
-            ? 'KnockoutSchedule'
-            : isLeague ? 'LeagueSchedule' : 'TournamentDetail';
-          const nextMatchRoute = isKnockout
-            ? 'KnockoutSchedule'
-            : isLeague ? 'LeagueSchedule' : 'MatchSetup';
-          const nextMatchParams = (isKnockout || isLeague)
-            ? { tournamentId: tid }
-            : { tournamentId: tid, ...(tournamentDefaults ? { tournamentDefaults } : {}) };
           return (
             <View style={styles.actionButtons}>
               <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
+                {/* Tournament → the schedule (overview); Back then goes to the
+                    tournaments list, never back to this finished scorecard. */}
                 <TouchableOpacity
                   style={styles.dashboardButton}
-                  onPress={tid
-                    ? () => navigation.navigate(tournamentRoute, { tournamentId: tid })
-                    : handleGoToDashboard
-                  }
+                  onPress={tid ? () => resetToTournament() : handleGoToDashboard}
                   onPressIn={handleButtonPressIn}
                   onPressOut={handleButtonPressOut}
                   activeOpacity={0.9}
@@ -1445,12 +1542,11 @@ const FullScorecardScreen = ({ navigation, route }) => {
                 </TouchableOpacity>
               </Animated.View>
               <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
+                {/* Next Match → opens the next unplayed fixture directly (falls
+                    back to the schedule if none remain). */}
                 <TouchableOpacity
                   style={styles.newMatchButtonLarge}
-                  onPress={() => tid
-                    ? navigation.replace(nextMatchRoute, nextMatchParams)
-                    : navigation.navigate('MatchSetup')
-                  }
+                  onPress={() => tid ? openNextMatch() : navigation.navigate('MatchSetup')}
                   onPressIn={handleButtonPressIn}
                   onPressOut={handleButtonPressOut}
                   activeOpacity={0.9}
@@ -1793,6 +1889,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
         takenNames={renameModal.takenNames}
         allowMerge={renameModal.allowMerge}
         mergeOptions={renameModal.mergeOptions}
+        teamOnly={!!(matchData?.tournament)}
         onSave={handleRenameSave}
         onClose={() => setRenameModal((m) => ({ ...m, visible: false }))}
       />
