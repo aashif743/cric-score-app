@@ -29,6 +29,21 @@ const criczoneLogo = require('../../assets/logo/criczone_icon.png');
 
 const { width } = Dimensions.get('window');
 
+// Is a name just a generated placeholder (e.g. "Batsman 1", "Bowler 2",
+// "New Batsman", "Team A Player 3") rather than a real player name? Used so the
+// rename suggestions don't offer placeholders. (Mirrors ScoreCardScreen.)
+const isPlaceholderPlayerName = (name, team) => {
+  const n = (name || '').trim();
+  if (!n) return true;
+  if (/^(batsman|bowler|player)\s+\d+$/i.test(n)) return true;
+  if (/^new\s+batsman$/i.test(n)) return true;
+  if (team) {
+    const esc = String(team).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`^${esc}\\s+player\\s+\\d+$`, 'i').test(n)) return true;
+  }
+  return false;
+};
+
 // Brand colors matching CricZone
 const colors = {
   primary: '#0d3b66',

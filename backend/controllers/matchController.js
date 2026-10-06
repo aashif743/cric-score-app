@@ -1250,21 +1250,20 @@ exports.resetMatch = async (req, res) => {
       return res.status(400).json({ success: false, error: "A completed match cannot be reset." });
     }
 
-    match.status = 'scheduled';
-    match.innings = 1;
-    match.innings1 = undefined;
-    match.innings2 = undefined;
-    match.currentState = undefined;
-    match.target = undefined;
-    match.result = '';
-    match.superOver = undefined;
-    if (match.matchSummary) { match.matchSummary = undefined; match.markModified('matchSummary'); }
-    match.markModified('innings1');
-    match.markModified('innings2');
-    match.markModified('currentState');
-    match.markModified('superOver');
-    match.updatedAt = new Date();
-    await match.save();
+    // Clear via findByIdAndUpdate with validators OFF: innings1 is a REQUIRED
+    // path, so a plain save() after clearing it fails validation ("Path
+    // `innings1` is required"). $unset removes the live scoring data cleanly.
+    await Match.findByIdAndUpdate(
+      id,
+      {
+        $set: { status: 'scheduled', innings: 1, result: '', updatedAt: new Date() },
+        $unset: {
+          innings1: '', innings2: '', currentState: '', target: '',
+          superOver: '', matchSummary: '', liveState: '',
+        },
+      },
+      { runValidators: false }
+    );
 
     return res.json({ success: true, data: { status: 'scheduled' } });
   } catch (error) {

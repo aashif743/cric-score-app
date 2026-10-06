@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "30",
+      "buildNumber": "31",
       "associatedDomains": [
         "applinks:cric-zone.com",
         "applinks:www.cric-zone.com"
@@ -51,10 +51,21 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "cric-zone.com", "pathPrefix": "/tournament" },
-            { "scheme": "https", "host": "www.cric-zone.com", "pathPrefix": "/tournament" }
+            {
+              "scheme": "https",
+              "host": "cric-zone.com",
+              "pathPrefix": "/tournament"
+            },
+            {
+              "scheme": "https",
+              "host": "www.cric-zone.com",
+              "pathPrefix": "/tournament"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "permissions": [

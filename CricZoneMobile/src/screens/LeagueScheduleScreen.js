@@ -865,6 +865,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
               groupId={activeTab.id}
               match={m}
               onStart={handleStartMatch}
+              onPlaySuperOver={playSuperOver}
               isOwner={isOwner}
               logos={tournament?.teamLogos || {}}
             />
@@ -943,6 +944,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
               roundLabel={m.matchLabel || currentTabLabel}
               match={m}
               onStart={handleStartMatch}
+              onPlaySuperOver={playSuperOver}
               isOwner={isOwner}
               koMatches={knockoutMatches}
               gameNoMap={koGameNos}
