@@ -19,8 +19,8 @@ const adminService = {
     API.delete(`/admin/tournaments/${id}`, auth(token)).then((r) => r.data),
 
   // Users
-  listUsers: (token, { search = "", page = 1 } = {}) =>
-    API.get(`/admin/users`, { ...auth(token), params: { search, page } }).then((r) => r.data),
+  listUsers: (token, { search = "", page = 1, all = false } = {}) =>
+    API.get(`/admin/users`, { ...auth(token), params: all ? { search, all: true } : { search, page } }).then((r) => r.data),
   getUser: (token, id) => API.get(`/admin/users/${id}`, auth(token)).then((r) => r.data?.data),
   setUserStatus: (token, id, status) =>
     API.post(`/admin/users/${id}/status`, { status }, auth(token)).then((r) => r.data),

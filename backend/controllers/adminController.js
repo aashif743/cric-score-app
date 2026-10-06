@@ -233,8 +233,11 @@ exports.rejectTournament = async (req, res) => {
 exports.listUsers = async (req, res) => {
   try {
     const { search = "" } = req.query;
+    const all = req.query.all === "true";
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(50, Math.max(5, parseInt(req.query.limit, 10) || 20));
+    // Normal view paginates; "View all" returns everyone (capped high for safety).
+    const limit = all ? 5000 : Math.min(50, Math.max(5, parseInt(req.query.limit, 10) || 20));
+    const skip = all ? 0 : (page - 1) * limit;
 
     const q = {};
     if (search.trim()) {
@@ -242,7 +245,7 @@ exports.listUsers = async (req, res) => {
       q.$or = [{ name: re }, { email: re }, { phoneNumber: re }];
     }
     const [rows, total] = await Promise.all([
-      User.find(q).select("name email phoneNumber role status createdAt").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      User.find(q).select("name email phoneNumber role status createdAt").sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       User.countDocuments(q),
     ]);
 
@@ -265,7 +268,7 @@ exports.listUsers = async (req, res) => {
       tournaments: tById[String(u._id)] || 0,
       createdAt: u.createdAt,
     }));
-    res.json({ success: true, data, page, limit, total, pages: Math.ceil(total / limit) });
+    res.json({ success: true, data, page, limit, total, all, pages: all ? 1 : Math.ceil(total / limit) });
   } catch (error) {
     console.error("Admin list users error:", error);
     res.status(500).json({ success: false, error: "Failed to load users." });

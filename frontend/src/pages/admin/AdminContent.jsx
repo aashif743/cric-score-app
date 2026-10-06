@@ -1,7 +1,9 @@
 import React, { useContext, useEffect, useState, useCallback } from "react";
+import { motion } from "framer-motion";
 import { AuthContext } from "../../context/AuthContext.jsx";
 import adminService from "../../services/adminService";
-import { PageHeader, Card, StatCard, Spinner, Badge } from "./ui.jsx";
+import { PageHeader, Card, StatCard, Spinner, Badge, Btn, Reveal, EmptyState } from "./ui.jsx";
+import { FiUserX, FiLink, FiFolderMinus, FiClock } from "react-icons/fi";
 
 export default function AdminContent() {
   const { user } = useContext(AuthContext);
@@ -15,8 +17,7 @@ export default function AdminContent() {
         adminService.contentIssues(user.token),
         adminService.auditLog(user.token, 1),
       ]);
-      setIssues(iss);
-      setAudit(log);
+      setIssues(iss); setAudit(log);
     } catch (_) { /* leave */ }
   }, [user.token]);
 
@@ -35,13 +36,13 @@ export default function AdminContent() {
 
   return (
     <div>
-      <PageHeader title="Content cleanup" subtitle="Find and remove orphaned / junk data safely." />
+      <PageHeader title="Content cleanup" subtitle="Find and remove orphaned or junk data safely." />
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard label="Matches with no user" value={issues.orphanMatchesNoUser} accent={issues.orphanMatchesNoUser ? "rose" : "slate"} />
-        <StatCard label="Matches with no tournament" value={issues.orphanMatchesNoTournament} accent={issues.orphanMatchesNoTournament ? "amber" : "slate"} />
-        <StatCard label="Empty tournaments" value={issues.emptyTournaments} accent={issues.emptyTournaments ? "amber" : "slate"} />
-      </div>
+      <Reveal className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <StatCard label="Matches, no owner" value={issues.orphanMatchesNoUser} accent={issues.orphanMatchesNoUser ? "rose" : "slate"} icon={FiUserX} />
+        <StatCard label="Matches, no tournament" value={issues.orphanMatchesNoTournament} accent={issues.orphanMatchesNoTournament ? "amber" : "slate"} icon={FiLink} />
+        <StatCard label="Empty tournaments" value={issues.emptyTournaments} accent={issues.emptyTournaments ? "amber" : "slate"} icon={FiFolderMinus} />
+      </Reveal>
 
       <div className="mt-4">
         <Card title="Cleanup actions">
@@ -55,7 +56,7 @@ export default function AdminContent() {
             />
             <CleanupRow
               label="Delete standalone matches with no tournament link"
-              hint="⚠️ This also removes quick/standalone matches. Use with care."
+              hint="⚠️ Also removes quick/standalone matches. Use with care."
               count={issues.orphanMatchesNoTournament}
               danger
               busy={busy === "noTournament"}
@@ -66,21 +67,26 @@ export default function AdminContent() {
       </div>
 
       <div className="mt-4">
-        <Card title="Recent admin actions">
+        <Card title={<span className="flex items-center gap-2"><FiClock className="text-slate-400" /> Recent admin actions</span>}>
           {!audit?.data?.length ? (
-            <div className="text-sm text-slate-400">No actions logged yet.</div>
+            <EmptyState title="No actions logged yet" hint="Approvals, disables and deletes will appear here." />
           ) : (
             <ul className="divide-y divide-slate-100">
-              {audit.data.map((a) => (
-                <li key={a._id} className="py-2.5 flex items-center justify-between text-sm">
-                  <div className="min-w-0">
-                    <span className="font-semibold text-slate-800">{a.action}</span>
-                    <span className="text-slate-400"> · {a.targetType} {a.details?.name || a.details?.email || ""}</span>
+              {audit.data.map((a, i) => (
+                <motion.li
+                  key={a._id}
+                  initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.03 }}
+                  className="py-2.5 flex items-center justify-between text-sm gap-3"
+                >
+                  <div className="min-w-0 flex items-center gap-2.5">
+                    <Badge color={actionColor(a.action)}>{a.action}</Badge>
+                    <span className="text-slate-500 truncate">{a.targetType} {a.details?.name || a.details?.email || ""}</span>
                   </div>
-                  <div className="text-xs text-slate-400 shrink-0 ml-3">
-                    {a.adminEmail} · {new Date(a.createdAt).toLocaleString()}
+                  <div className="text-xs text-slate-400 shrink-0 text-right">
+                    <div className="truncate max-w-[180px]">{a.adminEmail}</div>
+                    <div>{new Date(a.createdAt).toLocaleString()}</div>
                   </div>
-                </li>
+                </motion.li>
               ))}
             </ul>
           )}
@@ -90,25 +96,26 @@ export default function AdminContent() {
   );
 }
 
+function actionColor(action = "") {
+  if (action.includes("delete") || action.includes("reject") || action.includes("disable")) return "rose";
+  if (action.includes("approve") || action.includes("enable")) return "green";
+  if (action.includes("Admin")) return "violet";
+  return "slate";
+}
+
 function CleanupRow({ label, hint, count, onClick, busy, danger }) {
   return (
-    <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-slate-50">
+    <motion.div whileHover={{ scale: 1.005 }} className="flex items-center justify-between gap-4 p-3.5 rounded-xl bg-slate-50 border border-slate-100">
       <div className="min-w-0">
         <div className="font-semibold text-slate-800 text-sm">{label}</div>
         <div className="text-xs text-slate-500 mt-0.5">{hint}</div>
       </div>
       <div className="flex items-center gap-3 shrink-0">
         <Badge color={count ? (danger ? "rose" : "amber") : "slate"}>{count}</Badge>
-        <button
-          disabled={!count || busy}
-          onClick={onClick}
-          className={`px-3.5 py-2 rounded-lg text-sm font-bold disabled:opacity-40 ${
-            danger ? "bg-rose-600 text-white hover:bg-rose-500" : "bg-slate-800 text-white hover:bg-slate-700"
-          }`}
-        >
+        <Btn variant={danger ? "danger" : "dark"} disabled={!count || busy} onClick={onClick}>
           {busy ? "Deleting…" : "Delete"}
-        </button>
+        </Btn>
       </div>
-    </div>
+    </motion.div>
   );
 }
