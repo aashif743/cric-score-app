@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AuthContext } from '../context/AuthContext';
 import LiveMatchesStrip from '../components/LiveMatchesStrip';
 import LiveAuctionsStrip from '../components/LiveAuctionsStrip';
+import FeaturedTournamentsStrip from '../components/FeaturedTournamentsStrip';
 import Icon from '../components/Icon';
 import UpdatePromptModal from '../components/UpdatePromptModal';
 import { checkForUpdate } from '../utils/versionService';
@@ -255,6 +256,11 @@ const DashboardScreen = ({ navigation }) => {
             public live match. Self-contained: fetches + subscribes to its
             own socket so the dashboard stays a thin shell. */}
         <LiveMatchesStrip navigation={navigation} />
+
+        {/* Featured tournaments — owner-opted-in events (upcoming + live), so
+            users can follow a real tournament before it starts. Only renders
+            when there's at least one; self-contained fetch. */}
+        <FeaturedTournamentsStrip navigation={navigation} />
 
         {/* Live auctions strip — only renders when a public auction is live. */}
         <LiveAuctionsStrip navigation={navigation} />

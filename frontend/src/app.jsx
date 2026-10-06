@@ -38,6 +38,11 @@ import AuctionBigScreen from './pages/auction/AuctionBigScreen';
 import AuctionOverlay from './pages/auction/AuctionOverlay';
 import AuctionResults from './pages/auction/AuctionResults';
 import LandingPage from './pages/LandingPage';
+import AdminLayout from './pages/admin/AdminLayout.jsx';
+import AdminOverview from './pages/admin/AdminOverview.jsx';
+import AdminApprovals from './pages/admin/AdminApprovals.jsx';
+import AdminUsers from './pages/admin/AdminUsers.jsx';
+import AdminContent from './pages/admin/AdminContent.jsx';
 import { Toaster, ConfirmHost } from './components/auction/ui.jsx';
 import { ThemeProvider } from './context/ThemeContext.jsx';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
@@ -224,7 +229,7 @@ const handleResumeMatch = (matchToResume) => {
   // render completely chrome-free.
   const path = location.pathname;
   const chromelessExact = ['/', '/auth'];
-  const chromelessPrefix = ['/auction', '/scorecard', '/full-scorecard', '/tournament', '/overlay', '/tv', '/privacy', '/terms', '/support', '/account-deletion'];
+  const chromelessPrefix = ['/admin', '/auction', '/scorecard', '/full-scorecard', '/tournament', '/overlay', '/tv', '/privacy', '/terms', '/support', '/account-deletion'];
   const isChromeless = chromelessExact.includes(path) || chromelessPrefix.some((p) => path === p || path.startsWith(p));
   const showBottomNav = !isChromeless;
   const showHeader = false;
@@ -292,6 +297,14 @@ const handleResumeMatch = (matchToResume) => {
               )
             }
           />
+
+          {/* --- Admin Panel (admin role enforced in AdminLayout + backend) --- */}
+          <Route path="/admin" element={user ? <AdminLayout /> : <Navigate to="/auth" replace />}>
+            <Route index element={<AdminOverview />} />
+            <Route path="approvals" element={<AdminApprovals />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="content" element={<AdminContent />} />
+          </Route>
 
           {/* Fallback route for any other path */}
           <Route path="*" element={<Navigate to="/" replace />} />

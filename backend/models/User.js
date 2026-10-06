@@ -24,7 +24,19 @@ const userSchema = mongoose.Schema(
     },
     otpExpires: {
         type: Date,
-    }
+    },
+    // Access control for the admin panel. Only 'admin' may reach /api/admin/*.
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+    },
+    // Account state. A 'disabled' account is blocked from the app by the admin.
+    status: {
+      type: String,
+      enum: ['active', 'disabled'],
+      default: 'active',
+    },
   },
   {
     timestamps: true,

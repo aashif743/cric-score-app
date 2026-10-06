@@ -193,6 +193,8 @@ const TournamentCreateScreen = ({ navigation, route }) => {
   // Visibility: 'public' (anyone signed in can see live scores) or 'private'.
   // Default 'public' so the live feed has content unless the creator opts out.
   const [visibility, setVisibility] = useState(existingData?.visibility || 'public');
+  // Opt-in: show this tournament on everyone's dashboard (upcoming + live feed).
+  const [listed, setListed] = useState(existingData?.listed === true);
 
   // Tournament crest URL, and per-team crests kept by INDEX while editing (so a
   // rename in this screen keeps the logo attached to the right row). Converted to
@@ -591,6 +593,8 @@ const TournamentCreateScreen = ({ navigation, route }) => {
       description: description.trim(),
       format,
       visibility,
+      // Featuring only makes sense for a public tournament.
+      listed: visibility === 'public' ? listed : false,
       ...(format === 'league' ? {
         numberOfGroups: parseInt(numberOfGroups, 10),
         teamsAdvancePerGroup: parseInt(teamsAdvancePerGroup, 10),
@@ -1049,6 +1053,25 @@ const TournamentCreateScreen = ({ navigation, route }) => {
                   {visibility === 'private' && <View style={styles.visibilityCheck} />}
                 </TouchableOpacity>
               </View>
+
+              {/* Feature on everyone's dashboard (public only) */}
+              {visibility === 'public' && (
+                <TouchableOpacity
+                  style={[styles.featureRow, listed && styles.featureRowActive]}
+                  onPress={() => setListed((v) => !v)}
+                  activeOpacity={0.85}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.featureTitle}>Request to feature on public dashboard</Text>
+                    <Text style={styles.featureHint}>
+                      Ask the CricZone team to show this tournament to all users (upcoming & live). It appears once approved. Leave off for practice/test tournaments.
+                    </Text>
+                  </View>
+                  <View style={[styles.toggleTrack, listed && styles.toggleTrackOn]}>
+                    <View style={[styles.toggleThumb, listed && styles.toggleThumbOn]} />
+                  </View>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Venue & Description */}
@@ -1300,6 +1323,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   headerSaveText: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 0.3 },
+
+  // Feature-on-dashboard toggle
+  featureRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginTop: 12, padding: 14, borderRadius: 14,
+    borderWidth: 2, borderColor: '#e2e8f0', backgroundColor: '#fff',
+  },
+  featureRowActive: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  featureTitle: { fontSize: 14, fontWeight: '800', color: '#0f172a', marginBottom: 3 },
+  featureHint: { fontSize: 11.5, fontWeight: '600', color: '#94a3b8', lineHeight: 16 },
+  toggleTrack: {
+    width: 46, height: 28, borderRadius: 999, backgroundColor: '#cbd5e1',
+    padding: 3, justifyContent: 'center',
+  },
+  toggleTrackOn: { backgroundColor: '#2563eb' },
+  toggleThumb: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff',
+    shadowColor: '#0f172a', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+  },
+  toggleThumbOn: { alignSelf: 'flex-end' },
 
   // Visibility picker (Public / Private)
   visibilityRow: { flexDirection: 'row', gap: 12 },

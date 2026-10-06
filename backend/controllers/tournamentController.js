@@ -149,7 +149,7 @@ exports.createTournament = async (req, res) => {
 
     const {
       name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
-      venue, description, format, visibility, logoUrl, teamLogos,
+      venue, description, format, visibility, listed, logoUrl, teamLogos,
       auctionId, teamSquads,
       // League-only:
       numberOfGroups, teamsAdvancePerGroup, matchesPerPair, playoffFormat,
@@ -183,6 +183,7 @@ exports.createTournament = async (req, res) => {
       description: description || "",
       format: tournamentFormat,
       visibility: visibility === "private" ? "private" : "public",
+      listed: listed === true,
       numberOfGroups: tournamentFormat === "league" ? Math.max(1, numberOfGroups || 1) : 1,
       teamsAdvancePerGroup: tournamentFormat === "league" ? Math.max(0, teamsAdvancePerGroup || 0) : 0,
       matchesPerPair: tournamentFormat === "league" ? Math.max(1, matchesPerPair || 1) : 1,
@@ -402,7 +403,7 @@ exports.updateTournament = async (req, res) => {
 
     const {
       name, numberOfTeams, teamNames, playersPerTeam, totalOvers, ballsPerOver,
-      venue, description, status, visibility, logoUrl, teamLogos,
+      venue, description, status, visibility, listed, logoUrl, teamLogos,
       auctionId, teamSquads,
       numberOfGroups, teamsAdvancePerGroup, matchesPerPair, playoffFormat,
     } = req.body;
@@ -428,6 +429,7 @@ exports.updateTournament = async (req, res) => {
     if (visibility !== undefined && (visibility === "public" || visibility === "private")) {
       tournament.visibility = visibility;
     }
+    if (listed !== undefined) tournament.listed = (listed === true);
     // Logos are non-structural — applied here so they persist through every
     // return path below (including the league group/knockout rebuilds).
     if (logoUrl !== undefined) tournament.logoUrl = logoUrl;

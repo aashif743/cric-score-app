@@ -704,6 +704,69 @@ const ScoreCardScreen = ({ navigation, route }) => {
     initializePlayers();
   }, [matchData, settings.playersPerTeam]);
 
+  // A team's known players, team-scoped and ordered: names already on THIS
+  // match's pre-generated roster (including an imported / edited squad), then
+  // names saved from the team's EARLIER tournament matches (teamRosters).
+  // Placeholders removed, de-duped. Powers auto-filling line-ups below.
+  const teamNamePool = useCallback((teamName) => {
+    if (!teamName) return [];
+    const out = [];
+    const push = (nm) => {
+      const n = (nm || '').trim();
+      if (n && !isPlaceholderPlayerName(n, teamName) &&
+          !out.some((x) => x.toLowerCase() === n.toLowerCase())) out.push(n);
+    };
+    for (const inn of [matchData?.innings1, matchData?.innings2]) {
+      if (!inn) continue;
+      if (inn.battingTeam === teamName) (inn.batting || []).forEach((p) => push(p?.name));
+      if (inn.bowlingTeam === teamName) (inn.bowling || []).forEach((p) => push(p?.name));
+    }
+    (teamRosters[teamName] || []).forEach(push);
+    return out;
+  }, [matchData, teamRosters]);
+
+  // Auto-fill a FRESH (not-yet-started) match's line-ups with each team's known
+  // players, so names entered once carry over to later matches and show up in
+  // the Settings list — the scorer no longer has to re-type them every game.
+  // Safeguards: only fills PLACEHOLDER slots (never overwrites a real/edited
+  // name), and only before any ball is bowled (never touches live data).
+  useEffect(() => {
+    if (matchData?.currentState) return;          // resumed match → keep saved names
+    if ((match?.balls || 0) > 0) return;          // scoring started → leave alone
+    if (!allBatsmen.length && !allBowlers.length) return;
+    const batTeam = teams[getBattingTeamKey()]?.name;
+    const bowlTeam = teams[getBowlingTeamKey()]?.name;
+    const batPool = teamNamePool(batTeam);
+    const bowlPool = teamNamePool(bowlTeam);
+    if (!batPool.length && !bowlPool.length) return;
+
+    const fill = (arr, pool, teamName) => {
+      let p = 0; let changed = false;
+      const next = arr.map((pl) => {
+        const cur = (pl?.name || '').trim();
+        if (cur && !isPlaceholderPlayerName(cur, teamName)) return pl; // keep real name
+        if (p < pool.length) { changed = true; return { ...pl, name: pool[p++] }; }
+        return pl;
+      });
+      return changed ? next : arr;
+    };
+
+    const filledBat = fill(allBatsmen, batPool, batTeam);
+    if (filledBat !== allBatsmen) {
+      setAllBatsmen(filledBat);
+      setCurrentBatsmen((c) => ({
+        striker: filledBat.find((b) => b.id === c.striker?.id) || c.striker,
+        nonStriker: filledBat.find((b) => b.id === c.nonStriker?.id) || c.nonStriker,
+      }));
+    }
+    const filledBowl = fill(allBowlers, bowlPool, bowlTeam);
+    if (filledBowl !== allBowlers) {
+      setAllBowlers(filledBowl);
+      setCurrentBowler((c) => filledBowl.find((b) => b.id === c?.id) || c);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamRosters, matchData?._id, allBatsmen.length, allBowlers.length]);
+
   // Get current batting and bowling team names
   const getBattingTeam = () => {
     if (match.innings === 1) {

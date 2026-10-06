@@ -92,6 +92,21 @@ const TournamentSchema = new mongoose.Schema({
     enum: ["public", "private"],
     default: "public"
   },
+  // Owner opt-in: when true, this tournament is surfaced on EVERY user's
+  // dashboard (the "Upcoming / Live tournaments" feed) — before and during play,
+  // so people can follow a real event. Default false so the feed stays curated
+  // and the dashboard never fills with test/junk tournaments.
+  listed: {
+    type: Boolean,
+    default: false
+  },
+  // Admin approval for the public dashboard feed. `listed` is the OWNER's request
+  // to be featured; a tournament only actually appears on everyone's dashboard
+  // once an admin sets `approved: true`. Keeps the feed curated.
+  approved: {
+    type: Boolean,
+    default: false
+  },
   // League-format only. `numberOfGroups` divides teams into pools.
   // `teamsAdvancePerGroup` controls how many top teams from each group advance
   // into the knockout stage (0 = league only, no knockout).
@@ -150,6 +165,10 @@ TournamentSchema.virtual("matches", {
 TournamentSchema.index({ user: 1, updatedAt: -1 });
 // Live-feed lookups query by visibility, so index it for cheap scans.
 TournamentSchema.index({ visibility: 1, updatedAt: -1 });
+// Dashboard "featured tournaments" feed queries approved + not-private.
+TournamentSchema.index({ approved: 1, visibility: 1, updatedAt: -1 });
+// Admin approval queue queries listed-but-not-approved.
+TournamentSchema.index({ listed: 1, approved: 1 });
 
 // Unique only when shareId is a string. partialFilterExpression is reliable
 // across nulls/missing values; plain `sparse + default: null` collides because

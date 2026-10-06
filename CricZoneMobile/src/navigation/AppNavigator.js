@@ -23,11 +23,25 @@ import TournamentStatsScreen from '../screens/TournamentStatsScreen';
 import FullBracketScreen from '../screens/FullBracketScreen';
 import PublicLiveMatchScreen from '../screens/PublicLiveMatchScreen';
 import LiveAuctionScreen from '../screens/LiveAuctionScreen';
+import TournamentLinkScreen from '../screens/TournamentLinkScreen';
 
 // Tab Navigator
 import BottomTabNavigator from '../components/BottomTabNavigator';
 
 const Stack = createNativeStackNavigator();
+
+// Deep links: a shared tournament link (https://cric-zone.com/tournament/:id or
+// criczone://tournament/:id) opens the TournamentLink resolver screen, which
+// routes on to the live schedule. Works installed-app → app; the web page
+// handles the not-installed case (store redirect).
+const linking = {
+  prefixes: ['criczone://', 'https://cric-zone.com', 'https://www.cric-zone.com'],
+  config: {
+    screens: {
+      TournamentLink: 'tournament/:shareId',
+    },
+  },
+};
 
 const AppNavigator = () => {
   const { user, loading } = useContext(AuthContext);
@@ -42,7 +56,7 @@ const AppNavigator = () => {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
@@ -68,6 +82,7 @@ const AppNavigator = () => {
             <Stack.Screen name="FullBracket" component={FullBracketScreen} />
             <Stack.Screen name="PublicLiveMatch" component={PublicLiveMatchScreen} />
             <Stack.Screen name="LiveAuction" component={LiveAuctionScreen} />
+            <Stack.Screen name="TournamentLink" component={TournamentLinkScreen} />
           </>
         ) : (
           // Non-authenticated user screens
@@ -77,6 +92,7 @@ const AppNavigator = () => {
             <Stack.Screen name="ScoreCard" component={ScoreCardScreen} />
             <Stack.Screen name="SuperOver" component={SuperOverScreen} />
             <Stack.Screen name="FullScorecard" component={FullScorecardScreen} />
+            <Stack.Screen name="TournamentLink" component={TournamentLinkScreen} />
           </>
         )}
       </Stack.Navigator>

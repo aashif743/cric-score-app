@@ -164,3 +164,75 @@ exports.getLiveMatches = async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to fetch live matches." });
   }
 };
+
+// Featured tournaments for the dashboard feed. Only tournaments the owner has
+// explicitly opted in (`listed: true`) and not made private — so the feed stays
+// curated and never fills with test/junk. Shown BEFORE play starts (upcoming)
+// and during the event (live / ongoing), with a lightweight payload + each
+// tournament's live/completed match counts and a derived status.
+let featuredCache = { data: null, exp: 0 };
+exports.getFeaturedTournaments = async (req, res) => {
+  try {
+    if (featuredCache.data && Date.now() < featuredCache.exp) {
+      return res.json({ success: true, data: featuredCache.data });
+    }
+
+    const tournaments = await Tournament.find({ approved: true, visibility: { $ne: "private" } })
+      .select("name logoUrl format status numberOfTeams teamNames venue shareId playersPerTeam totalOvers createdAt updatedAt")
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    if (!tournaments.length) {
+      featuredCache = { data: [], exp: Date.now() + LIVE_CACHE_TTL };
+      return res.json({ success: true, data: [] });
+    }
+
+    const ids = tournaments.map((t) => t._id);
+    const agg = await Match.aggregate([
+      { $match: { tournament: { $in: ids } } },
+      { $group: {
+        _id: "$tournament",
+        total: { $sum: 1 },
+        live: { $sum: { $cond: [{ $in: ["$status", ["in_progress", "innings_break"]] }, 1, 0] } },
+        completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+      } },
+    ]);
+    const byId = {};
+    agg.forEach((a) => { byId[String(a._id)] = a; });
+
+    const data = tournaments.map((t) => {
+      const m = byId[String(t._id)] || { total: 0, live: 0, completed: 0 };
+      // live → a match is on now; completed → every match done; ongoing → some
+      // done but none live; upcoming → nothing played yet.
+      const status = m.live > 0
+        ? "live"
+        : (m.total > 0 && m.completed >= m.total)
+          ? "completed"
+          : (m.completed > 0 ? "ongoing" : "upcoming");
+      return {
+        _id: t._id,
+        name: t.name,
+        logoUrl: t.logoUrl || "",
+        format: t.format,
+        venue: t.venue || "",
+        numberOfTeams: t.numberOfTeams || (t.teamNames || []).length,
+        totalMatches: m.total,
+        liveMatches: m.live,
+        completedMatches: m.completed,
+        status,
+        shareId: t.shareId || null,
+        updatedAt: t.updatedAt,
+      };
+    });
+
+    // Order: live → ongoing → upcoming → completed; most-recent within each.
+    const rank = { live: 0, ongoing: 1, upcoming: 2, completed: 3 };
+    data.sort((a, b) => (rank[a.status] - rank[b.status]) || (new Date(b.updatedAt) - new Date(a.updatedAt)));
+
+    featuredCache = { data, exp: Date.now() + LIVE_CACHE_TTL };
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error("Get featured tournaments error:", error);
+    return res.status(500).json({ success: false, error: "Failed to fetch tournaments." });
+  }
+};

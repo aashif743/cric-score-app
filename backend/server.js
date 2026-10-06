@@ -31,6 +31,7 @@ const liveRoutes = require("./routes/liveRoutes");
 const auctionRoutes = require("./routes/auctionRoutes");
 const appRoutes = require("./routes/appRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 
@@ -103,6 +104,7 @@ app.use("/api/live", liveRoutes);
 app.use("/api/auctions", auctionRoutes);
 app.use("/api/app", appRoutes);
 app.use("/api/uploads", uploadRoutes);
+app.use("/api/admin", adminRoutes);
 
 // MongoDB Connection — bounded pool + fast failover so a slow/broken DB rejects
 // quickly instead of hanging requests and exhausting sockets under load.

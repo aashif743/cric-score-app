@@ -12,6 +12,18 @@ const liveService = {
       throw error;
     }
   },
+
+  // Curated feed of owner-featured tournaments (upcoming + live) for the
+  // dashboard. Returns []; resolves successfully even when empty.
+  getFeaturedTournaments: async (token) => {
+    try {
+      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const response = await API.get('/live/tournaments', config);
+      return response.data?.data || [];
+    } catch (error) {
+      return [];
+    }
+  },
 };
 
 export default liveService;

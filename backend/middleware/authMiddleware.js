@@ -35,4 +35,19 @@ const protect = async (req, res, next) => {
   }
 };
 
-module.exports = { protect };
+// Gate for the admin panel. Must run AFTER `protect` (needs req.user). Rejects
+// anyone who isn't an active admin.
+const requireAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: 'Not authorized.' });
+  }
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, error: 'Admin access required.' });
+  }
+  if (req.user.status === 'disabled') {
+    return res.status(403).json({ success: false, error: 'Account disabled.' });
+  }
+  next();
+};
+
+module.exports = { protect, requireAdmin };

@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["U6ZHLMGQ3J.com.criczone.mobile"],
+        "components": [
+          { "/": "/tournament/*", "comment": "Shared tournament links open the CricZone app" }
+        ]
+      }
+    ]
+  }
+}

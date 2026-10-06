@@ -3,6 +3,7 @@
     "name": "CricZone",
     "slug": "CricZoneMobile",
     "version": "1.1.1",
+    "scheme": "criczone",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -16,6 +17,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.criczone.mobile",
       "buildNumber": "30",
+      "associatedDomains": [
+        "applinks:cric-zone.com",
+        "applinks:www.cric-zone.com"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "CricZone needs camera access to scan auction QR codes and capture scorecard images.",
         "NSPhotoLibraryUsageDescription": "CricZone needs photo library access to save and share scorecard images.",
@@ -41,6 +46,17 @@
       "package": "com.criczone.mobile",
       "edgeToEdgeEnabled": true,
       "versionCode": 4,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            { "scheme": "https", "host": "cric-zone.com", "pathPrefix": "/tournament" },
+            { "scheme": "https", "host": "www.cric-zone.com", "pathPrefix": "/tournament" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.WRITE_EXTERNAL_STORAGE",
