@@ -21,6 +21,7 @@ import QRScanModal from '../components/QRScanModal';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import GradientHeader from '../components/GradientHeader';
 import LogoPicker from '../components/LogoPicker';
+import ScheduleShareButton from '../components/ScheduleShareButton';
 import { colors, spacing, fontWeights, shadows } from '../utils/theme';
 
 // Dropdown Component (same pattern as MatchSetupScreen)
@@ -783,6 +784,19 @@ const TournamentCreateScreen = ({ navigation, route }) => {
               </View>
               <Text style={styles.logoHint}>Tap the box to add a tournament logo (optional)</Text>
             </View>
+
+            {/* Share / download the schedule (edit mode, once matches exist) */}
+            {isEditMode && (existingData?.matches || []).length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Schedule</Text>
+                <View style={styles.inputCard}>
+                  <Text style={styles.logoHint}>Share or download the full schedule as an image or PDF.</Text>
+                  <View style={{ marginTop: 10, alignItems: 'flex-start' }}>
+                    <ScheduleShareButton tournament={existingData} matches={existingData.matches} />
+                  </View>
+                </View>
+              </View>
+            )}
 
             {/* Import from auction */}
             <View style={styles.section}>

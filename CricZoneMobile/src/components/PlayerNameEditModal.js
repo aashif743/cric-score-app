@@ -79,9 +79,13 @@ const PlayerNameEditModal = ({
     .filter((n) => n && (!q || n.toLowerCase().startsWith(q)))
     .slice(0, 8);
   const mergeMatchSet = new Set(mergeMatches.map((n) => n.toLowerCase()));
+  // Show the FULL team line-up (e.g. all 11 from an auction import), INCLUDING
+  // players already assigned to another slot. Those are flagged "In XI" and
+  // can't be re-used (tapping one surfaces the duplicate warning) — but the
+  // scorer sees the whole squad at a glance, no typing needed.
   const teamMatches = (prioritySuggestions || [])
-    .filter((n) => n && !takenSet.has(n.trim().toLowerCase()) && !mergeMatchSet.has(n.toLowerCase()) && (!q || n.toLowerCase().startsWith(q)))
-    .slice(0, teamOnly ? 24 : 8);
+    .filter((n) => n && !mergeMatchSet.has(n.toLowerCase()) && (!q || n.toLowerCase().startsWith(q)))
+    .slice(0, teamOnly ? 24 : 10);
   const teamSet = new Set(teamMatches.map((n) => n.toLowerCase()));
   const generalSuggestions = suggestions.filter(
     (s) => !teamSet.has((s.name || '').toLowerCase())
@@ -337,17 +341,22 @@ const PlayerNameEditModal = ({
                             <Text style={styles.suggestionsLabel} numberOfLines={1}>{priorityLabel}</Text>
                             <View style={styles.savedPill}><Text style={styles.savedPillText}>Saved line-up</Text></View>
                           </View>
-                          {teamMatches.map((name, idx) => (
-                            <TouchableOpacity
-                              key={`team-${name}-${idx}`}
-                              style={styles.suggestionItem}
-                              onPress={() => handleSelectSuggestion({ name })}
-                              activeOpacity={0.7}
-                            >
-                              <Text style={styles.suggestionText} numberOfLines={1}>{name}</Text>
-                              <View style={styles.teamBadge}><Text style={styles.teamBadgeText}>Team</Text></View>
-                            </TouchableOpacity>
-                          ))}
+                          {teamMatches.map((name, idx) => {
+                            const taken = takenSet.has((name || '').trim().toLowerCase());
+                            return (
+                              <TouchableOpacity
+                                key={`team-${name}-${idx}`}
+                                style={styles.suggestionItem}
+                                onPress={() => (taken ? setValue(name) : handleSelectSuggestion({ name }))}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={[styles.suggestionText, taken && styles.suggestionTextTaken]} numberOfLines={1}>{name}</Text>
+                                {taken
+                                  ? <View style={styles.inXiBadge}><Text style={styles.inXiBadgeText}>In XI</Text></View>
+                                  : <View style={styles.teamBadge}><Text style={styles.teamBadgeText}>Team</Text></View>}
+                              </TouchableOpacity>
+                            );
+                          })}
                         </>
                       )}
 
@@ -514,6 +523,9 @@ const styles = StyleSheet.create({
   savedPillText: { fontSize: 9.5, fontWeight: '800', color: '#1d4ed8', letterSpacing: 0.3 },
   teamBadge: { backgroundColor: '#eff6ff', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginLeft: 8 },
   teamBadgeText: { fontSize: 10, color: '#1d4ed8', fontWeight: '700' },
+  suggestionTextTaken: { color: '#94a3b8' },
+  inXiBadge: { backgroundColor: '#f1f5f9', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginLeft: 8 },
+  inXiBadgeText: { fontSize: 10, color: '#64748b', fontWeight: '700' },
   mergePill: {
     backgroundColor: '#eef2ff', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2,
     borderWidth: 1, borderColor: '#c7d2fe', marginBottom: 6,

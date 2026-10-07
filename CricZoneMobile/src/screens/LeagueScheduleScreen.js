@@ -22,7 +22,6 @@ import TournamentTopTabs from '../components/TournamentTopTabs';
 import PointsTableView from '../components/PointsTableView';
 import { TeamCrest } from '../components/LogoPicker';
 import TournamentStatsView from '../components/TournamentStatsView';
-import ScheduleShareButton from '../components/ScheduleShareButton';
 import QualifierBracket from '../components/QualifierBracket';
 import BracketTeamPicker from '../components/BracketTeamPicker';
 import { slotSourceLabel, knockoutGameNumbers, groupSourceLabel } from '../utils/bracketLabels';
@@ -814,10 +813,6 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
         )
       ) : (
       <>
-      {/* Share the full schedule (all groups, rounds, playoffs) as image / PDF */}
-      <View style={{ paddingHorizontal: 16, paddingTop: 12, alignItems: 'flex-end' }}>
-        <ScheduleShareButton tournament={tournament} matches={matches} />
-      </View>
       {/* Stage tab strip — group / playoff filters, Matches page only */}
       <View style={styles.tabStripWrap}>
         <ScrollView

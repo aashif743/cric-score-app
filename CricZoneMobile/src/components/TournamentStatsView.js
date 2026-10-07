@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Animated, Easing } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Animated, Easing, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const MEDALS = {
@@ -55,30 +55,46 @@ const PlayerRow = ({ rank, name, team, matches, value, accent, delay }) => {
   );
 };
 
-const Leaderboard = ({ title, accent, unit, players, valueOf, delay }) => (
-  <Rise delay={delay} style={styles.card}>
-    <View style={styles.cardHead}>
-      <Text style={styles.cardTitle}>{title}</Text>
-      <View style={styles.unitChip}>
-        <Text style={[styles.unitChipText, { color: accent }]}>{unit}</Text>
+// Shows the top 5 by default; an expand button reveals the rest (up to 10).
+const Leaderboard = ({ title, accent, unit, players, valueOf, delay }) => {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? players : players.slice(0, 5);
+  return (
+    <Rise delay={delay} style={styles.card}>
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        <View style={styles.unitChip}>
+          <Text style={[styles.unitChipText, { color: accent }]}>{unit}</Text>
+        </View>
       </View>
-    </View>
-    {players.length === 0 ? (
-      <Text style={styles.empty}>No data yet — finish a match to see the leaders.</Text>
-    ) : players.map((p, i) => (
-      <PlayerRow
-        key={`${title}_${i}`}
-        rank={i + 1}
-        name={p.name}
-        team={p.team}
-        matches={p.innings}
-        value={valueOf(p)}
-        accent={accent}
-        delay={delay + 80 + i * 70}
-      />
-    ))}
-  </Rise>
-);
+      {players.length === 0 ? (
+        <Text style={styles.empty}>No data yet — finish a match to see the leaders.</Text>
+      ) : (
+        <>
+          {shown.map((p, i) => (
+            <PlayerRow
+              key={`${title}_${i}`}
+              rank={i + 1}
+              name={p.name}
+              team={p.team}
+              matches={p.innings}
+              value={valueOf(p)}
+              accent={accent}
+              delay={i < 5 ? delay + 80 + i * 70 : 0}
+            />
+          ))}
+          {players.length > 5 && (
+            <TouchableOpacity style={styles.showMoreBtn} onPress={() => setExpanded((v) => !v)} activeOpacity={0.7}>
+              <Text style={[styles.showMoreText, { color: accent }]}>
+                {expanded ? 'Show less ▲' : `Show top ${players.length} ▼`}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </>
+      )}
+    </Rise>
+  );
+};
 
 // Animated progress bar for the hero.
 const ProgressBar = ({ progress }) => {
@@ -209,6 +225,8 @@ const styles = StyleSheet.create({
   unitChip: { backgroundColor: '#f1f5f9', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   unitChipText: { fontSize: 9.5, fontWeight: '800', letterSpacing: 0.6 },
   empty: { fontSize: 13, color: '#94a3b8', fontStyle: 'italic', paddingVertical: 12 },
+  showMoreBtn: { marginTop: 8, paddingVertical: 10, alignItems: 'center', borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+  showMoreText: { fontSize: 13, fontWeight: '800', letterSpacing: 0.2 },
 
   // Row
   row: {

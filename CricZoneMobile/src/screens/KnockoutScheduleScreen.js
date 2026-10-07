@@ -18,7 +18,6 @@ import GradientHeader from '../components/GradientHeader';
 import BracketTeamPicker from '../components/BracketTeamPicker';
 import Icon from '../components/Icon';
 import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
-import ScheduleShareButton from '../components/ScheduleShareButton';
 
 // Clean line-style settings gear (matches the league schedule screen).
 const SettingsIcon = ({ size = 20, color = '#475569' }) => (
@@ -381,11 +380,6 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
                 <SettingsIcon size={20} color="#475569" />
               </TouchableOpacity>
             ) : null}
-          </View>
-
-          {/* Share the full bracket (all rounds → final) as image / PDF */}
-          <View style={{ paddingHorizontal: 16, paddingBottom: 6, alignItems: 'flex-end' }}>
-            <ScheduleShareButton tournament={tournament} matches={matches} />
           </View>
 
           {/* Round Tabs (equal-width, fit-to-screen) */}

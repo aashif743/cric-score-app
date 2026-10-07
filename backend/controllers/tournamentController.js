@@ -655,7 +655,7 @@ exports.getTournamentStats = async (req, res) => {
           }
         },
         { $sort: { totalRuns: -1 } },
-        { $limit: 5 },
+        { $limit: 10 },
         {
           $project: {
             _id: 0,
@@ -706,7 +706,7 @@ exports.getTournamentStats = async (req, res) => {
           }
         },
         { $sort: { totalWickets: -1, totalRuns: 1 } },
-        { $limit: 5 },
+        { $limit: 10 },
         {
           $project: {
             _id: 0,
