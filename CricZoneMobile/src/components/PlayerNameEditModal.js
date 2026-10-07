@@ -67,7 +67,13 @@ const PlayerNameEditModal = ({
   // labelled section above the normal suggestions. Already-taken names are
   // dropped from every list so a duplicate can't be picked. General suggestions
   // that duplicate a team player are dropped so nothing appears twice.
-  const q = isPlaceholderName(value) ? '' : value.trim().toLowerCase();
+  // Until the user actually EDITS the field, show the WHOLE team line-up — don't
+  // prefix-filter by the name that's already in the box. So tapping a player to
+  // change their name immediately lists all of this team's players (no typing
+  // needed). Once they start typing (value diverges from the opened value),
+  // filter the list by what they type. A placeholder also shows everything.
+  const unedited = value === initialValue;
+  const q = (isPlaceholderName(value) || unedited) ? '' : value.trim().toLowerCase();
   // Existing bowlers this row can merge into (prefix-matched by the query).
   const mergeMatches = (allowMerge ? (mergeOptions || []) : [])
     .filter((n) => n && (!q || n.toLowerCase().startsWith(q)))
