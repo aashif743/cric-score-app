@@ -20,5 +20,6 @@ router.patch("/:id/swap-teams", protect, tournamentController.swapTeamGroups);
 router.patch("/:id/bracket-team", protect, tournamentController.setBracketTeam);
 router.patch("/:id/bracket-source", protect, tournamentController.setBracketSource);
 router.patch("/:id/playoff-format", protect, tournamentController.setPlayoffFormat);
+router.patch("/:id/reorder-matches", protect, tournamentController.reorderMatches);
 
 module.exports = router;

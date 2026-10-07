@@ -142,6 +142,14 @@ const tournamentService = {
     );
     return response.data;
   },
+
+  // Manually re-sequence a league's matches. `order` is an array of match IDs
+  // in the new display order.
+  reorderMatches: async (id, order, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(`/tournaments/${id}/reorder-matches`, { order }, config);
+    return response.data;
+  },
 };
 
 export default tournamentService;

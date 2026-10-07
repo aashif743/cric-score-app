@@ -9,6 +9,7 @@ import {
   Animated,
   Easing,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -715,9 +716,14 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
 
   const matchesForActiveTab = useMemo(() => {
     if (activeTab.kind === 'group') {
-      return groupMatches
-        .filter((m) => m.group === activeTab.id)
-        .sort((a, b) => (a.round || 0) - (b.round || 0));
+      const gm = groupMatches.filter((m) => m.group === activeTab.id);
+      // Use the owner's manual order if any match in the group has one set;
+      // otherwise fall back to the generated round order.
+      const hasOrder = gm.some((m) => m.order != null);
+      return gm.sort((a, b) =>
+        hasOrder
+          ? ((a.order ?? 1e9) - (b.order ?? 1e9))
+          : ((a.round || 0) - (b.round || 0)));
     }
     if (activeTab.kind === 'secondround') {
       // Only the pre-playoff knockout matches (they feed the Eliminator).
@@ -733,6 +739,34 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
       .filter((m) => m.round === activeTab.id)
       .sort((a, b) => (a.bracketSlot || 0) - (b.bracketSlot || 0));
   }, [activeTab, groupMatches, knockoutMatches, secondRoundMatches]);
+
+  // ── Manual match reordering (owner, group stage) ──
+  const [reorderOpen, setReorderOpen] = useState(false);
+  const [reorderList, setReorderList] = useState([]);
+  const [reorderSaving, setReorderSaving] = useState(false);
+  const openReorder = () => { setReorderList(matchesForActiveTab); setReorderOpen(true); };
+  const moveReorder = (i, dir) => {
+    const j = i + dir;
+    setReorderList((prev) => {
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  };
+  const saveReorder = async () => {
+    if (!tournament?._id || reorderSaving) return;
+    setReorderSaving(true);
+    try {
+      await tournamentService.reorderMatches(tournament._id, reorderList.map((m) => m._id), user.token);
+      setReorderOpen(false);
+      await fetchData({ silent: true });
+    } catch (e) {
+      Alert.alert('Could not save order', e?.error || e?.response?.data?.error || 'Please try again.');
+    } finally {
+      setReorderSaving(false);
+    }
+  };
 
   const onPressSettings = () => {
     if (!tournament?._id) return;
@@ -852,19 +886,26 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
             </Text>
           </View>
         ) : activeTab.kind === 'group' ? (
-          matchesForActiveTab.map((m, i) => (
-            <GroupMatchCard
-              key={m._id}
-              index={i}
-              ordinal={i + 1}
-              groupId={activeTab.id}
-              match={m}
-              onStart={handleStartMatch}
-              onPlaySuperOver={playSuperOver}
-              isOwner={isOwner}
-              logos={tournament?.teamLogos || {}}
-            />
-          ))
+          <>
+            {isOwner && matchesForActiveTab.length > 1 && (
+              <TouchableOpacity style={styles.reorderBtn} onPress={openReorder} activeOpacity={0.8}>
+                <Text style={styles.reorderBtnText}>⇅  Reorder matches</Text>
+              </TouchableOpacity>
+            )}
+            {matchesForActiveTab.map((m, i) => (
+              <GroupMatchCard
+                key={m._id}
+                index={i}
+                ordinal={i + 1}
+                groupId={activeTab.id}
+                match={m}
+                onStart={handleStartMatch}
+                onPlaySuperOver={playSuperOver}
+                isOwner={isOwner}
+                logos={tournament?.teamLogos || {}}
+              />
+            ))}
+          </>
         ) : activeTab.kind === 'secondround' ? (
           <>
             {/* Byes: teams that skip the 2nd round and go straight to Qualifier 1 */}
@@ -986,6 +1027,45 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
           />
         );
       })() : null}
+
+      {/* Manual match-order editor */}
+      <Modal visible={reorderOpen} transparent animationType="slide" onRequestClose={() => setReorderOpen(false)}>
+        <View style={styles.reorderOverlay}>
+          <View style={styles.reorderCard}>
+            <View style={styles.reorderHeader}>
+              <Text style={styles.reorderTitle}>Reorder matches</Text>
+              <TouchableOpacity onPress={() => setReorderOpen(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={styles.reorderClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.reorderHint}>Arrange the match order for this group. Use the arrows to move a match up or down.</Text>
+            <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ paddingBottom: 6 }}>
+              {reorderList.map((m, i) => (
+                <View key={m._id} style={styles.reorderRow}>
+                  <View style={styles.reorderNum}><Text style={styles.reorderNumText}>{i + 1}</Text></View>
+                  <Text style={styles.reorderMatch} numberOfLines={1}>
+                    {(m.teamA?.name || 'TBD')}  v  {(m.teamB?.name || 'TBD')}
+                  </Text>
+                  <TouchableOpacity style={styles.reorderArrow} onPress={() => moveReorder(i, -1)} disabled={i === 0}>
+                    <Text style={[styles.reorderArrowText, i === 0 && styles.reorderArrowDisabled]}>▲</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.reorderArrow} onPress={() => moveReorder(i, 1)} disabled={i === reorderList.length - 1}>
+                    <Text style={[styles.reorderArrowText, i === reorderList.length - 1 && styles.reorderArrowDisabled]}>▼</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+            <View style={styles.reorderActions}>
+              <TouchableOpacity style={styles.reorderCancel} onPress={() => setReorderOpen(false)} activeOpacity={0.8}>
+                <Text style={styles.reorderCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.reorderSave} onPress={saveReorder} disabled={reorderSaving} activeOpacity={0.85}>
+                <Text style={styles.reorderSaveText}>{reorderSaving ? 'Saving…' : 'Save order'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -993,6 +1073,30 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
 // --- Styles ----------------------------------------------------------------
 
 const styles = StyleSheet.create({
+  reorderBtn: {
+    alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#eef2ff', borderWidth: 1.5, borderColor: '#c7d2fe',
+    borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 12,
+  },
+  reorderBtnText: { color: '#4338ca', fontWeight: '800', fontSize: 13 },
+  reorderOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'flex-end' },
+  reorderCard: { backgroundColor: '#fff', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 22 },
+  reorderHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  reorderTitle: { fontSize: 18, fontWeight: '900', color: '#0f172a' },
+  reorderClose: { fontSize: 20, fontWeight: '700', color: '#94a3b8' },
+  reorderHint: { fontSize: 12.5, color: '#64748b', lineHeight: 18, marginTop: 6, marginBottom: 12 },
+  reorderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  reorderNum: { width: 26, height: 26, borderRadius: 8, backgroundColor: '#eef2ff', justifyContent: 'center', alignItems: 'center' },
+  reorderNumText: { fontSize: 12, fontWeight: '800', color: '#4338ca' },
+  reorderMatch: { flex: 1, fontSize: 14, fontWeight: '700', color: '#1e293b' },
+  reorderArrow: { width: 34, height: 34, borderRadius: 9, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center' },
+  reorderArrowText: { fontSize: 13, color: '#475569', fontWeight: '800' },
+  reorderArrowDisabled: { color: '#cbd5e1' },
+  reorderActions: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  reorderCancel: { flex: 1, height: 48, borderRadius: 12, borderWidth: 1.5, borderColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center' },
+  reorderCancelText: { fontSize: 15, fontWeight: '700', color: '#475569' },
+  reorderSave: { flex: 2, height: 48, borderRadius: 12, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center' },
+  reorderSaveText: { fontSize: 15, fontWeight: '800', color: '#fff' },
   container: { flex: 1, backgroundColor: '#f8fafc' },
 
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },

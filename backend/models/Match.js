@@ -371,6 +371,12 @@ const MatchSchema = new mongoose.Schema({
   group: {
     type: String,
     default: null
+  },
+  // Manual display/play order within a league group (owner-set). Null → fall
+  // back to the generated round order. Lower = earlier.
+  order: {
+    type: Number,
+    default: null
   }
 }, {
   timestamps: true,

@@ -360,7 +360,7 @@ exports.getTournamentById = async (req, res) => {
     // Include `tournament` so the FullScorecard "Next Match" button can
     // route the user back into the tournament flow (otherwise the field is
     // stripped and the button falls back to a Quick-match setup).
-    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot loserNextMatchId loserNextMatchSlot liveState superOver matchSummary tournament stage group matchLabel';
+    const BRACKET_FIELDS = 'round bracketSlot nextMatchId nextMatchSlot loserNextMatchId loserNextMatchSlot liveState superOver matchSummary tournament stage group matchLabel order';
     const [completedMatches, inProgressMatches] = await Promise.all([
       Match.find({ tournament: id, status: { $in: ["completed", "abandoned"] } })
         .select(`teamA teamB status result createdAt updatedAt totalOvers ballsPerOver playersPerTeam innings1.runs innings1.wickets innings1.overs innings1.battingTeam innings2.runs innings2.wickets innings2.overs innings2.battingTeam ${BRACKET_FIELDS}`)
@@ -1228,6 +1228,36 @@ exports.getTeamRosters = async (req, res) => {
   } catch (error) {
     console.error("Get team rosters error:", error);
     return res.status(500).json({ success: false, error: "Failed to load team rosters." });
+  }
+};
+
+// PATCH /tournaments/:id/reorder-matches  { order: [matchId, matchId, ...] }
+// Owner-only. Sets each listed match's `order` to its index, so the league
+// schedule can be manually re-sequenced (Match 1, 2, 3 …). Display-only — it
+// does NOT change rounds/groups, so auto-advance keeps working.
+exports.reorderMatches = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
+    }
+    const tournament = await Tournament.findById(id).select("user").lean();
+    if (!tournament) return res.status(404).json({ success: false, error: "Tournament not found" });
+    if (String(tournament.user) !== req.user.id) {
+      return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+    const order = Array.isArray(req.body.order) ? req.body.order : [];
+    const ops = order
+      .filter((mid) => mongoose.Types.ObjectId.isValid(mid))
+      .map((mid, i) => ({
+        updateOne: { filter: { _id: mid, tournament: id }, update: { $set: { order: i } } },
+      }));
+    if (!ops.length) return res.status(400).json({ success: false, error: "No valid matches to reorder." });
+    await Match.bulkWrite(ops);
+    return res.json({ success: true, data: { updated: ops.length } });
+  } catch (error) {
+    console.error("Reorder matches error:", error);
+    return res.status(500).json({ success: false, error: "Failed to reorder matches." });
   }
 };
 
