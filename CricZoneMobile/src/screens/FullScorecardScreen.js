@@ -209,6 +209,10 @@ const FullScorecardScreen = ({ navigation, route }) => {
   // rename picker suggests ONLY this team's players — never another team's.
   const [teamRosters, setTeamRosters] = useState({});
 
+  // Net Run Rate section is shown by default, but can be collapsed so the
+  // shareable top section fits more on one screen for a screenshot.
+  const [nrrCollapsed, setNrrCollapsed] = useState(false);
+
   // Owner-only player rename (fixes a mis-typed name after the match).
   const [renameModal, setRenameModal] = useState({
     visible: false, teamName: '', oldName: '', playerType: 'batsman', teamPlayers: [],
@@ -1385,13 +1389,23 @@ const FullScorecardScreen = ({ navigation, route }) => {
               },
             ]}
           >
-            <View style={styles.nrrHeader}>
+            <TouchableOpacity
+              style={[styles.nrrHeader, nrrCollapsed && styles.nrrHeaderCollapsed]}
+              onPress={() => setNrrCollapsed((v) => !v)}
+              activeOpacity={0.7}
+            >
               <View style={styles.nrrIconContainer}>
                 <Text style={styles.nrrIcon}>📊</Text>
               </View>
               <Text style={styles.nrrTitle}>Net Run Rate</Text>
-            </View>
+              <View style={{ flex: 1 }} />
+              <View style={styles.nrrChevron}>
+                <Text style={styles.nrrChevronText}>{nrrCollapsed ? '▸' : '▾'}</Text>
+              </View>
+            </TouchableOpacity>
 
+            {!nrrCollapsed && (
+            <>
             <View style={styles.nrrTeamsContainer}>
               {/* Team A NRR */}
               <View style={styles.nrrTeamCard}>
@@ -1456,6 +1470,8 @@ const FullScorecardScreen = ({ navigation, route }) => {
                   * All-out teams use full {nrrData.scheduledOvers} overs for NRR (ICC Rule)
                 </Text>
               </View>
+            )}
+            </>
             )}
           </Animated.View>
         )}
@@ -1985,8 +2001,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
+    padding: 14,
+    paddingBottom: 30,
   },
   loadingContainer: {
     flex: 1,
@@ -2062,9 +2078,9 @@ const styles = StyleSheet.create({
   },
   matchHeader: {
     backgroundColor: colors.surface,
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 16,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 10,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
@@ -2075,20 +2091,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 12,
   },
   teamContainer: {
     flex: 1,
     alignItems: 'center',
   },
   teamAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 6,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -2104,11 +2120,11 @@ const styles = StyleSheet.create({
     color: colors.surface,
   },
   teamName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.textPrimary,
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   teamScore: {
     fontSize: 22,
@@ -2132,8 +2148,8 @@ const styles = StyleSheet.create({
   matchInfoContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 32,
-    paddingTop: 16,
+    gap: 24,
+    paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: colors.borderLight,
   },
@@ -2156,9 +2172,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.primary,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 10,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
@@ -2166,13 +2182,13 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   resultIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: 12,
   },
   resultTextContainer: {
     flex: 1,
@@ -2193,9 +2209,9 @@ const styles = StyleSheet.create({
   // Net Run Rate Styles
   nrrContainer: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 10,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
@@ -2205,10 +2221,30 @@ const styles = StyleSheet.create({
   nrrHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 12,
+    marginBottom: 12,
+    paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
+  },
+  // When collapsed, the header has no bottom divider/gap (it's the only thing shown).
+  nrrHeaderCollapsed: {
+    marginBottom: 0,
+    paddingBottom: 0,
+    borderBottomWidth: 0,
+  },
+  nrrChevron: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceGray,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  nrrChevronText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textMuted,
+    lineHeight: 16,
   },
   nrrIconContainer: {
     width: 36,
@@ -2234,7 +2270,7 @@ const styles = StyleSheet.create({
   nrrTeamCard: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 4,
   },
   nrrTeamBadge: {
     width: 44,
