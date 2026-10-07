@@ -4886,6 +4886,23 @@ const ScoreCardScreen = ({ navigation, route }) => {
             <TouchableOpacity style={tieStyles.keepBtn} onPress={confirmMatchEnd} activeOpacity={0.8}>
               <Text style={tieStyles.keepText}>{isKnockoutMatch() ? 'Keep as Tie (decide later)' : 'Keep as a Tie'}</Text>
             </TouchableOpacity>
+
+            {/* Undo Last Ball — in case the scorer mis-marked the last delivery
+                that caused the tie. Reverts that ball and returns to scoring. */}
+            {undoHistory.length > 0 && (
+              <TouchableOpacity
+                style={inningsModalStyles.undoBtn}
+                onPress={() => {
+                  setShowTieModal(false);
+                  setPendingMatchEnd(null);
+                  handleUndo();
+                }}
+                activeOpacity={0.85}
+              >
+                <UndoArrowIcon color="#b91c1c" size={18} />
+                <Text style={inningsModalStyles.undoText}>Undo Last Ball</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
