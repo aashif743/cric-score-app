@@ -356,9 +356,9 @@ const PlayerNameEditModal = ({
                           </View>
                           {teamMatches.map((name, idx) => {
                             const taken = takenSet.has((name || '').trim().toLowerCase());
-                            // In live scoring, tapping a teammate who's already in the
-                            // XI swaps the two players; elsewhere it just shows why it's
-                            // blocked.
+                            // Tapping a name picks it; in live scoring, picking a
+                            // teammate already in use swaps the two players. No badges —
+                            // every team player is shown the same.
                             const onPress = () => {
                               if (!taken) return handleSelectSuggestion({ name });
                               if (allowSwap) { suggestionService.addSuggestion(name, type); onSave(name, { swap: true }); onClose(); return; }
@@ -371,12 +371,7 @@ const PlayerNameEditModal = ({
                                 onPress={onPress}
                                 activeOpacity={0.7}
                               >
-                                <Text style={[styles.suggestionText, taken && !allowSwap && styles.suggestionTextTaken]} numberOfLines={1}>{name}</Text>
-                                {taken
-                                  ? (allowSwap
-                                      ? <View style={styles.swapBadge}><Text style={styles.swapBadgeText}>Swap</Text></View>
-                                      : <View style={styles.inXiBadge}><Text style={styles.inXiBadgeText}>In XI</Text></View>)
-                                  : <View style={styles.teamBadge}><Text style={styles.teamBadgeText}>Team</Text></View>}
+                                <Text style={styles.suggestionText} numberOfLines={1}>{name}</Text>
                               </TouchableOpacity>
                             );
                           })}
