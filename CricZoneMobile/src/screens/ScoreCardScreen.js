@@ -717,14 +717,17 @@ const ScoreCardScreen = ({ navigation, route }) => {
       if (n && !isPlaceholderPlayerName(n, teamName) &&
           !out.some((x) => x.toLowerCase() === n.toLowerCase())) out.push(n);
     };
-    for (const inn of [matchData?.innings1, matchData?.innings2]) {
+    // Include the LIVE first innings (where names were actually entered this
+    // match) as well as the pre-generated roster — so in the 2nd innings each
+    // team's names (the side that bowled 1st now bats, and vice-versa) carry over.
+    for (const inn of [firstInningsData, matchData?.innings1, matchData?.innings2]) {
       if (!inn) continue;
       if (inn.battingTeam === teamName) (inn.batting || []).forEach((p) => push(p?.name));
       if (inn.bowlingTeam === teamName) (inn.bowling || []).forEach((p) => push(p?.name));
     }
     (teamRosters[teamName] || []).forEach(push);
     return out;
-  }, [matchData, teamRosters]);
+  }, [matchData, teamRosters, firstInningsData]);
 
   // Auto-fill a FRESH (not-yet-started) match's line-ups with each team's known
   // players, so names entered once carry over to later matches and show up in
@@ -766,7 +769,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
       setCurrentBowler((c) => filledBowl.find((b) => b.id === c?.id) || c);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamRosters, matchData?._id, allBatsmen.length, allBowlers.length]);
+  }, [teamRosters, matchData?._id, allBatsmen.length, allBowlers.length, match.innings, firstInningsData]);
 
   // Get current batting and bowling team names
   const getBattingTeam = () => {
