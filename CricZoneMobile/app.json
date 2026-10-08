@@ -2,7 +2,7 @@
   "expo": {
     "name": "CricZone",
     "slug": "CricZoneMobile",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "scheme": "criczone",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "33",
+      "buildNumber": "34",
       "associatedDomains": [
         "applinks:cric-zone.com",
         "applinks:www.cric-zone.com"
@@ -45,7 +45,7 @@
       },
       "package": "com.criczone.mobile",
       "edgeToEdgeEnabled": true,
-      "versionCode": 4,
+      "versionCode": 34,
       "intentFilters": [
         {
           "action": "VIEW",

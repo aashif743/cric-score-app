@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 // app.json's "version" on every release — the update prompt compares this to the
 // latest version reported by the backend (GET /api/app/version) to decide
 // whether to nudge the user to update.
-export const APP_VERSION = '1.0.5';
+export const APP_VERSION = '1.1.2';
 
 // Fallback store links (used only if the backend doesn't return one).
 export const STORE_URLS = {
