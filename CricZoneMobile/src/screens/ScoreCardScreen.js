@@ -22,6 +22,7 @@ import { AuthContext } from '../context/AuthContext';
 import matchService from '../utils/matchService';
 import suggestionService from '../utils/suggestionService';
 import tournamentService from '../utils/tournamentService';
+import { shortenName } from '../utils/nameDisplay';
 import AutocompleteInput from '../components/AutocompleteInput';
 import PlayerNameEditModal from '../components/PlayerNameEditModal';
 import StrikerSelectModal from '../components/StrikerSelectModal';
@@ -3635,7 +3636,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                   {firstInningsData.batting?.filter(b => b.balls > 0 || b.runs > 0 || b.isOut).map((batsman, index) => (
                     <View key={batsman.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
                       <View style={styles.scorecardNameCol}>
-                        <Text style={styles.scorecardPlayerNameText}>{batsman.name}</Text>
+                        <Text style={styles.scorecardPlayerNameText}>{shortenName(batsman.name)}</Text>
                         <Text style={[
                           styles.scorecardPlayerStatus,
                           batsman.isOut && styles.scorecardPlayerStatusOut
@@ -3689,7 +3690,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                     return (
                       <View key={bowler.id} style={[styles.scorecardTableRow, index % 2 === 0 && styles.scorecardTableRowAlt]}>
                         <View style={styles.scorecardNameCol}>
-                          <Text style={styles.scorecardPlayerNameText}>{bowler.name}</Text>
+                          <Text style={styles.scorecardPlayerNameText}>{shortenName(bowler.name)}</Text>
                         </View>
                         <Text style={styles.scorecardStatText}>{bowler.overs}</Text>
                         <Text style={styles.scorecardStatText}>{bowler.maidens}</Text>
@@ -3770,7 +3771,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           activeOpacity={0.6}
                         >
                           <Text style={styles.scorecardPlayerNameEditable} numberOfLines={1}>
-                            {batsman.name} <Text style={styles.scorecardEditPencil}>✎</Text>
+                            {shortenName(batsman.name)} <Text style={styles.scorecardEditPencil}>✎</Text>
                           </Text>
                         </TouchableOpacity>
                         <Text style={[
@@ -3799,7 +3800,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                       <Text style={styles.scorecardYetToBatNames}>
                         {allBatsmen
                           .filter(b => !b.balls && !b.runs && !b.isOut && b.id !== striker?.id && b.id !== nonStriker?.id && !b.isRetired)
-                          .map(b => b.name)
+                          .map(b => shortenName(b.name))
                           .join(', ')}
                       </Text>
                     </View>
@@ -3843,7 +3844,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                             activeOpacity={0.6}
                           >
                             <Text style={styles.scorecardPlayerNameEditable} numberOfLines={1}>
-                              {bowler.name} <Text style={styles.scorecardEditPencil}>✎</Text>
+                              {shortenName(bowler.name)} <Text style={styles.scorecardEditPencil}>✎</Text>
                             </Text>
                           </TouchableOpacity>
                           {bowler.id === currentBowler?.id && (
@@ -4025,7 +4026,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
               activeOpacity={0.7}
             >
               <Text style={styles.playerNameText} numberOfLines={1}>
-                {striker.name || 'Tap to edit'}
+                {striker?.name ? shortenName(striker.name) : 'Tap to edit'}
               </Text>
               <View style={styles.editIconSmall}>
                 <View style={styles.editPencilBody} />
@@ -4045,7 +4046,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
               activeOpacity={0.7}
             >
               <Text style={styles.playerNameText} numberOfLines={1}>
-                {nonStriker.name || 'Tap to edit'}
+                {nonStriker?.name ? shortenName(nonStriker.name) : 'Tap to edit'}
               </Text>
               <View style={styles.editIconSmall}>
                 <View style={styles.editPencilBody} />
@@ -4071,7 +4072,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                 activeOpacity={0.7}
               >
                 <Text style={styles.bowlerNameText} numberOfLines={1}>
-                  {currentBowler.name || 'Tap to edit'}
+                  {currentBowler?.name ? shortenName(currentBowler.name) : 'Tap to edit'}
                 </Text>
                 <View style={styles.editIconSmall}>
                   <View style={styles.editPencilBody} />
@@ -4336,7 +4337,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                             styles.batsmanCardCompactName,
                             runOutBatsman === 'striker' && styles.batsmanCardCompactNameSelected,
                           ]}>
-                            {striker.name}
+                            {shortenName(striker.name)}
                           </Text>
                           <Text style={styles.batsmanCardCompactRole}>Striker</Text>
                         </View>
@@ -4362,7 +4363,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                             styles.batsmanCardCompactName,
                             runOutBatsman === 'nonStriker' && styles.batsmanCardCompactNameSelected,
                           ]}>
-                            {nonStriker.name}
+                            {shortenName(nonStriker.name)}
                           </Text>
                           <Text style={styles.batsmanCardCompactRole}>Non-Striker</Text>
                         </View>
@@ -4580,7 +4581,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                         styles.bowlerOptionName,
                         isPreviousBowler && styles.bowlerOptionNameDisabled,
                       ]}>
-                        {bowler.name}
+                        {shortenName(bowler.name)}
                       </Text>
                       {isPreviousBowler && (
                         <Text style={styles.previousBowlerLabel}>Last Over</Text>
@@ -5051,7 +5052,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           styles.batsmanCardName,
                           wideNoBallRunOutBatsman === 'striker' && styles.batsmanCardNameSelected,
                         ]}>
-                          {striker.name}
+                          {shortenName(striker.name)}
                         </Text>
                         <Text style={styles.batsmanCardRole}>Striker</Text>
                       </TouchableOpacity>
@@ -5075,7 +5076,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           styles.batsmanCardName,
                           wideNoBallRunOutBatsman === 'nonStriker' && styles.batsmanCardNameSelected,
                         ]}>
-                          {nonStriker.name}
+                          {shortenName(nonStriker.name)}
                         </Text>
                         <Text style={styles.batsmanCardRole}>Non-Striker</Text>
                       </TouchableOpacity>
@@ -5210,7 +5211,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           styles.batsmanCardName,
                           wideNoBallRunOutBatsman === 'striker' && styles.batsmanCardNameSelected,
                         ]}>
-                          {striker.name}
+                          {shortenName(striker.name)}
                         </Text>
                         <Text style={styles.batsmanCardRole}>Striker</Text>
                       </TouchableOpacity>
@@ -5234,7 +5235,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           styles.batsmanCardName,
                           wideNoBallRunOutBatsman === 'nonStriker' && styles.batsmanCardNameSelected,
                         ]}>
-                          {nonStriker.name}
+                          {shortenName(nonStriker.name)}
                         </Text>
                         <Text style={styles.batsmanCardRole}>Non-Striker</Text>
                       </TouchableOpacity>
@@ -5369,7 +5370,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           styles.batsmanCardName,
                           byeRunOutBatsman === 'striker' && styles.batsmanCardNameSelected,
                         ]}>
-                          {striker.name}
+                          {shortenName(striker.name)}
                         </Text>
                         <Text style={styles.batsmanCardRole}>Striker</Text>
                       </TouchableOpacity>
@@ -5393,7 +5394,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                           styles.batsmanCardName,
                           byeRunOutBatsman === 'nonStriker' && styles.batsmanCardNameSelected,
                         ]}>
-                          {nonStriker.name}
+                          {shortenName(nonStriker.name)}
                         </Text>
                         <Text style={styles.batsmanCardRole}>Non-Striker</Text>
                       </TouchableOpacity>
@@ -5665,7 +5666,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                       <Text style={[
                         styles.retireBatsmanName,
                         retireBatsman === 'striker' && styles.retireBatsmanNameSelected,
-                      ]}>{striker.name}</Text>
+                      ]}>{shortenName(striker.name)}</Text>
                       <View style={styles.retireBatsmanStatsRow}>
                         <Text style={[
                           styles.retireBatsmanRuns,
@@ -5725,7 +5726,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
                       <Text style={[
                         styles.retireBatsmanName,
                         retireBatsman === 'nonStriker' && styles.retireBatsmanNameSelected,
-                      ]}>{nonStriker.name}</Text>
+                      ]}>{shortenName(nonStriker.name)}</Text>
                       <View style={styles.retireBatsmanStatsRow}>
                         <Text style={[
                           styles.retireBatsmanRuns,
