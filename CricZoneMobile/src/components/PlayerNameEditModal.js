@@ -48,6 +48,11 @@ const PlayerNameEditModal = ({
   // name pool (which includes the opposing team & other tournaments), so a
   // scorer can't accidentally pick an opponent's player.
   teamOnly = false,
+  // Live scoring: picking a teammate's name (already used by another slot) SWAPS
+  // the two players instead of being blocked — so the scorer can change who's in
+  // the lineup. onSave is called with { swap: true }; the parent does the swap
+  // (and refuses if the other player already has stats).
+  allowSwap = false,
 }) => {
   const [value, setValue] = useState(initialValue);
   const [suggestions, setSuggestions] = useState([]);
@@ -59,7 +64,8 @@ const PlayerNameEditModal = ({
   const takenSet = new Set((takenNames || []).map((n) => (n || '').trim().toLowerCase()));
   const mergeSet = new Set((allowMerge ? (mergeOptions || []) : []).map((n) => (n || '').trim().toLowerCase()));
   const trimmed = value.trim();
-  const isDuplicate = trimmed.length > 0 && takenSet.has(trimmed.toLowerCase());
+  // In swap mode a "taken" name isn't a duplicate — it's a swap target.
+  const isDuplicate = !allowSwap && trimmed.length > 0 && takenSet.has(trimmed.toLowerCase());
   // Typed name matches an existing bowler → this will MERGE (not blocked).
   const isMergeTarget = trimmed.length > 0 && mergeSet.has(trimmed.toLowerCase());
 
@@ -171,7 +177,14 @@ const PlayerNameEditModal = ({
     const trimmedName = nameToSave.trim();
     if (!trimmedName) { onClose(); return; }
     if (takenSet.has(trimmedName.toLowerCase())) {
-      // Genuine duplicate — keep the modal open so the warning is visible.
+      // A teammate already uses this name. In live scoring we SWAP the two
+      // players; otherwise it's a genuine duplicate — keep the warning visible.
+      if (allowSwap) {
+        suggestionService.addSuggestion(trimmedName, type);
+        onSave(trimmedName, { swap: true });
+        onClose();
+        return;
+      }
       inputRef.current?.focus();
       return;
     }
@@ -343,16 +356,26 @@ const PlayerNameEditModal = ({
                           </View>
                           {teamMatches.map((name, idx) => {
                             const taken = takenSet.has((name || '').trim().toLowerCase());
+                            // In live scoring, tapping a teammate who's already in the
+                            // XI swaps the two players; elsewhere it just shows why it's
+                            // blocked.
+                            const onPress = () => {
+                              if (!taken) return handleSelectSuggestion({ name });
+                              if (allowSwap) { suggestionService.addSuggestion(name, type); onSave(name, { swap: true }); onClose(); return; }
+                              setValue(name);
+                            };
                             return (
                               <TouchableOpacity
                                 key={`team-${name}-${idx}`}
                                 style={styles.suggestionItem}
-                                onPress={() => (taken ? setValue(name) : handleSelectSuggestion({ name }))}
+                                onPress={onPress}
                                 activeOpacity={0.7}
                               >
-                                <Text style={[styles.suggestionText, taken && styles.suggestionTextTaken]} numberOfLines={1}>{name}</Text>
+                                <Text style={[styles.suggestionText, taken && !allowSwap && styles.suggestionTextTaken]} numberOfLines={1}>{name}</Text>
                                 {taken
-                                  ? <View style={styles.inXiBadge}><Text style={styles.inXiBadgeText}>In XI</Text></View>
+                                  ? (allowSwap
+                                      ? <View style={styles.swapBadge}><Text style={styles.swapBadgeText}>Swap</Text></View>
+                                      : <View style={styles.inXiBadge}><Text style={styles.inXiBadgeText}>In XI</Text></View>)
                                   : <View style={styles.teamBadge}><Text style={styles.teamBadgeText}>Team</Text></View>}
                               </TouchableOpacity>
                             );
@@ -526,6 +549,8 @@ const styles = StyleSheet.create({
   suggestionTextTaken: { color: '#94a3b8' },
   inXiBadge: { backgroundColor: '#f1f5f9', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginLeft: 8 },
   inXiBadgeText: { fontSize: 10, color: '#64748b', fontWeight: '700' },
+  swapBadge: { backgroundColor: '#eef2ff', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginLeft: 8 },
+  swapBadgeText: { fontSize: 10, color: '#4338ca', fontWeight: '800' },
   mergePill: {
     backgroundColor: '#eef2ff', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2,
     borderWidth: 1, borderColor: '#c7d2fe', marginBottom: 6,

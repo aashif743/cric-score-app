@@ -3344,12 +3344,37 @@ const ScoreCardScreen = ({ navigation, route }) => {
   };
 
   // Handle save from player name edit modal
-  const handlePlayerNameModalSave = (newName) => {
+  const handlePlayerNameModalSave = (newName, opts = {}) => {
     const { playerId, playerType } = playerNameEditModal;
     const clean = (newName || '').trim();
     if (!clean || playerId == null) return;
+    const isBowler = playerType === 'bowler';
 
-    if (playerType === 'bowler') {
+    // SWAP: the chosen name belongs to another player in the same role → the
+    // scorer wants to change the playing lineup. Exchange the two players' names
+    // (only if NEITHER has batted/bowled, so no stats move to the wrong person).
+    if (opts.swap) {
+      const list = isBowler ? (allBowlers || []) : (allBatsmen || []);
+      const me = list.find((p) => p.id === playerId);
+      const other = list.find((p) => p.id !== playerId && (p.name || '').trim().toLowerCase() === clean.toLowerCase());
+      if (me && other) {
+        const hasPlayed = isBowler
+          ? (p) => { const [o, b] = String(p.overs ?? '0.0').split('.').map(Number); return (o || 0) > 0 || (b || 0) > 0; }
+          : (p) => (p.balls || 0) > 0 || (p.runs || 0) > 0 || p.isOut;
+        if (hasPlayed(me) || hasPlayed(other)) {
+          Alert.alert('Can\'t swap', 'One of these players has already batted or bowled, so their names can\'t be swapped. Give a brand-new name instead.');
+          return;
+        }
+        const myOld = me.name;
+        handleUpdatePlayerName(playerId, clean, playerType === 'striker', isBowler);
+        handleUpdatePlayerName(other.id, myOld, false, isBowler);
+        setTimeout(() => saveProgressRef.current?.({ silent: true }), 60);
+        return;
+      }
+      // other not found → fall through to a normal rename.
+    }
+
+    if (isBowler) {
       handleUpdatePlayerName(playerId, clean, false, true);
     } else {
       handleUpdatePlayerName(playerId, clean, playerType === 'striker', false);
@@ -6107,6 +6132,7 @@ const ScoreCardScreen = ({ navigation, route }) => {
         priorityLabel={playerNameEditModal.teamLabel}
         takenNames={playerNameEditModal.takenNames}
         teamOnly={!!matchData?.tournament}
+        allowSwap={!!matchData?.tournament}
         onSave={handlePlayerNameModalSave}
         onClose={closePlayerNameModal}
       />
