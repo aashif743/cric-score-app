@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "31",
+      "buildNumber": "33",
       "associatedDomains": [
         "applinks:cric-zone.com",
         "applinks:www.cric-zone.com"
