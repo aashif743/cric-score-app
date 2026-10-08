@@ -40,7 +40,7 @@ const PlayerRow = ({ rank, name, team, matches, value, accent, delay }) => {
         <Text style={[styles.rankText, medal && { color: medal.fg }]}>{rank}</Text>
       </View>
       <View style={styles.rowMid}>
-        <Text style={styles.rowName} numberOfLines={1}>{name}</Text>
+        <Text style={styles.rowName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.55}>{name}</Text>
         <View style={styles.rowSub}>
           {team ? <Text style={styles.rowTeam} numberOfLines={1}>{team}</Text> : null}
           {matches ? (
