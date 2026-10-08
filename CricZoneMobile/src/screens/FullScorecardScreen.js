@@ -23,6 +23,7 @@ import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system';
 import Icon from '../components/Icon';
+import { shortenName, shortenList } from '../utils/nameDisplay';
 
 // Import logo
 const criczoneLogo = require('../../assets/logo/criczone_icon.png');
@@ -892,6 +893,9 @@ const FullScorecardScreen = ({ navigation, route }) => {
     const playedBatsmen = (batting || []).filter(
       b => (b.balls || 0) > 0 || (b.runs || 0) > 0 || b.isOut === true
     );
+    // Short display names (full names stay stored; rename still gets the full).
+    const shortNames = shortenList((batting || []).map((b) => b.name));
+    const shortOf = (b) => shortNames[(batting || []).indexOf(b)] ?? shortenName(b.name);
 
     if (playedBatsmen.length === 0) {
       return (
@@ -917,10 +921,10 @@ const FullScorecardScreen = ({ navigation, route }) => {
             <View style={styles.nameColumn}>
               {isOwner ? (
                 <TouchableOpacity onPress={() => openRename('batsman', teamName, batsman.name)} activeOpacity={0.6}>
-                  <Text style={[styles.playerName, styles.editablePlayerName]}>{batsman.name} <Text style={styles.renamePencil}>✎</Text></Text>
+                  <Text style={[styles.playerName, styles.editablePlayerName]}>{shortOf(batsman)} <Text style={styles.renamePencil}>✎</Text></Text>
                 </TouchableOpacity>
               ) : (
-                <Text style={styles.playerName}>{batsman.name}</Text>
+                <Text style={styles.playerName}>{shortOf(batsman)}</Text>
               )}
               <Text style={[styles.playerStatus, batsman.isOut && styles.playerStatusOut]}>
                 {batsman.status || (batsman.isOut ? 'Out' : 'Not Out')}
@@ -945,6 +949,8 @@ const FullScorecardScreen = ({ navigation, route }) => {
       const [whole, part] = b.overs.toString().split('.').map(Number);
       return (whole || 0) > 0 || (part || 0) > 0;
     });
+    const shortNames = shortenList((bowling || []).map((b) => b.name));
+    const shortOf = (b) => shortNames[(bowling || []).indexOf(b)] ?? shortenName(b.name);
 
     if (bowledBowlers.length === 0) {
       return (
@@ -969,10 +975,10 @@ const FullScorecardScreen = ({ navigation, route }) => {
           <AnimatedTableRow key={index} delay={index * 50} style={styles.tableRow}>
             {isOwner ? (
               <TouchableOpacity style={styles.nameColumn} onPress={() => openRename('bowler', teamName, bowler.name)} activeOpacity={0.6}>
-                <Text style={[styles.playerName, styles.editablePlayerName]}>{bowler.name} <Text style={styles.renamePencil}>✎</Text></Text>
+                <Text style={[styles.playerName, styles.editablePlayerName]}>{shortOf(bowler)} <Text style={styles.renamePencil}>✎</Text></Text>
               </TouchableOpacity>
             ) : (
-              <Text style={[styles.playerName, styles.nameColumn]}>{bowler.name}</Text>
+              <Text style={[styles.playerName, styles.nameColumn]}>{shortOf(bowler)}</Text>
             )}
             <Text style={styles.statText}>{bowler.overs || '0.0'}</Text>
             <Text style={styles.statText}>{bowler.maidens || 0}</Text>
@@ -1041,7 +1047,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
               <View style={styles.fowDetails}>
                 <Text style={styles.fowScore}>{wicket.score}</Text>
                 <Text style={styles.fowInfo}>
-                  {wicket.batsman_name} ({wicket.over} ov)
+                  {shortenName(wicket.batsman_name)} ({wicket.over} ov)
                 </Text>
               </View>
             </View>
@@ -1753,7 +1759,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
                       .map((batsman, idx) => (
                         <View key={idx} style={styles.shareableTableRow}>
                           <Text style={[styles.shareableTableCell, styles.shareableNameCol]} numberOfLines={1}>
-                            {batsman.name}
+                            {shortenName(batsman.name)}
                           </Text>
                           <Text style={[styles.shareableTableCell, styles.shareableRunsCell]}>{batsman.runs || 0}</Text>
                           <Text style={styles.shareableTableCell}>{batsman.balls || 0}</Text>
@@ -1779,7 +1785,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
                       .map((bowler, idx) => (
                         <View key={idx} style={styles.shareableTableRow}>
                           <Text style={[styles.shareableTableCell, styles.shareableNameCol]} numberOfLines={1}>
-                            {bowler.name}
+                            {shortenName(bowler.name)}
                           </Text>
                           <Text style={styles.shareableTableCell}>{bowler.overs || '0.0'}</Text>
                           <Text style={styles.shareableTableCell}>{bowler.maidens || 0}</Text>
@@ -1839,7 +1845,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
                       .map((batsman, idx) => (
                         <View key={idx} style={styles.shareableTableRow}>
                           <Text style={[styles.shareableTableCell, styles.shareableNameCol]} numberOfLines={1}>
-                            {batsman.name}
+                            {shortenName(batsman.name)}
                           </Text>
                           <Text style={[styles.shareableTableCell, styles.shareableRunsCell]}>{batsman.runs || 0}</Text>
                           <Text style={styles.shareableTableCell}>{batsman.balls || 0}</Text>
@@ -1865,7 +1871,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
                       .map((bowler, idx) => (
                         <View key={idx} style={styles.shareableTableRow}>
                           <Text style={[styles.shareableTableCell, styles.shareableNameCol]} numberOfLines={1}>
-                            {bowler.name}
+                            {shortenName(bowler.name)}
                           </Text>
                           <Text style={styles.shareableTableCell}>{bowler.overs || '0.0'}</Text>
                           <Text style={styles.shareableTableCell}>{bowler.maidens || 0}</Text>
