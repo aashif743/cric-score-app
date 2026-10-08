@@ -1,5 +1,6 @@
 import React from "react";
 import styled, { keyframes, css, createGlobalStyle } from "styled-components";
+import { shortenName } from "../../utils/nameDisplay";
 
 // Presentational live scoreboard used by both the per-match TV page and the
 // tournament TV page. `title` is the header text (team-vs-team, or a tournament
@@ -69,14 +70,14 @@ const LiveBoard = ({ data, connected, title }) => {
           <CardTitle>Batting</CardTitle>
           {data.striker && (
             <PRow $striker>
-              <PName>{data.striker.name}<Star>●</Star></PName>
+              <PName>{shortenName(data.striker.name)}<Star>●</Star></PName>
               <PScore>{data.striker.runs}<em> ({data.striker.balls})</em></PScore>
               <PMeta>SR {data.striker.strikeRate} · 4s {data.striker.fours} · 6s {data.striker.sixes}</PMeta>
             </PRow>
           )}
           {data.nonStriker && (
             <PRow>
-              <PName>{data.nonStriker.name}</PName>
+              <PName>{shortenName(data.nonStriker.name)}</PName>
               <PScore>{data.nonStriker.runs}<em> ({data.nonStriker.balls})</em></PScore>
               <PMeta>SR {data.nonStriker.strikeRate} · 4s {data.nonStriker.fours} · 6s {data.nonStriker.sixes}</PMeta>
             </PRow>
@@ -88,7 +89,7 @@ const LiveBoard = ({ data, connected, title }) => {
           <CardTitle>Bowling · {bowlingTeam}</CardTitle>
           {data.bowler ? (
             <PRow>
-              <PName>{data.bowler.name}</PName>
+              <PName>{shortenName(data.bowler.name)}</PName>
               <PScore>{data.bowler.wickets}-{data.bowler.runs}<em> ({data.bowler.overs})</em></PScore>
               <PMeta>Econ {data.bowler.economy} · Maidens {data.bowler.maidens}</PMeta>
             </PRow>

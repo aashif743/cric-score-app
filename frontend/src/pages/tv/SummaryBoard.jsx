@@ -1,5 +1,6 @@
 import React from "react";
 import styled, { keyframes } from "styled-components";
+import { shortenName } from "../../utils/nameDisplay";
 import { NoScroll, TvScreen } from "./LiveBoard";
 import brand from "../../assets/criczone_icon.png";
 
@@ -57,7 +58,7 @@ const SummaryBoard = ({ summary, title, variant = "tv" }) => {
                 <SecLabel $c={bat.main}>Batting</SecLabel>
                 {inn.topBatters.length ? inn.topBatters.map((b, j) => (
                   <Row key={j}>
-                    <Nm>{b.name}</Nm>
+                    <Nm>{shortenName(b.name)}</Nm>
                     <Chip><b>{b.runs}{b.notOut ? "*" : ""}</b><Sub>({b.balls})</Sub></Chip>
                   </Row>
                 )) : <Row><Nm>—</Nm></Row>}
@@ -70,7 +71,7 @@ const SummaryBoard = ({ summary, title, variant = "tv" }) => {
                 <Section>
                   {inn.topBowlers.length ? inn.topBowlers.map((b, j) => (
                     <Row key={j}>
-                      <Nm>{b.name}</Nm>
+                      <Nm>{shortenName(b.name)}</Nm>
                       <Chip $bg={bowl.tint} $bd={bowl.border} $c={bowl.main}><b>{b.wickets}-{b.runs}</b><Sub $c={bowl.main}>({b.overs})</Sub></Chip>
                     </Row>
                   )) : <Row><Nm>—</Nm></Row>}

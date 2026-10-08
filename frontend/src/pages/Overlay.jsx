@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import io from "socket.io-client";
 import styled, { keyframes, css, createGlobalStyle } from "styled-components";
 import fullLogo from "../assets/criczone_full_logo.png";
+import { shortenName } from "../utils/nameDisplay";
 import SummaryBoard from "./tv/SummaryBoard";
 import { getBallType, formatBall } from "./tv/LiveBoard";
 
@@ -122,13 +123,13 @@ const LiveOverlay = ({ data, connected }) => {
           <BattersCell>
             {data.striker && (
               <PLine $on>
-                <StrikerArrow /><Nm>{data.striker.name}</Nm>
+                <StrikerArrow /><Nm>{shortenName(data.striker.name)}</Nm>
                 <Rn>{data.striker.runs}<em> ({data.striker.balls})</em></Rn>
               </PLine>
             )}
             {data.nonStriker && (
               <PLine>
-                <Nm>{data.nonStriker.name}</Nm>
+                <Nm>{shortenName(data.nonStriker.name)}</Nm>
                 <Rn>{data.nonStriker.runs}<em> ({data.nonStriker.balls})</em></Rn>
               </PLine>
             )}
@@ -136,7 +137,7 @@ const LiveOverlay = ({ data, connected }) => {
 
           {data.bowler && (
             <BowlerCell>
-              <Nm>{data.bowler.name}</Nm>
+              <Nm>{shortenName(data.bowler.name)}</Nm>
               <BowlFig>{data.bowler.wickets}-{data.bowler.runs} <em>({data.bowler.overs})</em></BowlFig>
             </BowlerCell>
           )}

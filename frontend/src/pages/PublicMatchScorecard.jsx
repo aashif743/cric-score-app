@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import publicService from "../services/publicService";
+import { shortenName } from "../utils/nameDisplay";
 import "./FullScorecard.css";
 
 const PublicMatchScorecard = () => {
@@ -157,7 +158,7 @@ const PublicMatchScorecard = () => {
               <span className="fow-score">
                 {wicket.score ?? "N/A"}-{wicket.wicket ?? "N/A"}
               </span>
-              {wicket.batsman_name && <span className="fow-batsman"> ({wicket.batsman_name})</span>}
+              {wicket.batsman_name && <span className="fow-batsman"> ({shortenName(wicket.batsman_name)})</span>}
               {wicket.over && <span className="fow-over"> - {wicket.over} ov</span>}
             </div>
           ))}
@@ -266,7 +267,7 @@ const PublicMatchScorecard = () => {
                 <tbody>
                   {playedBatsmen.map((batsman, index) => (
                     <tr key={`bat-${index}`}>
-                      <td className="player-name">{batsman.name}</td>
+                      <td className="player-name">{shortenName(batsman.name)}</td>
                       <td className="batsman-status">{batsman.status || "Did Not Bat"}</td>
                       <td>{batsman.runs || 0}</td>
                       <td>{batsman.balls || 0}</td>
@@ -299,7 +300,7 @@ const PublicMatchScorecard = () => {
                 <tbody>
                   {bowledBowlers.map((bowler, index) => (
                     <tr key={`bowl-${index}`}>
-                      <td className="player-name">{bowler.name}</td>
+                      <td className="player-name">{shortenName(bowler.name)}</td>
                       <td>{bowler.overs || "0.0"}</td>
                       <td>{bowler.maidens || 0}</td>
                       <td>{bowler.runs || 0}</td>
