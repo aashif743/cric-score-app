@@ -308,6 +308,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
     const clean = (newName || '').trim();
     if (!clean || clean === oldName) return;
     const merge = !!opts.merge && playerType === 'bowler';
+    const swap = !!opts.swap;
     const mid = matchData?._id || matchId;
     const eq = (a) => (a || '').trim().toLowerCase() === (oldName || '').trim().toLowerCase();
     const eqNew = (a) => (a || '').trim().toLowerCase() === clean.toLowerCase();
@@ -342,7 +343,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
 
     const undoSnap = snapshotScorecard(matchData);
     try {
-      await matchService.renamePlayer(mid, teamName, oldName, clean, playerType, user.token, merge);
+      await matchService.renamePlayer(mid, teamName, oldName, clean, playerType, user.token, merge, swap);
       setUndoStack((s) => [...s, undoSnap]);
 
       if (merge) {
@@ -370,6 +371,26 @@ const FullScorecardScreen = ({ navigation, route }) => {
           };
         };
         setMatchData((prev) => (prev ? { ...prev, innings1: mergeInn(prev.innings1), innings2: mergeInn(prev.innings2) } : prev));
+        return;
+      }
+
+      // Swap: exchange the two names everywhere for this team.
+      if (swap) {
+        const swapName = (n) => (eq(n) ? clean : (eqNew(n) ? oldName : n));
+        const swapInn = (inn) => {
+          if (!inn) return inn;
+          const copy = { ...inn };
+          if (inn.battingTeam === teamName) {
+            copy.batting = (inn.batting || []).map((b) => ({ ...b, name: swapName(b.name) }));
+            copy.fallOfWickets = (inn.fallOfWickets || []).map((f) => ({ ...f, batsman: swapName(f.batsman) }));
+          }
+          if (inn.bowlingTeam === teamName) {
+            copy.bowling = (inn.bowling || []).map((b) => ({ ...b, name: swapName(b.name) }));
+            copy.overHistory = (inn.overHistory || []).map((o) => ({ ...o, bowlerName: swapName(o.bowlerName) }));
+          }
+          return copy;
+        };
+        setMatchData((prev) => (prev ? { ...prev, innings1: swapInn(prev.innings1), innings2: swapInn(prev.innings2) } : prev));
         return;
       }
 
@@ -1927,6 +1948,7 @@ const FullScorecardScreen = ({ navigation, route }) => {
         allowMerge={renameModal.allowMerge}
         mergeOptions={renameModal.mergeOptions}
         teamOnly={!!(matchData?.tournament)}
+        allowSwap={isOwner}
         onSave={handleRenameSave}
         onClose={() => setRenameModal((m) => ({ ...m, visible: false }))}
       />

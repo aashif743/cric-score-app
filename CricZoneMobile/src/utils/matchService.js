@@ -70,9 +70,9 @@ const matchService = {
   // Rename a player across a completed match's scorecard (owner only). Pass
   // merge=true (bowlers only) to combine this row into an existing bowler of the
   // same name instead of rejecting the duplicate.
-  renamePlayer: async (matchId, teamName, oldName, newName, playerType, token, merge = false) => {
+  renamePlayer: async (matchId, teamName, oldName, newName, playerType, token, merge = false, swap = false) => {
     const config = { headers: { Authorization: `Bearer ${token}` } };
-    const response = await API.patch(`/matches/${matchId}/rename-player`, { teamName, oldName, newName, playerType, merge }, config);
+    const response = await API.patch(`/matches/${matchId}/rename-player`, { teamName, oldName, newName, playerType, merge, swap }, config);
     return response.data;
   },
 

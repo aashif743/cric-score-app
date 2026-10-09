@@ -990,6 +990,9 @@ exports.renamePlayer = async (req, res) => {
     // two bowler rows instead of rejecting the duplicate name. Only valid for
     // bowlers (a batsman can't bat twice, so their names stay unique).
     const merge = req.body?.merge === true && playerType === 'bowler';
+    // swap=true means the chosen name belongs to another player and the scorer
+    // wants to EXCHANGE the two (fix a mix-up) rather than be blocked.
+    const swap = req.body?.swap === true;
     if (!teamName || !oldName || !newName) {
       return res.status(400).json({ success: false, error: "teamName, oldName and newName are required" });
     }
@@ -1075,6 +1078,30 @@ exports.renamePlayer = async (req, res) => {
       match.markModified('innings2');
       await match.save();
       return res.json({ success: true, merged: true, data: { teamName, oldName, newName } });
+    }
+
+    // SWAP: the name belongs to another player and the scorer wants to exchange
+    // the two — swap oldName <-> newName everywhere for this team (batting,
+    // bowling, fall-of-wickets, over history). Stats stay on their row; only the
+    // name labels trade places, correcting a who-is-who mix-up.
+    if (clash && swap) {
+      const swapName = (n) => (eq(n, oldName) ? newName : (eq(n, newName) ? oldName : n));
+      let swapped = false;
+      innings.forEach((inn) => {
+        if (inn.battingTeam === teamName) {
+          (inn.batting || []).forEach((b) => { const nn = swapName(b.name); if (nn !== b.name) { b.name = nn; swapped = true; } });
+          (inn.fallOfWickets || []).forEach((f) => { const nn = swapName(f.batsman); if (nn !== f.batsman) { f.batsman = nn; swapped = true; } });
+        }
+        if (inn.bowlingTeam === teamName) {
+          (inn.bowling || []).forEach((b) => { const nn = swapName(b.name); if (nn !== b.name) { b.name = nn; swapped = true; } });
+          (inn.overHistory || []).forEach((o) => { const nn = swapName(o.bowlerName); if (nn !== o.bowlerName) { o.bowlerName = nn; swapped = true; } });
+        }
+      });
+      if (!swapped) return res.status(404).json({ success: false, error: "Couldn't find both players to swap." });
+      match.markModified('innings1');
+      match.markModified('innings2');
+      await match.save();
+      return res.json({ success: true, swapped: true, data: { teamName, oldName, newName } });
     }
 
     if (clash) {
