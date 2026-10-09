@@ -293,12 +293,16 @@ const FullScorecardScreen = ({ navigation, route }) => {
       oldName: currentName || '',
       playerType,
       teamPlayers: roster,
-      // Both batsmen AND bowlers: other same-role players are offered as SWAP
-      // targets — picking one exchanges the two names (fixes a mis-labelled
-      // player). A duplicate name is never created, and stats stay on their row.
-      takenNames: others,
-      allowMerge: false,
-      mergeOptions: [],
+      // Batsmen must stay unique (a batsman can't bat twice), so their other
+      // names are offered as SWAP targets (picking one exchanges the two).
+      // A bowler can bowl several overs, so another BOWLED bowler is offered as
+      // a MERGE target (combine the spells) — swapping two bowled bowlers could
+      // create an impossible over sequence. Changing a bowled bowler to a bowler
+      // who DIDN'T bowl is just a plain rename (that name isn't in the card, so
+      // there's no clash) — handled by typing/picking the non-bowled name.
+      takenNames: isBowler ? [] : others,
+      allowMerge: isBowler,
+      mergeOptions: isBowler ? others : [],
     });
   };
 
