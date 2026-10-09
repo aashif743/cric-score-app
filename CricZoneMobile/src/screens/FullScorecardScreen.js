@@ -293,12 +293,12 @@ const FullScorecardScreen = ({ navigation, route }) => {
       oldName: currentName || '',
       playerType,
       teamPlayers: roster,
-      // Batsmen must stay unique (a batsman can't bat twice), so their other
-      // names are blocked. A bowler can bowl several overs, so their other rows
-      // are offered as MERGE targets instead of being blocked.
-      takenNames: isBowler ? [] : others,
-      allowMerge: isBowler,
-      mergeOptions: isBowler ? others : [],
+      // Both batsmen AND bowlers: other same-role players are offered as SWAP
+      // targets — picking one exchanges the two names (fixes a mis-labelled
+      // player). A duplicate name is never created, and stats stay on their row.
+      takenNames: others,
+      allowMerge: false,
+      mergeOptions: [],
     });
   };
 
