@@ -214,7 +214,9 @@ const pulse = keyframes`0%,100%{opacity:1}50%{opacity:.35}`;
 /* Premium logo entrance + a slow gloss sweep that rests between passes. */
 const logoIn = keyframes`0%{transform:translateY(-130%) scale(.9);opacity:0}60%{transform:translateY(6%) scale(1.02);opacity:1}100%{transform:translateY(0) scale(1);opacity:1}`;
 const sheen = keyframes`0%{left:-70%}18%{left:140%}100%{left:140%}`;
-const floaty = keyframes`0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}`;
+/* Logo-specific: a spring-y pop in, then a slow, subtle breathe. */
+const logoPop = keyframes`0%{transform:scale(.5);opacity:0}70%{transform:scale(1.1);opacity:1}100%{transform:scale(1);opacity:1}`;
+const breathe = keyframes`0%,100%{transform:scale(1)}50%{transform:scale(1.05)}`;
 
 const ObsGlobal = createGlobalStyle`
   html, body, #root { margin:0; height:100%; background:transparent !important; overflow:hidden; }
@@ -228,12 +230,16 @@ const FONT = css`font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI'
 const CornerLogo = styled.div`
   position: fixed; top: 2.4vh; left: 2vw; z-index: 3;
   display: flex; align-items: center; justify-content: center; overflow: hidden;
-  padding: clamp(7px,1.2vh,15px) clamp(11px,1.5vw,22px); border-radius: 16px;
+  padding: clamp(4px,0.7vh,9px) clamp(7px,0.9vw,13px); border-radius: 14px;
   background: linear-gradient(135deg, #ffffff 0%, #eef2f7 100%);
   border: 1px solid rgba(255,255,255,.8);
   box-shadow: 0 12px 30px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.95);
-  animation: ${logoIn} .8s cubic-bezier(.2,.85,.3,1.15) both, ${floaty} 4.5s ease-in-out 1s infinite;
-  img { height: clamp(44px, 8.4vh, 108px); width: auto; object-fit: contain; display: block; }
+  animation: ${logoIn} .8s cubic-bezier(.2,.85,.3,1.15) both;
+  img {
+    height: clamp(56px, 10.5vh, 140px); width: auto; object-fit: contain; display: block;
+    transform-origin: center;
+    animation: ${logoPop} .7s cubic-bezier(.2,.8,.3,1.4) .25s both, ${breathe} 4s ease-in-out 1.1s infinite;
+  }
   &::after {
     content: ""; position: absolute; top: 0; bottom: 0; width: 45%;
     background: linear-gradient(100deg, transparent 0%, rgba(255,255,255,.85) 50%, transparent 100%);
