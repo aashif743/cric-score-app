@@ -125,7 +125,7 @@ const LiveOverlay = ({ data, connected }) => {
   return (
     <>
       {/* Screen corners: brand + live status */}
-      <CornerLogo src={fullLogo} alt="CricZone" />
+      <CornerLogo><img src={fullLogo} alt="CricZone" /></CornerLogo>
       <CornerRight>
         {done
           ? <ResultTag>RESULT</ResultTag>
@@ -211,6 +211,10 @@ const slideUp = keyframes`from{transform:translateY(120%);opacity:0}to{transform
 const dropIn = keyframes`from{transform:translateY(-120%);opacity:0}to{transform:translateY(0);opacity:1}`;
 const pop = keyframes`0%{transform:scale(1)}35%{transform:scale(1.16)}100%{transform:scale(1)}`;
 const pulse = keyframes`0%,100%{opacity:1}50%{opacity:.35}`;
+/* Premium logo entrance + a slow gloss sweep that rests between passes. */
+const logoIn = keyframes`0%{transform:translateY(-130%) scale(.9);opacity:0}60%{transform:translateY(6%) scale(1.02);opacity:1}100%{transform:translateY(0) scale(1);opacity:1}`;
+const sheen = keyframes`0%{left:-70%}18%{left:140%}100%{left:140%}`;
+const floaty = keyframes`0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}`;
 
 const ObsGlobal = createGlobalStyle`
   html, body, #root { margin:0; height:100%; background:transparent !important; overflow:hidden; }
@@ -219,9 +223,23 @@ const ObsGlobal = createGlobalStyle`
 
 const FONT = css`font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;`;
 
-const CornerLogo = styled.img`
-  position: fixed; top: 2.6vh; left: 2.4vw; height: clamp(64px, 13vh, 190px); width: auto; object-fit: contain;
-  filter: drop-shadow(0 6px 16px rgba(0,0,0,.5)); animation: ${dropIn} .6s ease both;
+/* Logo sits on a clean white card so it stays crisp over any video, with a
+   premium drop-in and a periodic gloss sweep + gentle float. */
+const CornerLogo = styled.div`
+  position: fixed; top: 2.4vh; left: 2vw; z-index: 3;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  padding: clamp(7px,1.2vh,15px) clamp(11px,1.5vw,22px); border-radius: 16px;
+  background: linear-gradient(135deg, #ffffff 0%, #eef2f7 100%);
+  border: 1px solid rgba(255,255,255,.8);
+  box-shadow: 0 12px 30px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.95);
+  animation: ${logoIn} .8s cubic-bezier(.2,.85,.3,1.15) both, ${floaty} 4.5s ease-in-out 1s infinite;
+  img { height: clamp(44px, 8.4vh, 108px); width: auto; object-fit: contain; display: block; }
+  &::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 45%;
+    background: linear-gradient(100deg, transparent 0%, rgba(255,255,255,.85) 50%, transparent 100%);
+    transform: skewX(-18deg); filter: blur(1px);
+    animation: ${sheen} 6s ease-in-out 1.2s infinite;
+  }
 `;
 const CornerRight = styled.div`position: fixed; top: 3vh; right: 2.6vw; animation: ${dropIn} .6s ease both; ${FONT}`;
 const LivePill = styled.div`
