@@ -11,6 +11,28 @@ const SOCKET_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 const POLL_MS = 2500;
 
+// Sample frame for previewing the overlay layout without a live match: open
+// /overlay/demo?demo=1 (any id works with ?demo). Exercises long names, the
+// chase line and both team crests (falls back to initials when no crest).
+const DEMO_PAYLOAD = {
+  mode: "live",
+  tournamentName: "Balangoda Indoor Premier League",
+  summary: null,
+  live: {
+    currentInnings: 2,
+    status: "in_progress",
+    battingTeam: "Smashers",
+    bowlingTeam: "Thunders",
+    runs: 72, wickets: 3, overs: "6.0", runRate: "12.00",
+    logos: {},
+    striker: { name: "Hiranya Deshapriya", runs: 34, balls: 19 },
+    nonStriker: { name: "Isuru Lakshan", runs: 21, balls: 14 },
+    bowler: { name: "Zamseer Ahamed", wickets: 1, runs: 28, overs: "2.0" },
+    thisOver: [1, 4, 0, 6, "W"],
+    requiredRuns: 60, ballsRemaining: 24, requiredRunRate: "15.00",
+  },
+};
+
 // Professional broadcast overlay for OBS. Single match (/overlay/:matchId) or a
 // whole tournament (/overlay/tournament/:tournamentId): auto-switches to each
 // new match and shows a full summary card between games.
@@ -18,9 +40,10 @@ const Overlay = () => {
   const params = useParams();
   const isTournament = !!params.tournamentId;
   const id = params.tournamentId || params.matchId;
+  const isDemo = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("demo");
 
-  const [payload, setPayload] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [payload, setPayload] = useState(isDemo ? DEMO_PAYLOAD : null);
+  const [connected, setConnected] = useState(isDemo);
   const payloadRef = useRef(null);
   useEffect(() => { payloadRef.current = payload; }, [payload]);
 
@@ -40,6 +63,7 @@ const Overlay = () => {
   }, [id, isTournament]);
 
   useEffect(() => {
+    if (isDemo) return; // preview mode: render sample data, no network
     fetchData();
     const socket = io(SOCKET_URL, {
       transports: ["websocket", "polling"],
@@ -66,7 +90,7 @@ const Overlay = () => {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [id, isTournament, fetchData]);
+  }, [id, isTournament, fetchData, isDemo]);
 
   if (!payload) return <ObsGlobal />;
 
@@ -82,18 +106,25 @@ const Overlay = () => {
   return <ObsGlobal />;
 };
 
+// Up-to-3-letter initials for a team with no uploaded crest.
+const initials = (name = "") =>
+  (name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase()) || "–";
+
 // ---- Live overlay ----------------------------------------------------------
 const LiveOverlay = ({ data, connected }) => {
   const isSecond = data.currentInnings === 2;
   const done = data.status === "completed";
   const battingTeam = data.battingTeam || data.teamA?.name || "Team";
+  const bowlingTeam = data.bowlingTeam || data.teamB?.name || "Team";
   const need = isSecond && data.requiredRuns != null ? Math.max(0, data.requiredRuns) : null;
   const scoreKey = `${data.runs}-${data.wickets}`;
-  const battingLogo = (data.logos && data.logos[battingTeam]) || "";
+  const logos = data.logos || {};
+  const battingLogo = logos[battingTeam] || "";
+  const bowlingLogo = logos[bowlingTeam] || "";
 
   return (
     <>
-      {/* Corners */}
+      {/* Screen corners: brand + live status */}
       <CornerLogo src={fullLogo} alt="CricZone" />
       <CornerRight>
         {done
@@ -104,11 +135,15 @@ const LiveOverlay = ({ data, connected }) => {
       {/* Lower-third scorebar */}
       <BarWrap>
         <Bar>
+          {/* Batting team crest — left corner */}
+          <SideLogoCell $batting title={battingTeam}>
+            {battingLogo
+              ? <SideLogo src={battingLogo} alt="" />
+              : <SideLogoFallback $batting>{initials(battingTeam)}</SideLogoFallback>}
+          </SideLogoCell>
+
           <ScoreCell>
-            <TeamNameRow>
-              {battingLogo ? <TeamLogo src={battingLogo} alt="" /> : null}
-              <TeamName>{battingTeam}</TeamName>
-            </TeamNameRow>
+            <TeamName>{battingTeam}</TeamName>
             <ScoreRow>
               <ScoreBig key={scoreKey}>{data.runs ?? 0}<i>/</i>{data.wickets ?? 0}</ScoreBig>
               <OversSide>{data.overs || "0.0"}<small> OV</small></OversSide>
@@ -137,7 +172,7 @@ const LiveOverlay = ({ data, connected }) => {
 
           {data.bowler && (
             <BowlerCell>
-              <Nm>{shortenName(data.bowler.name)}</Nm>
+              <NmB>{shortenName(data.bowler.name)}</NmB>
               <BowlFig>{data.bowler.wickets}-{data.bowler.runs} <em>({data.bowler.overs})</em></BowlFig>
             </BowlerCell>
           )}
@@ -145,7 +180,7 @@ const LiveOverlay = ({ data, connected }) => {
           <OverCell>
             <Balls>
               {data.thisOver && data.thisOver.length > 0
-                ? data.thisOver.slice(-10).map((b, i) => <Ball key={i} $type={getBallType(b)}>{formatBall(b)}</Ball>)
+                ? data.thisOver.slice(-9).map((b, i) => <Ball key={i} $type={getBallType(b)}>{formatBall(b)}</Ball>)
                 : <NewOver>New over</NewOver>}
             </Balls>
           </OverCell>
@@ -158,6 +193,13 @@ const LiveOverlay = ({ data, connected }) => {
               <RateSub>RRR {data.requiredRunRate || "-"}</RateSub>
             </RateCell>
           ) : null}
+
+          {/* Bowling team crest — right corner */}
+          <SideLogoCell $bowling title={bowlingTeam}>
+            {bowlingLogo
+              ? <SideLogo src={bowlingLogo} alt="" />
+              : <SideLogoFallback>{initials(bowlingTeam)}</SideLogoFallback>}
+          </SideLogoCell>
         </Bar>
       </BarWrap>
     </>
@@ -192,49 +234,67 @@ const ResultTag = styled.div`padding:.6vh 1vw;border-radius:999px;background:#63
 
 const BarWrap = styled.div`position: fixed; left: 0; right: 0; bottom: 2.6vh; display: flex; justify-content: center; ${FONT} animation: ${slideUp} .6s cubic-bezier(.18,.9,.32,1.1) both;`;
 const Bar = styled.div`
-  display: flex; align-items: stretch; height: clamp(58px, 10vh, 116px); width: 96vw;
+  display: flex; align-items: stretch; height: clamp(54px, 9.2vh, 104px); width: 96vw;
   border-radius: 14px; overflow: hidden; color: #fff;
   background: linear-gradient(180deg, rgba(15,23,42,.95), rgba(11,17,32,.97));
   border: 1px solid rgba(255,255,255,.12); box-shadow: 0 16px 44px rgba(0,0,0,.55); backdrop-filter: blur(6px);
 `;
-const Cell = styled.div`display: flex; flex-direction: column; justify-content: center; gap: .3vh; padding: 0 clamp(12px,1.4vw,30px); border-right: 1px solid rgba(255,255,255,.1);`;
-const CellLabel = styled.div`font-size: clamp(9px,1.3vh,17px); font-weight: 900; letter-spacing: 2px; color: #64748b;`;
+const Cell = styled.div`display: flex; flex-direction: column; justify-content: center; gap: .25vh; padding: 0 clamp(9px,1.1vw,22px); border-right: 1px solid rgba(255,255,255,.1); min-width: 0;`;
+const CellLabel = styled.div`font-size: clamp(8px,1.1vh,14px); font-weight: 900; letter-spacing: 1.6px; color: #64748b;`;
+
+/* Team crest cells frame the bar: batting on the left, bowling on the right. */
+const SideLogoCell = styled.div`
+  display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  padding: 0 clamp(7px,0.8vw,16px);
+  ${p => p.$batting && css`background: linear-gradient(135deg,#4f46e5,#7c3aed);`}
+  ${p => p.$bowling && css`background: rgba(255,255,255,.04); border-left: 1px solid rgba(255,255,255,.1);`}
+`;
+const SideLogo = styled.img`
+  height: clamp(28px,4.9vh,56px); width: clamp(28px,4.9vh,56px); border-radius: 50%;
+  object-fit: cover; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+`;
+const SideLogoFallback = styled.div`
+  height: clamp(28px,4.9vh,56px); width: clamp(28px,4.9vh,56px); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-weight: 900;
+  font-size: clamp(10px,1.7vh,20px); color: #fff; letter-spacing: .5px;
+  border: 2px solid rgba(255,255,255,.4);
+  background: ${p => p.$batting ? "rgba(255,255,255,.16)" : "linear-gradient(135deg,#1e293b,#334155)"};
+`;
 
 const ScoreCell = styled(Cell)`
-  flex: 1.25; align-items: center; justify-content: center; text-align: center; gap: .4vh; min-width: 0;
+  flex: 1.1; align-items: center; justify-content: center; text-align: center; gap: .3vh; min-width: 0;
   background: linear-gradient(135deg, #4f46e5, #7c3aed);
 `;
-const TeamNameRow = styled.div`display: flex; align-items: center; justify-content: center; gap: .6vw; max-width: 100%;`;
-const TeamLogo = styled.img`height: clamp(16px,3vh,40px); width: clamp(16px,3vh,40px); border-radius: 50%; object-fit: cover; background: #fff; flex-shrink: 0;`;
-const TeamName = styled.div`font-size: clamp(12px,2.2vh,30px); font-weight: 900; letter-spacing: .5px; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;`;
-const ScoreRow = styled.div`display: flex; align-items: baseline; justify-content: center; gap: 1.8vw;`;
-const ScoreBig = styled.div`font-size: clamp(26px,5.2vh,72px); font-weight: 900; line-height: 1; letter-spacing: -1px; animation: ${pop} .5s ease; i{ font-style:normal; color: rgba(255,255,255,.6); margin: 0 2px; }`;
-const OversSide = styled.div`font-size: clamp(15px,2.8vh,38px); font-weight: 900; color: rgba(255,255,255,.92); small{ font-size:.5em; font-weight:800; color: rgba(255,255,255,.8); letter-spacing:1px; }`;
-const CrrCell = styled(Cell)`flex: .6; min-width: 0; align-items: center; justify-content: center; text-align: center;`;
-const CrrNum = styled.div`font-size: clamp(18px,3.4vh,46px); font-weight: 900; color: #22c55e; line-height: 1.05;`;
+const TeamName = styled.div`font-size: clamp(10px,1.7vh,22px); font-weight: 900; letter-spacing: .4px; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;`;
+const ScoreRow = styled.div`display: flex; align-items: baseline; justify-content: center; gap: 1.4vw;`;
+const ScoreBig = styled.div`font-size: clamp(22px,4.4vh,56px); font-weight: 900; line-height: 1; letter-spacing: -1px; animation: ${pop} .5s ease; i{ font-style:normal; color: rgba(255,255,255,.6); margin: 0 2px; }`;
+const OversSide = styled.div`font-size: clamp(13px,2.4vh,30px); font-weight: 900; color: rgba(255,255,255,.92); small{ font-size:.5em; font-weight:800; color: rgba(255,255,255,.8); letter-spacing:1px; }`;
+const CrrCell = styled(Cell)`flex: .5; min-width: 0; align-items: center; justify-content: center; text-align: center;`;
+const CrrNum = styled.div`font-size: clamp(15px,2.9vh,36px); font-weight: 900; color: #22c55e; line-height: 1.05;`;
 
-const BattersCell = styled(Cell)`flex: 1.35; min-width: 0; justify-content: center; gap: .5vh;`;
+const BattersCell = styled(Cell)`flex: 1.4; min-width: 0; justify-content: center; gap: .4vh;`;
 const PLine = styled.div`
-  display: flex; align-items: center; gap: .5vw; font-size: clamp(13px,2.3vh,32px); color: ${p => p.$on ? "#fff" : "#cbd5e1"};
+  display: flex; align-items: center; gap: .5vw; font-size: clamp(11px,1.95vh,25px); color: ${p => p.$on ? "#fff" : "#cbd5e1"};
 `;
 /* Small green arrow marks the striker (no big highlight). */
 const StrikerArrow = styled.span`
   width: 0; height: 0; flex-shrink: 0;
-  border-top: clamp(5px,1vh,9px) solid transparent;
-  border-bottom: clamp(5px,1vh,9px) solid transparent;
-  border-left: clamp(8px,1.4vh,13px) solid #22c55e;
+  border-top: clamp(4px,.8vh,8px) solid transparent;
+  border-bottom: clamp(4px,.8vh,8px) solid transparent;
+  border-left: clamp(7px,1.2vh,12px) solid #22c55e;
 `;
-const Nm = styled.span`font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12vw;`;
-const Rn = styled.span`margin-left: auto; font-weight: 900; padding-left: 1vw; em{ font-style:normal; color:#94a3b8; font-size:.62em; font-weight:700; }`;
+const Nm = styled.span`font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 13vw;`;
+const Rn = styled.span`margin-left: auto; font-weight: 900; padding-left: .8vw; em{ font-style:normal; color:#94a3b8; font-size:.62em; font-weight:700; }`;
 
-const BowlerCell = styled(Cell)`flex: .7; min-width: 0;`;
-const BowlFig = styled.div`font-size: clamp(14px,2.3vh,32px); font-weight: 900; color: #f8fafc; em{ font-style:normal; color:#94a3b8; font-size:.66em; font-weight:700; }`;
+const BowlerCell = styled(Cell)`flex: .95; min-width: 0; justify-content: center;`;
+const NmB = styled.span`font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; font-size: clamp(11px,1.95vh,25px);`;
+const BowlFig = styled.div`font-size: clamp(12px,1.95vh,25px); font-weight: 900; color: #f8fafc; em{ font-style:normal; color:#94a3b8; font-size:.66em; font-weight:700; }`;
 
-const OverCell = styled(Cell)`flex: 1.5; min-width: 0; justify-content: center;`;
-const Balls = styled.div`display: flex; gap: .35vw; align-items: center; flex-wrap: nowrap; overflow: hidden;`;
+const OverCell = styled(Cell)`flex: 1.35; min-width: 0; justify-content: center;`;
+const Balls = styled.div`display: flex; gap: .3vw; align-items: center; flex-wrap: nowrap; overflow: hidden;`;
 const Ball = styled.div`
-  width: clamp(22px,3.8vh,42px); height: clamp(22px,3.8vh,42px); border-radius: 50%; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; font-weight: 900; color: #fff; font-size: clamp(10px,1.7vh,20px);
+  width: clamp(20px,3.4vh,37px); height: clamp(20px,3.4vh,37px); border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-weight: 900; color: #fff; font-size: clamp(9px,1.5vh,17px);
   ${p => { switch (p.$type) {
     case "wicket": return css`background:#ef4444;`;
     case "wide": case "noball": return css`background:#f59e0b;`;
@@ -244,12 +304,12 @@ const Ball = styled.div`
     default: return css`background:#2563eb;`;
   } }}
 `;
-const NewOver = styled.div`color:#64748b; font-size: clamp(13px,2.2vh,28px); font-weight:700;`;
+const NewOver = styled.div`color:#64748b; font-size: clamp(11px,1.9vh,23px); font-weight:700;`;
 
-const RateCell = styled(Cell)`border-right: 0; flex: 1.55; min-width: 0; align-items: flex-start; justify-content: center;`;
-const NeedLine = styled.div`font-size: clamp(14px,2.4vh,32px); font-weight: 900; color: #fca5a5; white-space: nowrap; letter-spacing: .2px;`;
-const RateSub = styled.div`font-size: clamp(11px,1.9vh,24px); font-weight: 800; color: #94a3b8; margin-top: 2px;`;
-const ResultInline = styled.div`font-size: clamp(15px,2.6vh,34px); font-weight: 900; color: #fff; max-width: 20vw;`;
+const RateCell = styled(Cell)`flex: 1.45; min-width: 0; align-items: flex-start; justify-content: center;`;
+const NeedLine = styled.div`font-size: clamp(11px,1.9vh,23px); font-weight: 900; color: #fca5a5; white-space: nowrap; letter-spacing: .2px;`;
+const RateSub = styled.div`font-size: clamp(9px,1.55vh,19px); font-weight: 800; color: #94a3b8; margin-top: 2px;`;
+const ResultInline = styled.div`font-size: clamp(13px,2.2vh,28px); font-weight: 900; color: #fff; max-width: 22vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
 
 const IdleBadge = styled.div`
   position: fixed; left: 3vw; bottom: 3.4vh; display:flex; align-items:center; gap:1.2vw;
