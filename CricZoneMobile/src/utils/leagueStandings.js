@@ -25,7 +25,13 @@ const winnerOf = (m) => {
 // out of the points table over a stray space or capital letter.
 const norm = (s) => (s || '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
 
-export function computeGroupStandings(matches, teamNames) {
+// options.official (set from tournament.nrrRule === 'official') switches on the
+// full ICC Net Run Rate rules: an all-out innings is deemed to have faced its
+// full over quota, and every completed result (incl. ties) counts toward NRR.
+// Omitted/false → legacy behaviour (actual overs faced; ties excluded), so
+// tournaments created before this change keep their existing points table.
+export function computeGroupStandings(matches, teamNames, options = {}) {
+  const official = options.official === true;
   const row = (team) => ({
     team, played: 0, won: 0, lost: 0, tied: 0, points: 0,
     runsFor: 0, oversFor: 0, runsAgainst: 0, oversAgainst: 0,
@@ -48,17 +54,29 @@ export function computeGroupStandings(matches, teamNames) {
     const aBat = aFirst ? i1 : i2;
     const bBat = aFirst ? i2 : i1;
     const aRuns = aBat.runs || 0;
-    const aOv = oversToDecimal(aBat.overs);
+    let aOv = oversToDecimal(aBat.overs);
     const bRuns = bBat.runs || 0;
-    const bOv = oversToDecimal(bBat.overs);
+    let bOv = oversToDecimal(bBat.overs);
+
+    // Official ICC all-out rule: a side bowled out is deemed to have faced the
+    // full over quota (stops teams gaming NRR by getting out quickly). Quota and
+    // squad size come from the match itself so mixed-format groups are handled.
+    if (official) {
+      const quota = oversToDecimal(m.totalOvers) || 0;
+      const allOutAt = (m.playersPerTeam || 11) - 1;
+      if (quota > 0) {
+        if ((aBat.wickets || 0) >= allOutAt) aOv = quota;
+        if ((bBat.wickets || 0) >= allOutAt) bOv = quota;
+      }
+    }
 
     table[a].played++; table[b].played++;
-    // A TIE never affects NRR — skip the run/over accumulation when the scores
-    // are level, so a tied match (whether it went to a super over or not)
-    // contributes 0 NRR to both teams. (Super-over runs live in match.superOver
-    // and never reach the innings, so a super-over match is still level here.)
+    // Official: every completed result counts toward NRR (including ties).
+    // Legacy: a TIE is excluded — skip the run/over accumulation when the scores
+    // are level, so a tied match contributes 0 NRR to both teams. (Super-over
+    // runs live in match.superOver and never reach the innings either way.)
     const isTie = aRuns === bRuns;
-    if (!isTie) {
+    if (official || !isTie) {
       table[a].runsFor += aRuns; table[a].runsAgainst += bRuns;
       table[a].oversFor += aOv;  table[a].oversAgainst += bOv;
       table[b].runsFor += bRuns; table[b].runsAgainst += aRuns;

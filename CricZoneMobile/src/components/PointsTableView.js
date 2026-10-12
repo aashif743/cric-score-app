@@ -190,9 +190,9 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
     () => groups.map((teams, gIdx) => {
       const letter = groupLetter(gIdx);
       const gm = matches.filter((m) => m.stage === 'group' && m.group === letter);
-      return computeGroupStandings(gm, teams);
+      return computeGroupStandings(gm, teams, { official: tournament?.nrrRule === 'official' });
     }),
-    [groups, matches],
+    [groups, matches, tournament?.nrrRule],
   );
 
   const activeGroupComplete = useMemo(() => {

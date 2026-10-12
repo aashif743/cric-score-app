@@ -764,7 +764,11 @@ const oversToDecimal = (overs) => {
 // Build a points-table row per team for a group from all its completed matches.
 // Cricket league points (CPL/IPL convention): win=2, tie/no-result=1, loss=0.
 // Tie-break: NRR descending, then head-to-head (if exactly two teams tied).
-const computeGroupStandings = (matches, teamNames) => {
+const computeGroupStandings = (matches, teamNames, options = {}) => {
+  // official=true → full ICC NRR rules: an all-out innings is deemed to have
+  // faced the full over quota, and every completed result (incl. ties) counts
+  // toward NRR. Legacy (default) keeps actual overs and excludes ties.
+  const official = options.official === true;
   const row = (team) => ({
     team, played: 0, won: 0, lost: 0, tied: 0, points: 0,
     runsFor: 0, oversFor: 0, runsAgainst: 0, oversAgainst: 0,
@@ -790,16 +794,27 @@ const computeGroupStandings = (matches, teamNames) => {
     const aBat = aFirst ? i1 : i2;
     const bBat = aFirst ? i2 : i1;
     const aRuns = aBat.runs || 0;
-    const aOv = oversToDecimal(aBat.overs);
+    let aOv = oversToDecimal(aBat.overs);
     const bRuns = bBat.runs || 0;
-    const bOv = oversToDecimal(bBat.overs);
+    let bOv = oversToDecimal(bBat.overs);
+
+    // Official ICC all-out rule: a side bowled out is deemed to have faced the
+    // full over quota (prevents gaming NRR by getting out quickly).
+    if (official) {
+      const quota = m.totalOvers || 0;
+      const allOutAt = (m.playersPerTeam || 11) - 1;
+      if (quota > 0) {
+        if ((aBat.wickets || 0) >= allOutAt) aOv = quota;
+        if ((bBat.wickets || 0) >= allOutAt) bOv = quota;
+      }
+    }
 
     table[a].played++; table[b].played++;
-    // A TIE never affects NRR — skip run/over accumulation when scores are level
-    // (a super-over-decided match is still level here; super-over runs live in
-    // match.superOver and never reach the innings). Keeps NRR at 0 for ties.
+    // Official: every completed result counts toward NRR (incl. ties). Legacy:
+    // a TIE is excluded — skip run/over accumulation when scores are level
+    // (super-over runs live in match.superOver and never reach the innings).
     const isTie = aRuns === bRuns;
-    if (!isTie) {
+    if (official || !isTie) {
       table[a].runsFor += aRuns; table[a].runsAgainst += bRuns;
       table[a].oversFor += aOv;   table[a].oversAgainst += bOv;
       table[b].runsFor += bRuns; table[b].runsAgainst += aRuns;
@@ -890,7 +905,7 @@ const tryAdvanceLeagueGroup = async (tournamentId, groupLetter) => {
   const allDone = groupMatches.every((m) => m.status === 'completed' || m.status === 'abandoned');
   if (!allDone) return;
 
-  const standings = computeGroupStandings(groupMatches, groupTeams);
+  const standings = computeGroupStandings(groupMatches, groupTeams, { official: tournament.nrrRule === 'official' });
   // Map "A1", "A2" → team name for this group.
   const placement = {};
   standings.forEach((r, i) => { placement[`${groupLetter}${i + 1}`] = r.team; });
@@ -940,7 +955,7 @@ const tryAdvanceQualifierSeeds = async (tournamentId) => {
     if (!teams || teams.length < 2) return;
     const gl = String.fromCharCode(65 + gi);
     const gms = groupMatches.filter((m) => m.group === gl);
-    const standings = computeGroupStandings(gms, teams);
+    const standings = computeGroupStandings(gms, teams, { official: tournament.nrrRule === 'official' });
     standings.slice(0, tournament.teamsAdvancePerGroup).forEach((r, pos) => {
       quals.push({ team: r.team, position: pos + 1, points: r.points || 0, nrr: r.nrr || 0, won: r.won || 0 });
     });

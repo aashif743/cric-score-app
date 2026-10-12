@@ -182,6 +182,10 @@ exports.createTournament = async (req, res) => {
       venue: venue || "",
       description: description || "",
       format: tournamentFormat,
+      // Every NEW tournament uses the full official ICC Net Run Rate rules.
+      // Existing tournaments keep the schema default ('legacy'), so their points
+      // tables never change.
+      nrrRule: "official",
       visibility: visibility === "private" ? "private" : "public",
       listed: listed === true,
       numberOfGroups: tournamentFormat === "league" ? Math.max(1, numberOfGroups || 1) : 1,

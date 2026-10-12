@@ -558,7 +558,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
     const out = [];
     groups.forEach((teams, gIdx) => {
       const gm = groupMatches.filter((m) => m.group === groupLetter(gIdx));
-      computeGroupStandings(gm, teams).slice(0, advance).forEach((r) => {
+      computeGroupStandings(gm, teams, { official: tournament?.nrrRule === 'official' }).slice(0, advance).forEach((r) => {
         if (r.team && !out.includes(r.team)) out.push(r.team);
       });
     });

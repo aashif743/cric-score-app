@@ -83,6 +83,18 @@ const TournamentSchema = new mongoose.Schema({
     enum: ["quick", "knockout", "league"],
     default: "quick"
   },
+  // Which Net Run Rate rule this tournament's points table follows.
+  //   'official' — full ICC rules: an all-out team is deemed to have faced its
+  //                full over quota, and every completed result (incl. ties) is
+  //                counted. Set on every NEWLY created tournament.
+  //   'legacy'   — the earlier method (actual overs faced; ties excluded from
+  //                NRR). The DEFAULT, so existing/ongoing tournaments already in
+  //                the database keep their current points table unchanged.
+  nrrRule: {
+    type: String,
+    enum: ["legacy", "official"],
+    default: "legacy"
+  },
   // Who can see this tournament in the live feed + public viewer screens.
   // 'public' shows up for every signed-in user; 'private' is owner-only.
   // Default 'public' so new tournaments populate the live strip by default;
