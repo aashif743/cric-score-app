@@ -12,6 +12,9 @@ router.get("/me", admin.me);
 // Overview
 router.get("/overview", admin.overview);
 
+// Usage / engagement analytics
+router.get("/analytics", admin.analytics);
+
 // Tournament approvals + management
 router.get("/tournaments", admin.listTournaments);
 router.post("/tournaments/:id/approve", admin.setTournamentApproval);

@@ -37,6 +37,12 @@ const userSchema = mongoose.Schema(
       enum: ['active', 'disabled'],
       default: 'active',
     },
+    // Last time this user made an authenticated request — powers Daily/Weekly/
+    // Monthly Active User metrics. Updated (throttled) by the auth middleware.
+    lastActive: {
+      type: Date,
+      index: true,
+    },
   },
   {
     timestamps: true,

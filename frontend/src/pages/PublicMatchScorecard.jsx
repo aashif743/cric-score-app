@@ -2,11 +2,14 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import publicService from "../services/publicService";
 import { shortenName } from "../utils/nameDisplay";
+import { trackView } from "../utils/analytics";
 import "./FullScorecard.css";
 
 const PublicMatchScorecard = () => {
   const { shareId, matchId } = useParams();
   const navigate = useNavigate();
+
+  useEffect(() => { trackView("live_view", { path: "/public-scorecard" }); }, []);
 
   const [matchData, setMatchData] = useState(null);
   const [loading, setLoading] = useState(true);

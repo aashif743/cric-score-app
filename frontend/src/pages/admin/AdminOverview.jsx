@@ -5,11 +5,13 @@ import adminService from "../../services/adminService";
 import { PageHeader, StatCard, Card, MiniBars, Spinner, Reveal, fadeRise } from "./ui.jsx";
 import {
   FiUsers, FiAward, FiActivity, FiClock, FiTrendingUp, FiRadio, FiCalendar, FiEyeOff, FiDollarSign,
+  FiEye, FiBarChart2, FiSmartphone, FiUserCheck,
 } from "react-icons/fi";
 
 export default function AdminOverview() {
   const { user } = useContext(AuthContext);
   const [data, setData] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -17,6 +19,10 @@ export default function AdminOverview() {
     adminService.overview(user.token)
       .then((d) => { if (!cancelled) setData(d); })
       .catch(() => { if (!cancelled) setErr("Failed to load overview."); });
+    // Analytics loads independently — a failure here must not blank the overview.
+    adminService.analytics(user.token)
+      .then((d) => { if (!cancelled) setAnalytics(d); })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [user.token]);
 
@@ -36,6 +42,46 @@ export default function AdminOverview() {
         <StatCard label="Matches" value={matches.total} sub={`${matches.completionRate}% completed`} accent="green" icon={FiActivity} />
         <StatCard label="Pending approvals" value={tournaments.pendingApprovals} sub="awaiting review" accent={tournaments.pendingApprovals > 0 ? "amber" : "slate"} icon={FiClock} />
       </Reveal>
+
+      {analytics && (
+        <>
+          <div className="mt-7 mb-3 flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-black text-slate-800">Usage &amp; engagement</h2>
+            {!analytics.viewTrackingLive && (
+              <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                Viewer tracking starts once the updated web &amp; app ship
+              </span>
+            )}
+          </div>
+
+          <Reveal className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard label="Active today" value={analytics.activeUsers.dau} sub="signed-in users (24h)" accent="green" icon={FiUserCheck} />
+            <StatCard label="Active this week" value={analytics.activeUsers.wau} sub={`${analytics.activeUsers.mau} this month`} accent="blue" icon={FiUsers} />
+            <StatCard label="Unique visitors" value={analytics.uniqueVisitors.d2} sub="last 2 days" accent="violet" icon={FiEye} />
+            <StatCard label="Page views" value={analytics.views.d2} sub="last 2 days" accent="amber" icon={FiBarChart2} />
+          </Reveal>
+
+          <Reveal className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+            <motion.div variants={fadeRise} className="lg:col-span-2">
+              <Card title="Unique visitors — last 14 days">
+                {analytics.visitorTrend?.length ? (
+                  <MiniBars data={analytics.visitorTrend} accent="violet" />
+                ) : (
+                  <div className="text-sm text-slate-400 py-6 text-center">No visitor data yet — starts once the updated clients are live.</div>
+                )}
+              </Card>
+            </motion.div>
+            <Card title="Views by platform">
+              <ul className="space-y-1 pt-1">
+                <Row icon={FiSmartphone} label="iOS" value={analytics.platform?.ios || 0} accent="blue" />
+                <Row icon={FiSmartphone} label="Android" value={analytics.platform?.android || 0} accent="green" />
+                <Row icon={FiRadio} label="Web" value={analytics.platform?.web || 0} accent="violet" />
+                <Row icon={FiUserCheck} label="Active scorers (2d)" value={analytics.activeScorers?.d2 || 0} accent="amber" />
+              </ul>
+            </Card>
+          </Reveal>
+        </>
+      )}
 
       <Reveal className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
         <motion.div variants={fadeRise} className="lg:col-span-2">

@@ -23,6 +23,14 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ message: 'Not authorized, user not found' });
       }
 
+      // Activity ping for DAU/WAU/MAU — throttled to at most once per 5 minutes
+      // per user, fire-and-forget so it never slows or breaks the request.
+      const FIVE_MIN = 5 * 60 * 1000;
+      const last = req.user.lastActive ? req.user.lastActive.getTime() : 0;
+      if (Date.now() - last > FIVE_MIN) {
+        User.updateOne({ _id: req.user._id }, { $set: { lastActive: new Date() } }).catch(() => {});
+      }
+
       next(); // Move on to the next middleware or the controller
     } catch (error) {
       console.error(error);

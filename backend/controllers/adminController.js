@@ -4,6 +4,7 @@ const Tournament = require("../models/Tournament");
 const Match = require("../models/Match");
 const Auction = require("../models/Auction");
 const AuditLog = require("../models/AuditLog");
+const AnalyticsEvent = require("../models/AnalyticsEvent");
 
 // ───────────────────────── helpers ─────────────────────────
 
@@ -130,6 +131,83 @@ exports.overview = async (req, res) => {
   } catch (error) {
     console.error("Admin overview error:", error);
     res.status(500).json({ success: false, error: "Failed to load overview." });
+  }
+};
+
+// GET /api/admin/analytics — usage/engagement metrics.
+//  • Active users (DAU/WAU/MAU) from User.lastActive (authenticated usage).
+//  • Sign-ups over rolling windows.
+//  • Views + unique visitors from AnalyticsEvent (incl. anonymous viewers).
+//  • Active scorers (distinct users who scored matches).
+//  • Platform / event-type breakdown + daily trends (Sri Lanka time).
+exports.analytics = async (req, res) => {
+  try {
+    const now = Date.now();
+    const d1 = new Date(now - DAY), d2 = new Date(now - 2 * DAY);
+    const d7 = new Date(now - 7 * DAY), d14 = new Date(now - 14 * DAY), d30 = new Date(now - 30 * DAY);
+    const TZ = "+05:30"; // Sri Lanka — bucket "days" in the organiser's timezone.
+    const uniq = (filter) => AnalyticsEvent.distinct("visitorId", { visitorId: { $ne: "" }, ...filter }).then((a) => a.length);
+
+    const [
+      dau, wau, mau,
+      signup1, signup2, signup7, signup30,
+      views1, views2, views7,
+      uniq1, uniq2, uniq7,
+      scorers2, scorers7,
+      byPlatform, byType,
+      visitorTrend, signupTrend,
+      eventsTotal,
+    ] = await Promise.all([
+      User.countDocuments({ lastActive: { $gte: d1 } }),
+      User.countDocuments({ lastActive: { $gte: d7 } }),
+      User.countDocuments({ lastActive: { $gte: d30 } }),
+      User.countDocuments({ createdAt: { $gte: d1 } }),
+      User.countDocuments({ createdAt: { $gte: d2 } }),
+      User.countDocuments({ createdAt: { $gte: d7 } }),
+      User.countDocuments({ createdAt: { $gte: d30 } }),
+      AnalyticsEvent.countDocuments({ createdAt: { $gte: d1 } }),
+      AnalyticsEvent.countDocuments({ createdAt: { $gte: d2 } }),
+      AnalyticsEvent.countDocuments({ createdAt: { $gte: d7 } }),
+      uniq({ createdAt: { $gte: d1 } }),
+      uniq({ createdAt: { $gte: d2 } }),
+      uniq({ createdAt: { $gte: d7 } }),
+      Match.distinct("user", { updatedAt: { $gte: d2 } }).then((a) => a.length),
+      Match.distinct("user", { updatedAt: { $gte: d7 } }).then((a) => a.length),
+      AnalyticsEvent.aggregate([{ $match: { createdAt: { $gte: d7 } } }, { $group: { _id: "$platform", count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+      AnalyticsEvent.aggregate([{ $match: { createdAt: { $gte: d7 } } }, { $group: { _id: "$type", count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+      AnalyticsEvent.aggregate([
+        { $match: { createdAt: { $gte: d14 }, visitorId: { $ne: "" } } },
+        { $group: { _id: { d: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: TZ } }, v: "$visitorId" } } },
+        { $group: { _id: "$_id.d", count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+      ]),
+      dailySeries(User, 14),
+      AnalyticsEvent.estimatedDocumentCount(),
+    ]);
+
+    const platform = {};
+    byPlatform.forEach((p) => { platform[p._id || "unknown"] = p.count; });
+
+    res.json({
+      success: true,
+      data: {
+        activeUsers: { dau, wau, mau },
+        signups: { d1: signup1, d2: signup2, d7: signup7, d30: signup30 },
+        views: { d1: views1, d2: views2, d7: views7 },
+        uniqueVisitors: { d1: uniq1, d2: uniq2, d7: uniq7 },
+        activeScorers: { d2: scorers2, d7: scorers7 },
+        platform,
+        types: byType.map((t) => ({ type: t._id || "unknown", count: t.count })),
+        visitorTrend: visitorTrend.map((r) => ({ date: r._id, count: r.count })),
+        signupTrend,
+        // false until the updated clients (that send view pings) are live — lets
+        // the UI show a "waiting for traffic" hint instead of empty zeros.
+        viewTrackingLive: eventsTotal > 0,
+      },
+    });
+  } catch (error) {
+    console.error("Admin analytics error:", error);
+    res.status(500).json({ success: false, error: "Failed to load analytics." });
   }
 };
 

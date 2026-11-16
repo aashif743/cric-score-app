@@ -9,6 +9,7 @@ import { FaApple, FaGooglePlay } from "react-icons/fa";
 import { AuthContext } from "../context/AuthContext.jsx";
 import ThemeToggle from "../components/ThemeToggle.jsx";
 import brand from "../assets/criczone_icon.png";
+import { trackView } from "../utils/analytics";
 
 // Real store links — replace these two when they're ready.
 const APP_STORE_URL = "#";
@@ -26,6 +27,8 @@ export default function LandingPage() {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
   const goAuction = () => navigate(user ? "/auctions" : "/auth");
+
+  useEffect(() => { trackView("landing_view", { path: "/" }); }, []);
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-white text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">

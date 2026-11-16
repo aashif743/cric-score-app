@@ -4,6 +4,7 @@ import io from "socket.io-client";
 import styled, { keyframes, css, createGlobalStyle } from "styled-components";
 import fullLogo from "../assets/criczone_full_logo.png";
 import { shortenName } from "../utils/nameDisplay";
+import { trackView } from "../utils/analytics";
 import SummaryBoard from "./tv/SummaryBoard";
 import { getBallType, formatBall } from "./tv/LiveBoard";
 
@@ -41,6 +42,10 @@ const Overlay = () => {
   const isTournament = !!params.tournamentId;
   const id = params.tournamentId || params.matchId;
   const isDemo = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("demo");
+
+  useEffect(() => {
+    if (!isDemo) trackView("overlay_view", { path: isTournament ? "/overlay/tournament" : "/overlay", tournamentId: isTournament ? id : null });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [payload, setPayload] = useState(isDemo ? DEMO_PAYLOAD : null);
   const [connected, setConnected] = useState(isDemo);

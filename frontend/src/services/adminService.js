@@ -8,6 +8,8 @@ const adminService = {
 
   overview: (token) => API.get("/admin/overview", auth(token)).then((r) => r.data?.data),
 
+  analytics: (token) => API.get("/admin/analytics", auth(token)).then((r) => r.data?.data),
+
   // Tournaments
   listTournaments: (token, { filter = "pending", search = "", page = 1 } = {}) =>
     API.get(`/admin/tournaments`, { ...auth(token), params: { filter, search, page } }).then((r) => r.data),
