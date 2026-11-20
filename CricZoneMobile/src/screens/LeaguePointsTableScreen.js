@@ -179,9 +179,15 @@ const LeaguePointsTableScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         </View>
       ) : (
-        // Shared table (smart full names, no logos) — same component the owner
-        // sees, so the public view is consistent. Read-only here (no isOwner).
-        <PointsTableView tournament={tournament} />
+        // Shared table. The owner can tap a team to rename it, move its group,
+        // or upload/change its crest; others see it read-only.
+        <PointsTableView
+          tournament={tournament}
+          isOwner={!!(tournament?.user && (user?.id || user?._id) && String(tournament.user) === String(user?.id || user?._id))}
+          tournamentId={tournamentId}
+          token={user?.token}
+          onChanged={fetchData}
+        />
       )}
     </SafeAreaView>
   );

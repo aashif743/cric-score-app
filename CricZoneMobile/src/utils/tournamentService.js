@@ -107,6 +107,20 @@ const tournamentService = {
     return response.data;
   },
 
+  // Set (or clear, with logoUrl '') a team's crest. Owner-only.
+  setTeamLogo: async (id, teamName, logoUrl, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(`/tournaments/${id}/team-logo`, { teamName, logoUrl }, config);
+    return response.data;
+  },
+
+  // Replace a team's squad: players = [{ name, role }]. Owner-only.
+  setTeamSquad: async (id, teamName, players, token) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const response = await API.patch(`/tournaments/${id}/team-squad`, { teamName, players }, config);
+    return response.data;
+  },
+
   // Manually set (or clear) a team in a knockout/playoff bracket slot.
   // teamName '' clears the slot back to TBD. Owner-only; scheduled matches only.
   setBracketTeam: async (id, matchId, slot, teamName, token) => {

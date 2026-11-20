@@ -869,6 +869,70 @@ exports.renameTeam = async (req, res) => {
   }
 };
 
+// PATCH /api/tournaments/:id/team-logo   body: { teamName, logoUrl }
+// Set (or clear, when logoUrl is empty) a single team's crest. Owner only.
+// teamLogos is a Map keyed by team NAME so it survives reordering/renames.
+exports.setTeamLogo = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const teamName = (req.body?.teamName || "").toString().trim();
+    const logoUrl = (req.body?.logoUrl || "").toString().trim();
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
+    }
+    if (!teamName) {
+      return res.status(400).json({ success: false, error: "teamName is required" });
+    }
+    const tournament = await Tournament.findById(id);
+    if (!tournament) {
+      return res.status(404).json({ success: false, error: "Tournament not found" });
+    }
+    if (tournament.user.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+    if (logoUrl) tournament.teamLogos.set(teamName, logoUrl);
+    else tournament.teamLogos.delete(teamName);
+    await tournament.save();
+    return res.json({ success: true, data: { teamName, logoUrl } });
+  } catch (error) {
+    console.error("Set team logo error:", error);
+    return res.status(500).json({ success: false, error: "Failed to update team logo." });
+  }
+};
+
+// PATCH /api/tournaments/:id/team-squad   body: { teamName, players: [{name, role}] }
+// Replace a team's squad (pre-filled line-up used when generating matches). Owner
+// only. Blank-named entries are dropped.
+exports.setTeamSquad = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const teamName = (req.body?.teamName || "").toString().trim();
+    const raw = Array.isArray(req.body?.players) ? req.body.players : [];
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid tournament ID" });
+    }
+    if (!teamName) {
+      return res.status(400).json({ success: false, error: "teamName is required" });
+    }
+    const tournament = await Tournament.findById(id);
+    if (!tournament) {
+      return res.status(404).json({ success: false, error: "Tournament not found" });
+    }
+    if (tournament.user.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, error: "Not authorized" });
+    }
+    const players = raw
+      .map((p) => ({ name: (p?.name || "").toString().trim(), role: (p?.role || "").toString().trim() }))
+      .filter((p) => p.name);
+    tournament.teamSquads.set(teamName, players);
+    await tournament.save();
+    return res.json({ success: true, data: { teamName, count: players.length } });
+  } catch (error) {
+    console.error("Set team squad error:", error);
+    return res.status(500).json({ success: false, error: "Failed to update team squad." });
+  }
+};
+
 // PATCH /api/tournaments/:id/swap-teams   body: { teamA, teamB }
 // Swap two teams between their groups. Only allowed before any group match has
 // started (so no played result is lost). Regenerates the group + knockout

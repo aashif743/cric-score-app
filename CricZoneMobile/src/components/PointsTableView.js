@@ -12,7 +12,7 @@ import { computeGroupStandings, formatNRR, computeQualification } from '../utils
 import tournamentService from '../utils/tournamentService';
 import AutocompleteInput from './AutocompleteInput';
 import ShareablePointsTable from './ShareablePointsTable';
-import { TeamCrest } from './LogoPicker';
+import LogoPicker, { TeamCrest } from './LogoPicker';
 
 const ShareIcon = ({ color = '#fff', size = 15 }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
@@ -171,6 +171,21 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
     } catch (err) {
       setBusy(false);
       Alert.alert('Rename failed', err?.error || 'Could not rename the team. Please try again.');
+    }
+  };
+
+  // Logo was picked + uploaded by LogoPicker (gives us the Cloudinary URL, or ''
+  // to remove). Persist it against the team name, then refresh the table.
+  const doSetLogo = async (url) => {
+    if (!editTeam) return;
+    try {
+      setBusy(true);
+      await tournamentService.setTeamLogo(tournamentId, editTeam, url || '', token);
+      setBusy(false);
+      onChanged && onChanged();
+    } catch (err) {
+      setBusy(false);
+      Alert.alert('Logo update failed', err?.error || 'Could not update the team logo. Please try again.');
     }
   };
 
@@ -414,6 +429,19 @@ const PointsTableView = ({ tournament, isOwner = false, tournamentId, token, onC
               {mode === 'edit' ? (
                 <>
                   <Text style={styles.modalTitle}>Edit team</Text>
+
+                  {/* Crest — tap to upload/change; × on the picker removes it */}
+                  <View style={styles.logoRow}>
+                    <LogoPicker
+                      value={teamLogos[editTeam] || ''}
+                      onChange={doSetLogo}
+                      token={token}
+                      folder="team"
+                      name={editTeam}
+                      size={64}
+                    />
+                    <Text style={styles.logoHint}>Tap to {teamLogos[editTeam] ? 'change' : 'add'} the team logo</Text>
+                  </View>
 
                   {/* Rename — pre-filled + selected; shows team-name suggestions */}
                   <View style={styles.renameRow}>
@@ -688,6 +716,10 @@ const styles = StyleSheet.create({
     fontSize: 12, fontWeight: '800', color: '#94a3b8', textAlign: 'center',
     letterSpacing: 1, textTransform: 'uppercase', marginBottom: 14,
   },
+
+  // Crest editor row inside the edit modal.
+  logoRow: { alignItems: 'center', gap: 8, marginBottom: 16 },
+  logoHint: { fontSize: 12, color: '#94a3b8', fontWeight: '600' },
 
   // Rename row: autocomplete input + inline Save (stays above the keyboard)
   renameRow: { flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 10 },

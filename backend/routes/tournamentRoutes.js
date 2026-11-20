@@ -17,6 +17,8 @@ router.get("/:id/rosters", protect, tournamentController.getTeamRosters);
 router.post("/:id/share", protect, tournamentController.generateShareId);
 router.patch("/:id/rename-team", protect, tournamentController.renameTeam);
 router.patch("/:id/swap-teams", protect, tournamentController.swapTeamGroups);
+router.patch("/:id/team-logo", protect, tournamentController.setTeamLogo);
+router.patch("/:id/team-squad", protect, tournamentController.setTeamSquad);
 router.patch("/:id/bracket-team", protect, tournamentController.setBracketTeam);
 router.patch("/:id/bracket-source", protect, tournamentController.setBracketSource);
 router.patch("/:id/playoff-format", protect, tournamentController.setPlayoffFormat);
