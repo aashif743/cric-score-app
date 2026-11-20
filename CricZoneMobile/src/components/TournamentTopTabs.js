@@ -49,8 +49,9 @@ const TournamentTopTabs = ({
     // Local mode: switch an in-screen tab instead of navigating to a new page.
     if (onSelect) { onSelect(key); return; }
     if (!tournamentId) return;
-    if (key === 'matches') {
-      navigation.navigate('LeagueSchedule', { tournamentId });
+    if (key === 'home' || key === 'matches') {
+      // The schedule screen hosts the Home + Matches tabs; it defaults to Home.
+      navigation.navigate('LeagueSchedule', { tournamentId, initialView: key });
     } else if (key === 'points') {
       navigation.navigate('LeaguePointsTable', { tournamentId });
     } else if (key === 'stats') {
@@ -78,8 +79,9 @@ const TournamentTopTabs = ({
 
   return (
     <View style={styles.bar}>
+      <Pill tabKey="home" label="Home" />
       <Pill tabKey="matches" label="Matches" />
-      <Pill tabKey="points" label="Points Table" />
+      <Pill tabKey="points" label="Table" />
       <Pill tabKey="stats" label="Stats" />
       {isOwner && onPressSettings ? (
         <TouchableOpacity activeOpacity={0.7} style={styles.settingsButton} onPress={onPressSettings}>
@@ -93,8 +95,8 @@ const TournamentTopTabs = ({
 const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
-    gap: 8,
+    paddingHorizontal: 12, paddingTop: 14, paddingBottom: 10,
+    gap: 6,
     alignItems: 'center',
   },
   pill: {
@@ -103,7 +105,7 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
   pillActive: {
     backgroundColor: '#2563eb',
@@ -115,8 +117,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderWidth: 1.5, borderColor: '#dbe3ee',
   },
-  pillTextActive: { color: '#fff', fontSize: 13.5, fontWeight: '800', letterSpacing: 0.2 },
-  pillTextIdle: { color: '#334155', fontSize: 13.5, fontWeight: '800', letterSpacing: 0.2 },
+  pillTextActive: { color: '#fff', fontSize: 12.5, fontWeight: '800', letterSpacing: 0.1 },
+  pillTextIdle: { color: '#334155', fontSize: 12.5, fontWeight: '800', letterSpacing: 0.1 },
 
   settingsButton: {
     width: 42, height: 42, borderRadius: 11,

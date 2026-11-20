@@ -23,6 +23,7 @@ import TournamentTopTabs from '../components/TournamentTopTabs';
 import PointsTableView from '../components/PointsTableView';
 import { TeamCrest } from '../components/LogoPicker';
 import TournamentStatsView from '../components/TournamentStatsView';
+import TournamentHomeView from '../components/TournamentHomeView';
 import QualifierBracket from '../components/QualifierBracket';
 import BracketTeamPicker from '../components/BracketTeamPicker';
 import { slotSourceLabel, knockoutGameNumbers, groupSourceLabel } from '../utils/bracketLabels';
@@ -478,7 +479,7 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
 
   // Top-level view tab: Matches | Points Table | Stats — switched in-place so
   // it feels like tabs (no page navigation / reload).
-  const [activeView, setActiveView] = useState('matches');
+  const [activeView, setActiveView] = useState(route.params?.initialView || 'home');
   // Stats are lazily fetched the first time the Stats tab is opened, then cached
   // so switching back is instant.
   const [stats, setStats] = useState(null);
@@ -821,7 +822,16 @@ const LeagueScheduleScreen = ({ navigation, route }) => {
         onPressSettings={onPressSettings}
       />
 
-      {activeView === 'points' ? (
+      {activeView === 'home' ? (
+        <TournamentHomeView
+          tournament={tournament}
+          isOwner={isOwner}
+          token={user?.token}
+          onChanged={() => fetchData({ silent: true })}
+          onGoToTab={setActiveView}
+          onRefresh={() => fetchData()}
+        />
+      ) : activeView === 'points' ? (
         <PointsTableView
           tournament={tournament}
           isOwner={isOwner}
