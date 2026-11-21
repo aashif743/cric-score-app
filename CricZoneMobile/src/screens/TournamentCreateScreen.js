@@ -671,6 +671,9 @@ const TournamentCreateScreen = ({ navigation, route }) => {
           navigation.replace('KnockoutSchedule', { tournamentId: created._id });
         } else if (format === 'league' && created?._id) {
           navigation.replace('LeagueSchedule', { tournamentId: created._id });
+        } else if (created?._id) {
+          // Quick tournaments land on their Home hub too.
+          navigation.replace('TournamentDetail', { tournamentId: created._id });
         } else {
           navigation.goBack();
         }

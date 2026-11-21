@@ -18,6 +18,8 @@ import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import StatsTable from '../components/StatsTable';
 import GradientHeader from '../components/GradientHeader';
+import TournamentTabBar from '../components/TournamentTabBar';
+import TournamentHomeView from '../components/TournamentHomeView';
 import { shadows } from '../utils/theme';
 
 const statusConfig = {
@@ -199,6 +201,7 @@ const TournamentDetailScreen = ({ navigation, route }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [showStats, setShowStats] = useState(false);
+  const [activeView, setActiveView] = useState(route.params?.initialView || 'home');
   const [statsLoading, setStatsLoading] = useState(false);
   const hasFetchedOnce = useRef(false);
 
@@ -622,40 +625,60 @@ const TournamentDetailScreen = ({ navigation, route }) => {
         }
       />
 
-      <FlatList
-        data={matches}
-        renderItem={({ item, index }) => (
-          <TournamentMatchCard
-            match={item}
-            index={index}
-            onPress={handleMatchPress}
-          />
-        )}
-        keyExtractor={(item) => item._id}
-        ListHeaderComponent={ListHeader}
-        ListEmptyComponent={renderEmptyMatches}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#d97706']}
-            tintColor="#d97706"
-          />
-        }
-        showsVerticalScrollIndicator={false}
+      {/* Hub tabs: Home · Matches (quick tournaments have no groups/bracket) */}
+      <TournamentTabBar
+        tabs={[{ key: 'home', label: 'Home' }, { key: 'matches', label: 'Matches' }]}
+        active={activeView}
+        onSelect={setActiveView}
       />
 
-      {/* New Match FAB — owner only */}
-      {isOwner ? (
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={handleNewMatch}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.fabText}>New Match</Text>
-        </TouchableOpacity>
-      ) : null}
+      {activeView === 'home' ? (
+        <TournamentHomeView
+          tournament={tournament}
+          isOwner={isOwner}
+          token={user?.token}
+          onChanged={() => fetchTournament()}
+          onGoToTab={(k) => setActiveView(k === 'matches' ? 'matches' : 'matches')}
+          onRefresh={onRefresh}
+        />
+      ) : (
+        <>
+          <FlatList
+            data={matches}
+            renderItem={({ item, index }) => (
+              <TournamentMatchCard
+                match={item}
+                index={index}
+                onPress={handleMatchPress}
+              />
+            )}
+            keyExtractor={(item) => item._id}
+            ListHeaderComponent={ListHeader}
+            ListEmptyComponent={renderEmptyMatches}
+            contentContainerStyle={styles.listContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={['#d97706']}
+                tintColor="#d97706"
+              />
+            }
+            showsVerticalScrollIndicator={false}
+          />
+
+          {/* New Match FAB — owner only */}
+          {isOwner ? (
+            <TouchableOpacity
+              style={styles.fab}
+              onPress={handleNewMatch}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.fabText}>New Match</Text>
+            </TouchableOpacity>
+          ) : null}
+        </>
+      )}
     </SafeAreaView>
   );
 };

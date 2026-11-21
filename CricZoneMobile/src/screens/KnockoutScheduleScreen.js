@@ -1,4 +1,4 @@
-import React, { useState, useContext, useCallback, useMemo } from 'react';
+import React, { useState, useContext, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,9 @@ import { AuthContext } from '../context/AuthContext';
 import tournamentService from '../utils/tournamentService';
 import matchService from '../utils/matchService';
 import GradientHeader from '../components/GradientHeader';
+import TournamentTabBar from '../components/TournamentTabBar';
+import TournamentHomeView from '../components/TournamentHomeView';
+import TournamentStatsView from '../components/TournamentStatsView';
 import BracketTeamPicker from '../components/BracketTeamPicker';
 import Icon from '../components/Icon';
 import { slotSourceLabel, knockoutGameNumbers } from '../utils/bracketLabels';
@@ -51,6 +54,10 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeRound, setActiveRound] = useState(1);
+  const [activeView, setActiveView] = useState(route.params?.initialView || 'home');
+  const [stats, setStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState('');
 
   const fetchData = useCallback(async () => {
     if (!user?.token || !tournamentId) return;
@@ -74,6 +81,27 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
       fetchData();
     }, [fetchData])
   );
+
+  const fetchStats = useCallback(async () => {
+    if (!user?.token || !tournamentId) return;
+    try {
+      setStatsLoading(true); setStatsError('');
+      const res = await tournamentService.getTournamentStats(tournamentId, user.token);
+      setStats(res?.data || res || {});
+    } catch (err) {
+      console.warn('Tournament stats error:', err);
+      setStatsError('Failed to load stats.');
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [user?.token, tournamentId]);
+
+  // Load stats the first time the Stats tab is opened.
+  useEffect(() => {
+    if (activeView === 'stats' && stats === null && !statsLoading && !statsError) {
+      fetchStats();
+    }
+  }, [activeView, stats, statsLoading, statsError, fetchStats]);
 
   // Group matches by round
   const matchesByRound = matches.reduce((acc, m) => {
@@ -365,21 +393,47 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
         </View>
       ) : (
         <>
-          {/* Action bar: Full Schedule + Stats (equal), Settings (owner only) */}
+          {/* Hub tabs: Home · Bracket · Stats (settings gear lives here now) */}
+          <TournamentTabBar
+            tabs={[{ key: 'home', label: 'Home' }, { key: 'bracket', label: 'Bracket' }, { key: 'stats', label: 'Stats' }]}
+            active={activeView}
+            onSelect={setActiveView}
+            isOwner={isOwner}
+            onPressSettings={onPressSettings}
+          />
+
+          {activeView === 'home' ? (
+            <TournamentHomeView
+              tournament={tournament}
+              isOwner={isOwner}
+              token={user?.token}
+              onChanged={() => fetchData()}
+              onGoToTab={(k) => setActiveView(k === 'matches' ? 'bracket' : k)}
+              onRefresh={() => fetchData()}
+            />
+          ) : activeView === 'stats' ? (
+            statsLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#4f46e5" />
+                <Text style={styles.loadingText}>Loading stats…</Text>
+              </View>
+            ) : statsError ? (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.errorText}>{statsError}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={fetchStats}>
+                  <Text style={styles.retryButtonText}>Try Again</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TournamentStatsView stats={stats} />
+            )
+          ) : (
+          <>
+          {/* Full bracket shortcut (Stats + Settings moved into the tab bar) */}
           <View style={styles.actionBar}>
             <TouchableOpacity activeOpacity={0.85} onPress={onPressFullSchedule} style={[styles.actionPill, styles.actionPillPrimary]}>
               <Text style={styles.actionPillTextPrimary}>Full Schedule</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity activeOpacity={0.85} onPress={onPressStats} style={[styles.actionPill, styles.actionPillSecondary]}>
-              <Text style={styles.actionPillTextSecondary}>Stats</Text>
-            </TouchableOpacity>
-
-            {isOwner ? (
-              <TouchableOpacity activeOpacity={0.7} style={styles.settingsButton} onPress={onPressSettings}>
-                <SettingsIcon size={20} color="#475569" />
-              </TouchableOpacity>
-            ) : null}
           </View>
 
           {/* Round Tabs (equal-width, fit-to-screen) */}
@@ -417,6 +471,8 @@ const KnockoutScheduleScreen = ({ navigation, route }) => {
               currentRoundMatches.map((m, i) => renderMatchCard(m, i))
             )}
           </ScrollView>
+          </>
+          )}
         </>
       )}
 
