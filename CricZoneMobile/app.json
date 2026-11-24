@@ -2,7 +2,7 @@
   "expo": {
     "name": "CricZone",
     "slug": "CricZoneMobile",
-    "version": "1.1.2",
+    "version": "1.1.4",
     "scheme": "criczone",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.criczone.mobile",
-      "buildNumber": "34",
+      "buildNumber": "35",
       "associatedDomains": [
         "applinks:cric-zone.com",
         "applinks:www.cric-zone.com"
