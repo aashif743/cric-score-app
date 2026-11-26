@@ -17,8 +17,36 @@ const authAttemptLimiter = rateLimit({
   message: { message: "Too many attempts. Please try again in a few minutes." },
 });
 
+// Per-NUMBER throttles layered on top of the per-IP limiter (bots rotate IPs).
+// Keyed by the NORMALISED number so switching format (94.. / 0.. / 7..) can't
+// dodge the limit. The App Store review phone is exempt so a reviewer never
+// gets locked out.
+const normalisedPhoneKey = (req) => {
+  let d = ((req.body && req.body.phoneNumber) || '').replace(/\D/g, '');
+  if (d.startsWith('0094')) d = d.slice(4);
+  else if (d.startsWith('94')) d = d.slice(2);
+  else if (d.startsWith('0')) d = d.slice(1);
+  return d || 'unknown';
+};
+const skipReviewPhone = (req) => {
+  const reviewDigits = (process.env.REVIEW_TEST_PHONE || '').replace(/\D/g, '');
+  return !!reviewDigits && normalisedPhoneKey(req) === reviewDigits.replace(/^(0094|94|0)/, '');
+};
+const otpNumberCooldown = rateLimit({
+  windowMs: 60 * 1000, max: 1, // at most 1 code / minute / number — kills rapid repeats
+  keyGenerator: normalisedPhoneKey, skip: skipReviewPhone, validate: false,
+  standardHeaders: true, legacyHeaders: false,
+  message: { message: "Please wait a minute before requesting another code." },
+});
+const otpNumberHourly = rateLimit({
+  windowMs: 60 * 60 * 1000, max: 5, // at most 5 codes / hour / number
+  keyGenerator: normalisedPhoneKey, skip: skipReviewPhone, validate: false,
+  standardHeaders: true, legacyHeaders: false,
+  message: { message: "Too many codes requested for this number. Please try again later." },
+});
+
 // Public routes
-router.post('/send-otp', otpSendLimiter, sendOtp);
+router.post('/send-otp', otpSendLimiter, otpNumberCooldown, otpNumberHourly, sendOtp);
 router.post('/verify-otp', authAttemptLimiter, verifyOtp);
 router.post('/complete-registration', setUserName);
 router.post('/register-email', authAttemptLimiter, registerEmail);
