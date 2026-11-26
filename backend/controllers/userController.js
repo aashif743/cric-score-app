@@ -37,7 +37,10 @@ const toSriLankaMobile = (raw) => {
   if (d.startsWith('0094')) d = d.slice(4);
   else if (d.startsWith('94')) d = d.slice(2);
   else if (d.startsWith('0')) d = d.slice(1);
-  return /^7\d{8}$/.test(d) ? d : null;
+  // SL mobiles are 9 digits (7XXXXXXXX); also accept a 10-digit variant a few
+  // real users have stored. All the international fraud is NON-7-prefixed, so
+  // this stays tight against the abuse while not locking out genuine users.
+  return /^7\d{8,9}$/.test(d) ? d : null;
 };
 
 // @desc    Send OTP to a phone number via Textit.biz
