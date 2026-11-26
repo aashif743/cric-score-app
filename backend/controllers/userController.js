@@ -27,6 +27,19 @@ console.log(
   `otp_length=${REVIEW_TEST_OTP.length}`
 );
 
+// Normalise an incoming phone to a 9-digit Sri Lankan mobile (7XXXXXXXX), or
+// return null if it isn't one. Accepts the shapes real users send/store —
+// 7XXXXXXXX, 07XXXXXXXX, 947XXXXXXXX, +947XXXXXXXX. Used to block SMS-pumping
+// fraud: bots were triggering OTP SMS to premium INTERNATIONAL numbers (each
+// costing 100-300x a local SMS). Only genuine SL mobiles may incur a paid SMS.
+const toSriLankaMobile = (raw) => {
+  let d = (raw || '').toString().replace(/\D/g, '');
+  if (d.startsWith('0094')) d = d.slice(4);
+  else if (d.startsWith('94')) d = d.slice(2);
+  else if (d.startsWith('0')) d = d.slice(1);
+  return /^7\d{8}$/.test(d) ? d : null;
+};
+
 // @desc    Send OTP to a phone number via Textit.biz
 // @route   POST /api/users/send-otp
 const sendOtp = async (req, res) => {
@@ -64,6 +77,15 @@ const sendOtp = async (req, res) => {
       console.error('[review-bypass] error:', e.message);
       return res.status(500).json({ message: 'Failed to send OTP' });
     }
+  }
+
+  // Anti-fraud gate: only genuine Sri Lankan mobile numbers may trigger a paid
+  // OTP SMS. Everything else (international premium numbers, malformed inputs)
+  // is rejected HERE — before any SMS is sent or any user doc is created — which
+  // stops the SMS-pumping abuse that was draining the SMS balance.
+  if (!toSriLankaMobile(incomingPhone)) {
+    console.warn(`[send-otp] blocked non-SL number: ${incomingPhone}`);
+    return res.status(400).json({ message: 'Please enter a valid Sri Lankan mobile number.' });
   }
 
   const otp = Math.floor(1000 + Math.random() * 9000).toString();
